@@ -22,7 +22,7 @@ public final class SphericalDemoSpec implements MapSpec {
     private final Map<CubeFace, double[][]> heights = new EnumMap<>(CubeFace.class);
     private final Map<CubeFace, TerrainTheme[][]> themes = new EnumMap<>(CubeFace.class);
 
-    public SphericalDemoSpec(CubeGeometry geometry) {
+    public SphericalDemoSpec(CubeGeometry geometry, WorldSeeds seeds) {
         this.cells = geometry.faceSize() / 16;
         CubeSurface surface = new CubeSurface(geometry);
         for (CubeFace face : CubeFace.values()) {
@@ -32,7 +32,7 @@ public final class SphericalDemoSpec implements MapSpec {
                 for (int cz = 0; cz < cells; cz++) {
                     double wx = geometry.faceMinX(face) + cx * 16 + 8;
                     double wz = geometry.faceMinZ(face) + cz * 16 + 8;
-                    double height = heightFunction(surface.point(face, wx, wz));
+                    double height = heightFunction(surface.point(face, wx, wz), seeds);
                     h[cx][cz] = height;
                     t[cx][cz] = themeFor(height);
                 }
@@ -42,12 +42,12 @@ public final class SphericalDemoSpec implements MapSpec {
         }
     }
 
-    /** Smooth "continents" on the cube surface; range roughly 48..92. */
-    private static double heightFunction(Vec3 p) {
+    /** Smooth "continents" on the cube surface; range roughly 48..92. Phases 0-3. */
+    private static double heightFunction(Vec3 p, WorldSeeds seeds) {
         return 69.0
-                + 10.0 * Math.sin(3.0 * p.x() + 0.5) * Math.cos(2.0 * p.z() - 1.0)
-                + 8.0 * Math.sin(2.2 * p.y() + 2.0)
-                + 4.0 * Math.sin(5.0 * (p.x() + p.y() + p.z()));
+                + 10.0 * Math.sin(3.0 * p.x() + seeds.phase(0)) * Math.cos(2.0 * p.z() + seeds.phase(1))
+                + 8.0 * Math.sin(2.2 * p.y() + seeds.phase(2))
+                + 4.0 * Math.sin(5.0 * (p.x() + p.y() + p.z()) + seeds.phase(3));
     }
 
     private static TerrainTheme themeFor(double height) {

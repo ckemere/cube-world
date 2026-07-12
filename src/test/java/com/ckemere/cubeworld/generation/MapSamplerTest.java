@@ -16,7 +16,7 @@ class MapSamplerTest {
 
     private final CubeGeometry geo = new CubeGeometry(S);
     private final CubeTopology topo = new CubeTopology(geo);
-    private final MapSampler sampler = new MapSampler(topo, new SphericalDemoSpec(geo));
+    private final MapSampler sampler = new MapSampler(topo, new SphericalDemoSpec(geo, WorldSeeds.from(20260712L)));
 
     /**
      * The prototype's core claim: interpolated height approaching a stitched
@@ -61,7 +61,7 @@ class MapSamplerTest {
         boolean snow = false;
         double min = 999;
         double max = -999;
-        SphericalDemoSpec spec = new SphericalDemoSpec(geo);
+        SphericalDemoSpec spec = new SphericalDemoSpec(geo, WorldSeeds.from(20260712L));
         for (com.ckemere.cubeworld.geometry.CubeFace face : com.ckemere.cubeworld.geometry.CubeFace.values()) {
             for (int cx = 0; cx < spec.cellsPerFace(); cx++) {
                 for (int cz = 0; cz < spec.cellsPerFace(); cz++) {

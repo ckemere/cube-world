@@ -1,6 +1,7 @@
 package com.ckemere.cubeworld;
 
 import com.ckemere.cubeworld.generation.MapSampler;
+import com.ckemere.cubeworld.generation.MapService;
 import com.ckemere.cubeworld.geometry.CubeFace;
 import com.ckemere.cubeworld.geometry.CubeGeometry;
 import com.ckemere.cubeworld.seam.MirrorService;
@@ -23,14 +24,19 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
     private final CubeGeometry geometry;
     private final SeamService seams;
     private final MirrorService mirrors;
-    private final MapSampler sampler;
+    private final MapService maps;
 
     public CubeWorldCommand(CubeGeometry geometry, SeamService seams, MirrorService mirrors,
-                            MapSampler sampler) {
+                            MapService maps) {
         this.geometry = geometry;
         this.seams = seams;
         this.mirrors = mirrors;
-        this.sampler = sampler;
+        this.maps = maps;
+    }
+
+    /** The sampler for the main world's seed. */
+    private MapSampler sampler() {
+        return maps.mapFor(org.bukkit.Bukkit.getWorlds().get(0).getSeed()).sampler();
     }
 
     @Override
@@ -68,7 +74,7 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                     int actual = world.getHighestBlockYAt((int) Math.floor(hx), (int) Math.floor(hz));
                     sender.sendMessage(Component.text(String.format(Locale.ROOT,
                             "height at (%.1f, %.1f): spec %.2f, world %d, theme %s",
-                            hx, hz, sampler.heightAt(hx, hz), actual, sampler.themeAt(hx, hz)),
+                            hx, hz, sampler().heightAt(hx, hz), actual, sampler().themeAt(hx, hz)),
                             NamedTextColor.AQUA));
                 } catch (NumberFormatException e) {
                     sender.sendMessage(Component.text("Coordinates must be numbers.", NamedTextColor.RED));
@@ -146,7 +152,7 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
         }
         double cx = geometry.faceMinX(face) + geometry.faceSize() / 2.0;
         double cz = geometry.faceMinZ(face) + geometry.faceSize() / 2.0;
-        double y = Math.max(sampler.heightAt(cx, cz), com.ckemere.cubeworld.generation.SphericalDemoSpec.SEA_LEVEL) + 2.0;
+        double y = Math.max(sampler().heightAt(cx, cz), com.ckemere.cubeworld.generation.SphericalDemoSpec.SEA_LEVEL) + 2.0;
         Location dest = new Location(player.getWorld(), cx, y, cz,
                 player.getYaw(), player.getPitch());
         player.teleportAsync(dest);

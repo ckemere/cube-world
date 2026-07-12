@@ -1,8 +1,7 @@
 package com.ckemere.cubeworld;
 
 import com.ckemere.cubeworld.generation.CubeWorldChunkGenerator;
-import com.ckemere.cubeworld.generation.MapSampler;
-import com.ckemere.cubeworld.generation.SphericalDemoSpec;
+import com.ckemere.cubeworld.generation.MapService;
 import com.ckemere.cubeworld.geometry.CubeGeometry;
 import com.ckemere.cubeworld.geometry.CubeTopology;
 import com.ckemere.cubeworld.seam.EntityMirrorService;
@@ -28,7 +27,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
 
     private final CubeGeometry geometry = new CubeGeometry(FACE_SIZE);
     private final CubeTopology topology = new CubeTopology(geometry);
-    private final MapSampler sampler = new MapSampler(topology, new SphericalDemoSpec(geometry));
+    private final MapService maps = new MapService(topology);
     private final SeamService seams = new SeamService(topology);
     private final MirrorService mirrors = new MirrorService(topology, MARGIN_BLOCKS);
     private EntityMirrorService entityMirrors;
@@ -42,7 +41,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new EntitySeamListener(entityMirrors), this);
         getServer().getScheduler().runTaskTimer(this,
                 () -> entityMirrors.tick(getServer().getWorlds().get(0)), 1L, 1L);
-        CubeWorldCommand executor = new CubeWorldCommand(geometry, seams, mirrors, sampler);
+        CubeWorldCommand executor = new CubeWorldCommand(geometry, seams, mirrors, maps);
         PluginCommand command = getCommand("cubeworld");
         if (command != null) {
             command.setExecutor(executor);
@@ -76,6 +75,6 @@ public final class CubeWorldPlugin extends JavaPlugin {
 
     @Override
     public @Nullable ChunkGenerator getDefaultWorldGenerator(@NotNull String worldName, @Nullable String id) {
-        return new CubeWorldChunkGenerator(topology, sampler, MARGIN_BLOCKS);
+        return new CubeWorldChunkGenerator(topology, maps, MARGIN_BLOCKS);
     }
 }

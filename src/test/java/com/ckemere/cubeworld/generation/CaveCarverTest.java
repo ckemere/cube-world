@@ -18,6 +18,7 @@ class CaveCarverTest {
     private final CubeGeometry geo = new CubeGeometry(S);
     private final CubeTopology topo = new CubeTopology(geo);
     private final CubeSurface surface = new CubeSurface(geo);
+    private final CaveCarver carver = new CaveCarver(WorldSeeds.from(20260712L));
 
     /** Tunnels agree across stitched seams: same edge point, same carving. */
     @Test
@@ -30,8 +31,8 @@ class CaveCarverTest {
                 double bz = l.b0().z() + t * (l.b1().z() - l.b0().z());
                 for (int y = -50; y <= 40; y += 5) {
                     assertEquals(
-                            CaveCarver.carved(surface.point(l.faceA(), ax, az), y, 70),
-                            CaveCarver.carved(surface.point(l.faceB(), bx, bz), y, 70),
+                            carver.carved(surface.point(l.faceA(), ax, az), y, 70),
+                            carver.carved(surface.point(l.faceB(), bx, bz), y, 70),
                             l.faceA() + "/" + l.sideA() + " t=" + t + " y=" + y);
                 }
             }
@@ -50,7 +51,7 @@ class CaveCarverTest {
                     double wz = geo.faceMinZ(face) + j * 20 + 3;
                     for (int y = -40; y <= 40; y += 4) {
                         total++;
-                        if (CaveCarver.carved(surface.point(face, wx, wz), y, 75)) {
+                        if (carver.carved(surface.point(face, wx, wz), y, 75)) {
                             carved++;
                         }
                     }
@@ -70,7 +71,7 @@ class CaveCarverTest {
             double cz = geo.faceMinZ(face) + 321;
             double surfaceHeight = 64;
             for (int y = (int) surfaceHeight - CaveCarver.ROOF + 1; y < surfaceHeight + 5; y++) {
-                assertFalse(CaveCarver.carved(surface.point(face, cx, cz), y, surfaceHeight),
+                assertFalse(carver.carved(surface.point(face, cx, cz), y, surfaceHeight),
                         face + " y=" + y);
             }
         }

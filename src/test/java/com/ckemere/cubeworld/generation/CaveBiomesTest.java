@@ -18,6 +18,7 @@ class CaveBiomesTest {
     private final CubeGeometry geo = new CubeGeometry(S);
     private final CubeTopology topo = new CubeTopology(geo);
     private final CubeSurface surface = new CubeSurface(geo);
+    private final CaveBiomes caveBiomes = new CaveBiomes(WorldSeeds.from(20260712L));
 
     /**
      * Cave biome patches agree across stitched seams: identical edge points
@@ -33,8 +34,8 @@ class CaveBiomesTest {
                 double bz = l.b0().z() + t * (l.b1().z() - l.b0().z());
                 for (int y = -50; y <= 40; y += 10) {
                     assertEquals(
-                            CaveBiomes.at(surface.point(l.faceA(), ax, az), y),
-                            CaveBiomes.at(surface.point(l.faceB(), bx, bz), y),
+                            caveBiomes.at(surface.point(l.faceA(), ax, az), y),
+                            caveBiomes.at(surface.point(l.faceB(), bx, bz), y),
                             l.faceA() + "/" + l.sideA() + " t=" + t + " y=" + y);
                 }
             }
@@ -51,7 +52,7 @@ class CaveBiomesTest {
                     double wx = geo.faceMinX(face) + i * 16 + 8;
                     double wz = geo.faceMinZ(face) + j * 16 + 8;
                     for (int y = -55; y <= 40; y += 12) {
-                        seen.add(CaveBiomes.at(surface.point(face, wx, wz), y));
+                        seen.add(caveBiomes.at(surface.point(face, wx, wz), y));
                     }
                 }
             }
@@ -69,7 +70,7 @@ class CaveBiomesTest {
             double cx = geo.faceMinX(face) + 400;
             double cz = geo.faceMinZ(face) + 400;
             for (int y = CaveBiomes.CAVE_BIOME_MAX_Y + 1; y < 100; y += 7) {
-                assertEquals(CaveBiomes.CaveBiome.NONE, CaveBiomes.at(surface.point(face, cx, cz), y));
+                assertEquals(CaveBiomes.CaveBiome.NONE, caveBiomes.at(surface.point(face, cx, cz), y));
             }
         }
     }

@@ -24,21 +24,23 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
 
     private final CubeGeometry geometry;
     private final CubeTopology topology;
-    private final MapSampler sampler;
+    private final MapService maps;
     private final int marginBlocks;
     private final CubeWorldBiomeProvider biomeProvider;
 
-    public CubeWorldChunkGenerator(CubeTopology topology, MapSampler sampler, int marginBlocks) {
+    public CubeWorldChunkGenerator(CubeTopology topology, MapService maps, int marginBlocks) {
         this.topology = topology;
         this.geometry = topology.geometry();
-        this.sampler = sampler;
+        this.maps = maps;
         this.marginBlocks = marginBlocks;
-        this.biomeProvider = new CubeWorldBiomeProvider(topology, sampler, marginBlocks);
+        this.biomeProvider = new CubeWorldBiomeProvider(topology, maps, marginBlocks);
     }
 
     @Override
     public void generateSurface(@NotNull WorldInfo worldInfo, @NotNull Random random,
                                 int chunkX, int chunkZ, @NotNull ChunkData chunkData) {
+        MapService.CubeWorldMap map = maps.mapFor(worldInfo.getSeed());
+        MapSampler sampler = map.sampler();
         int minY = chunkData.getMinHeight();
         int maxY = chunkData.getMaxHeight();
         boolean nearPillar = chunkNearPillar(chunkX, chunkZ);
@@ -72,21 +74,21 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                     chunkData.setRegion(lx, height + 1, lz, lx + 1, height + 2, lz + 1,
                             Material.SNOW);
                 }
-                carveCaves(chunkData, lx, lz, wx, wz, minY, exactHeight);
+                carveCaves(map, chunkData, lx, lz, wx, wz, minY, exactHeight);
             }
         }
     }
 
     /** Carve seam-consistent caves into a finished column (air, lava at the bottom). */
-    private void carveCaves(ChunkData chunkData, int lx, int lz, double wx, double wz,
-                            int minY, double surfaceHeight) {
-        com.ckemere.cubeworld.geometry.Vec3 p = sampler.cubePointAt(wx, wz);
+    private void carveCaves(MapService.CubeWorldMap map, ChunkData chunkData, int lx, int lz,
+                            double wx, double wz, int minY, double surfaceHeight) {
+        com.ckemere.cubeworld.geometry.Vec3 p = map.sampler().cubePointAt(wx, wz);
         if (p == null) {
             return;
         }
         int top = (int) Math.floor(surfaceHeight - CaveCarver.ROOF);
         for (int y = minY + 6; y <= top; y++) {
-            if (CaveCarver.carved(p, y, surfaceHeight)) {
+            if (map.carver().carved(p, y, surfaceHeight)) {
                 chunkData.setBlock(lx, y, lz,
                         y <= CaveCarver.LAVA_LEVEL ? Material.LAVA : Material.AIR);
             }
@@ -102,6 +104,7 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
     @Override
     public int getBaseHeight(@NotNull WorldInfo worldInfo, @NotNull Random random,
                              int x, int z, @NotNull HeightMap heightMap) {
+        MapSampler sampler = maps.mapFor(worldInfo.getSeed()).sampler();
         return (int) Math.round(Math.max(sampler.heightAt(x + 0.5, z + 0.5), SEA_LEVEL)) + 1;
     }
 

@@ -21,13 +21,13 @@ public final class CubeWorldBiomeProvider extends BiomeProvider {
 
     private final CubeGeometry geometry;
     private final CubeTopology topology;
-    private final MapSampler sampler;
+    private final MapService maps;
     private final int marginBlocks;
 
-    public CubeWorldBiomeProvider(CubeTopology topology, MapSampler sampler, int marginBlocks) {
+    public CubeWorldBiomeProvider(CubeTopology topology, MapService maps, int marginBlocks) {
         this.topology = topology;
         this.geometry = topology.geometry();
-        this.sampler = sampler;
+        this.maps = maps;
         this.marginBlocks = marginBlocks;
     }
 
@@ -37,12 +37,14 @@ public final class CubeWorldBiomeProvider extends BiomeProvider {
         if (!onFace && topology.marginSource(x + 0.5, z + 0.5, marginBlocks) == null) {
             return Biome.THE_VOID;
         }
+        MapService.CubeWorldMap map = maps.mapFor(worldInfo.getSeed());
+        MapSampler sampler = map.sampler();
         double wx = x + 0.5;
         double wz = z + 0.5;
         if (y < sampler.heightAt(wx, wz) - CaveBiomes.SURFACE_BUFFER) {
             Vec3 p = sampler.cubePointAt(wx, wz);
             if (p != null) {
-                switch (CaveBiomes.at(p, y)) {
+                switch (map.caveBiomes().at(p, y)) {
                     case LUSH -> {
                         return Biome.LUSH_CAVES;
                     }

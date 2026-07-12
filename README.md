@@ -32,6 +32,27 @@ The core topology works end to end, now with map-driven terrain (per-chunk heigh
 
 Next up: player clones across seams, sound/effect mirroring, and the Earth-map chunk generator (quadrilateralized spherical cube projection over real elevation/biome data).
 
+## Seeds and randomness on a folded cube
+
+Chunk-seeded randomness (vanilla's model) can never agree across a stitched
+seam — the two sides are unrelated chunks. Randomness here therefore comes in
+three sanctioned forms:
+
+1. **Seeded global fields** — the world seed selects phase offsets
+   (`WorldSeeds`, SplitMix64-derived) for the noise fields that shape terrain
+   height, caves, and cave biomes. Each seed picks a *different continuous
+   function of the cube surface*, so every seed's world is seam-consistent by
+   construction. Same seed, same planet.
+2. **Position-keyed hashes** (future) — per-feature placement can hash
+   `(seed, source-resolved cell)`; margins then mirror features automatically.
+3. **Chunk-seeded vanilla randomness** — used only for vanilla decorations
+   (trees, ores, cave flora), which run exclusively on face chunks away from
+   seams and pillars.
+
+The eventual Earth map ignores the seed for shape — data is data — and keeps
+it for caves and decoration detail. The dev server pins `level-seed=20260712`
+for reproducibility.
+
 ## Building and running
 
 ```sh
