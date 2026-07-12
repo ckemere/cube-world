@@ -18,6 +18,7 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Vector;
@@ -123,7 +124,7 @@ public final class EntityMirrorService {
         }
     }
 
-    /** Teleport a real entity that walked/flew/rolled across a stitched edge. */
+    /** Carry a real entity that walked/flew/rolled across a stitched edge. */
     private void handleCrossing(Entity entity) {
         Location loc = entity.getLocation();
         CubeFace face = topology.geometry().faceAt(loc.getBlockX(), loc.getBlockZ());
@@ -142,16 +143,81 @@ public final class EntityMirrorService {
         Vec2 mapped = transform.applyPoint(loc.getX(), loc.getZ());
         Vector velocity = entity.getVelocity();
         Vec2 rotated = transform.applyVector(velocity.getX(), velocity.getZ());
+        Vector newVelocity = new Vector(rotated.x(), velocity.getY(), rotated.z());
         Location dest = loc.clone();
         dest.setX(mapped.x());
         dest.setZ(mapped.z());
         dest.setYaw(transform.applyYaw(loc.getYaw()));
-        entity.teleport(dest);
-        entity.setVelocity(new Vector(rotated.x(), velocity.getY(), rotated.z()));
         CubeFace newFace = topology.geometry().faceAt((int) Math.floor(mapped.x()), (int) Math.floor(mapped.z()));
+        if (entity instanceof Projectile && !(entity instanceof org.bukkit.entity.FishHook)) {
+            // A projectile's own yaw field lags its motion (server-side
+            // rotation smoothing), so transforming it propagates a stale
+            // heading. Derive the exact heading from the transformed velocity
+            // instead, and spawn a fresh replacement bearing it — creation-
+            // time rotation is the only write that fully sticks.
+            double horizontal = Math.sqrt(newVelocity.getX() * newVelocity.getX()
+                    + newVelocity.getZ() * newVelocity.getZ());
+            if (horizontal > 1e-6 || Math.abs(newVelocity.getY()) > 1e-6) {
+                dest.setYaw((float) Math.toDegrees(Math.atan2(-newVelocity.getX(), newVelocity.getZ())));
+                dest.setPitch((float) Math.toDegrees(-Math.atan2(newVelocity.getY(), horizontal)));
+            }
+            replaceAcrossSeam(entity, dest, newVelocity, newFace);
+            return;
+        }
+        entity.teleport(dest);
+        entity.setVelocity(newVelocity);
         if (newFace != null) {
             lastFace.put(entity.getUniqueId(), newFace);
         }
+    }
+
+    private void replaceAcrossSeam(Entity old, Location dest, Vector velocity, CubeFace newFace) {
+        lastFace.remove(old.getUniqueId());
+        Entity fresh;
+        if (old instanceof org.bukkit.entity.AbstractArrow oldArrow) {
+            // Rotation writes on live projectiles never reach their lerp
+            // state (snapshot/teleport variants all resume the old heading
+            // and visibly twist). Creation-time rotation does: spawn a fresh
+            // arrow at a location bearing the new yaw and copy state.
+            fresh = spawnArrowCopy(oldArrow, dest);
+        } else {
+            org.bukkit.entity.EntitySnapshot snapshot = old.createSnapshot();
+            fresh = snapshot == null ? null : snapshot.createEntity(dest);
+        }
+        old.remove();
+        if (fresh == null) {
+            return;
+        }
+        fresh.setVelocity(velocity);
+        if (newFace != null) {
+            lastFace.put(fresh.getUniqueId(), newFace);
+        }
+    }
+
+    private Entity spawnArrowCopy(org.bukkit.entity.AbstractArrow old, Location dest) {
+        Class<? extends org.bukkit.entity.AbstractArrow> type;
+        if (old instanceof org.bukkit.entity.SpectralArrow) {
+            type = org.bukkit.entity.SpectralArrow.class;
+        } else if (old instanceof org.bukkit.entity.Trident) {
+            type = org.bukkit.entity.Trident.class;
+        } else {
+            type = org.bukkit.entity.Arrow.class;
+        }
+        return dest.getWorld().spawn(dest, type, fresh -> {
+            fresh.setDamage(old.getDamage());
+            fresh.setCritical(old.isCritical());
+            fresh.setPierceLevel(old.getPierceLevel());
+            fresh.setPickupStatus(old.getPickupStatus());
+            fresh.setShooter(old.getShooter());
+            fresh.setFireTicks(old.getFireTicks());
+            if (old instanceof org.bukkit.entity.Arrow oldTipped
+                    && fresh instanceof org.bukkit.entity.Arrow freshTipped) {
+                freshTipped.setBasePotionType(oldTipped.getBasePotionType());
+                for (org.bukkit.potion.PotionEffect effect : oldTipped.getCustomEffects()) {
+                    freshTipped.addCustomEffect(effect, true);
+                }
+            }
+        });
     }
 
     /** Create/move/remove the margin clones of a real entity. */
