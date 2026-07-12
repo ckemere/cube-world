@@ -34,6 +34,11 @@ public final class MirrorService {
                 && topology.marginSource(x, z, marginBlocks) != null;
     }
 
+    /** Is this column inside a cube-vertex pillar (unbreakable, immutable)? */
+    public boolean isPillar(double x, double z) {
+        return topology.inPillar(x, z, marginBlocks);
+    }
+
     /** The real block a margin block mirrors, or null if not a margin position. */
     public Block sourceBlock(Block marginBlock) {
         MarginSource source = topology.marginSource(
@@ -64,6 +69,9 @@ public final class MirrorService {
             int iz = (int) Math.floor(image.source().z());
             if (!world.isChunkLoaded(ix >> 4, iz >> 4)) {
                 continue;
+            }
+            if (topology.inPillar(ix + 0.5, iz + 0.5, marginBlocks)) {
+                continue; // never carve into a corner pillar
             }
             BlockData rotated = data.clone();
             rotated.rotate(structureRotation(image.toSource().quarterTurns()));

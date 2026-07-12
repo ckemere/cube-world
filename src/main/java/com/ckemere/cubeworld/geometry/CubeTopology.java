@@ -34,6 +34,7 @@ public final class CubeTopology {
 
     private final CubeGeometry geometry;
     private final List<EdgeLink> links;
+    private final List<Vec2> pillarSites;
 
     public CubeTopology(CubeGeometry geometry) {
         this.geometry = geometry;
@@ -54,6 +55,14 @@ public final class CubeTopology {
         list.add(link(CubeFace.SOUTH_POLE, Side.SOUTH, v(h, 5 * h), v(-h, 5 * h),
                 CubeFace.EQ_BACK, Side.NORTH, v(h, -3 * h), v(-h, -3 * h)));
         this.links = List.copyOf(list);
+        Set<Vec2> sites = new LinkedHashSet<>();
+        for (EdgeLink l : this.links) {
+            sites.add(l.a0());
+            sites.add(l.a1());
+            sites.add(l.b0());
+            sites.add(l.b1());
+        }
+        this.pillarSites = List.copyOf(sites);
     }
 
     private static Vec2 v(double x, double z) {
@@ -249,13 +258,22 @@ public final class CubeTopology {
      * consistently and get corner pillars.
      */
     public List<Vec2> pillarSites() {
-        Set<Vec2> sites = new LinkedHashSet<>();
-        for (EdgeLink l : links) {
-            sites.add(l.a0());
-            sites.add(l.a1());
-            sites.add(l.b0());
-            sites.add(l.b1());
+        return pillarSites;
+    }
+
+    /**
+     * Is (x, z) within {@code radius} of a cube-vertex net image? Those spots
+     * cannot be rendered consistently (a cube vertex has 270° of terrain, the
+     * plane has 360°), so they are filled with unbreakable pillars.
+     */
+    public boolean inPillar(double x, double z, double radius) {
+        for (Vec2 site : pillarSites()) {
+            double dx = x - site.x();
+            double dz = z - site.z();
+            if (dx * dx + dz * dz <= radius * radius) {
+                return true;
+            }
         }
-        return List.copyOf(sites);
+        return false;
     }
 }

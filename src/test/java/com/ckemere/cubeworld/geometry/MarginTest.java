@@ -95,4 +95,24 @@ class MarginTest {
         // Near an in-plane boundary: still no images.
         assertTrue(topo.marginImages(0, H - 2, MARGIN).isEmpty());
     }
+
+    @Test
+    void pillarZonesCoverCubeVertexImages() {
+        // At and near a reflex corner (northern cube vertex).
+        assertTrue(topo.inPillar(H, H, MARGIN));
+        assertTrue(topo.inPillar(H - 90, H, MARGIN));
+        assertTrue(topo.inPillar(H + 60, H + 60, MARGIN));
+        // Just outside the radius.
+        assertTrue(!topo.inPillar(H + MARGIN + 1, H, MARGIN));
+        // Outer corner images (southern cube vertices).
+        assertTrue(topo.inPillar(3 * H, H, MARGIN));
+        assertTrue(topo.inPillar(H, 3 * H, MARGIN));
+        assertTrue(topo.inPillar(-H, 5 * H, MARGIN));
+        // Face centers are clear.
+        assertTrue(!topo.inPillar(0, 0, MARGIN));
+        assertTrue(!topo.inPillar(0, 2 * H, MARGIN));
+        // Mid-edge is clear (pillars must not seal the seams shut).
+        assertTrue(!topo.inPillar(H, 2 * H, MARGIN));
+        assertTrue(!topo.inPillar(0, 5 * H, MARGIN));
+    }
 }

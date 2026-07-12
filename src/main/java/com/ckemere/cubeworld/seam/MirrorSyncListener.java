@@ -51,11 +51,26 @@ public final class MirrorSyncListener implements Listener {
 
     @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
     public void onMarginEdit(BlockPlaceEvent event) {
-        if (mirrors.isMargin(event.getBlock().getX() + 0.5, event.getBlock().getZ() + 0.5)) {
+        double x = event.getBlock().getX() + 0.5;
+        double z = event.getBlock().getZ() + 0.5;
+        if (mirrors.isPillar(x, z)) {
+            event.setCancelled(true);
+            event.getPlayer().sendMessage(Component.text(
+                    "The corner pillars are immutable.", NamedTextColor.YELLOW));
+        } else if (mirrors.isMargin(x, z)) {
             event.setCancelled(true);
             event.getPlayer().sendMessage(Component.text(
                     "That's a mirror of the far side — edits there aren't wired up yet.",
                     NamedTextColor.YELLOW));
+        }
+    }
+
+    @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
+    public void onPillarBreak(BlockBreakEvent event) {
+        double x = event.getBlock().getX() + 0.5;
+        double z = event.getBlock().getZ() + 0.5;
+        if (mirrors.isPillar(x, z) || mirrors.isMargin(x, z)) {
+            event.setCancelled(true);
         }
     }
 

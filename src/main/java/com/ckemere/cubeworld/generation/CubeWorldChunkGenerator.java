@@ -43,23 +43,38 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
     public void generateSurface(@NotNull WorldInfo worldInfo, @NotNull Random random,
                                 int chunkX, int chunkZ, @NotNull ChunkData chunkData) {
         int minY = chunkData.getMinHeight();
+        int maxY = chunkData.getMaxHeight();
         CubeFace face = geometry.faceAt(chunkX << 4, chunkZ << 4);
-        if (face != null) {
+        boolean nearPillar = chunkNearPillar(chunkX, chunkZ);
+        if (face != null && !nearPillar) {
             // Faces are chunk-aligned: the whole chunk shares one theme.
             fillColumnRegion(chunkData, 0, 0, 16, 16, minY, FaceTheme.of(face));
             return;
         }
-        // Off the cross: per-column margin resolution.
+        // Near a pillar or off the cross: per-column resolution.
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
                 double wx = (chunkX << 4) + lx + 0.5;
                 double wz = (chunkZ << 4) + lz + 0.5;
-                FaceTheme theme = marginTheme(wx, wz);
+                if (nearPillar && topology.inPillar(wx, wz, marginBlocks)) {
+                    // Cube-vertex pillar: unbreakable, full height.
+                    chunkData.setRegion(lx, minY, lz, lx + 1, maxY, lz + 1, Material.BEDROCK);
+                    continue;
+                }
+                FaceTheme theme = face != null ? FaceTheme.of(face) : marginTheme(wx, wz);
                 if (theme != null) {
                     fillColumnRegion(chunkData, lx, lz, lx + 1, lz + 1, minY, theme);
                 }
             }
         }
+    }
+
+    /** Cheap chunk-level pre-check: could any column of this chunk be in a pillar? */
+    private boolean chunkNearPillar(int chunkX, int chunkZ) {
+        double cx = (chunkX << 4) + 8;
+        double cz = (chunkZ << 4) + 8;
+        // Chunk half-diagonal is ~11.4; pad generously.
+        return topology.inPillar(cx, cz, marginBlocks + 12);
     }
 
     /** Theme of the real column this margin column mirrors, or null when not in a margin. */
