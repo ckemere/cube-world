@@ -1,7 +1,7 @@
 name: CubeWorld
 version: '${version}'
 main: com.ckemere.cubeworld.CubeWorldPlugin
-api-version: '26.1.2'
+api-version: '26.2'
 load: STARTUP
 description: Cube World experiments for Paper
 author: ckemere
