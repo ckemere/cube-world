@@ -3,6 +3,8 @@ package com.ckemere.cubeworld;
 import com.ckemere.cubeworld.generation.CubeWorldChunkGenerator;
 import com.ckemere.cubeworld.geometry.CubeGeometry;
 import com.ckemere.cubeworld.geometry.CubeTopology;
+import com.ckemere.cubeworld.seam.EntityMirrorService;
+import com.ckemere.cubeworld.seam.EntitySeamListener;
 import com.ckemere.cubeworld.seam.MarginInteractionListener;
 import com.ckemere.cubeworld.seam.MirrorService;
 import com.ckemere.cubeworld.seam.MirrorSyncListener;
@@ -26,12 +28,17 @@ public final class CubeWorldPlugin extends JavaPlugin {
     private final CubeTopology topology = new CubeTopology(geometry);
     private final SeamService seams = new SeamService(topology);
     private final MirrorService mirrors = new MirrorService(topology, MARGIN_BLOCKS);
+    private EntityMirrorService entityMirrors;
 
     @Override
     public void onEnable() {
+        entityMirrors = new EntityMirrorService(this, topology, MARGIN_BLOCKS);
         getServer().getPluginManager().registerEvents(new SeamTeleportListener(seams), this);
         getServer().getPluginManager().registerEvents(new MirrorSyncListener(this, mirrors), this);
         getServer().getPluginManager().registerEvents(new MarginInteractionListener(mirrors), this);
+        getServer().getPluginManager().registerEvents(new EntitySeamListener(entityMirrors), this);
+        getServer().getScheduler().runTaskTimer(this,
+                () -> entityMirrors.tick(getServer().getWorlds().get(0)), 1L, 1L);
         CubeWorldCommand executor = new CubeWorldCommand(geometry, seams, mirrors);
         PluginCommand command = getCommand("cubeworld");
         if (command != null) {
@@ -39,6 +46,13 @@ public final class CubeWorldPlugin extends JavaPlugin {
             command.setTabCompleter(executor);
         }
         getLogger().info("CubeWorld enabled (face size " + FACE_SIZE + " blocks)");
+    }
+
+    @Override
+    public void onDisable() {
+        if (entityMirrors != null) {
+            entityMirrors.removeAllClones();
+        }
     }
 
     public CubeGeometry geometry() {
