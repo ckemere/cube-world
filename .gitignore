@@ -1,0 +1,19 @@
+# Gradle
+build/
+.gradle/
+
+# run-paper dev server
+run/
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+.eclipse/
+.settings/
+.classpath
+.project
+bin/

@@ -1,0 +1,10 @@
+name: CubeWorld
+version: '${version}'
+main: com.ckemere.cubeworld.CubeWorldPlugin
+api-version: '26.1.2'
+description: Cube World experiments for Paper
+author: ckemere
+commands:
+  cubeworld:
+    description: CubeWorld commands
+    usage: /cubeworld ping
