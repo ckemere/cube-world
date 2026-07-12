@@ -15,9 +15,11 @@ import org.bukkit.event.world.ChunkLoadEvent;
 public final class EntitySeamListener implements Listener {
 
     private final EntityMirrorService entityMirrors;
+    private final PartnerTicketService partnerTickets;
 
-    public EntitySeamListener(EntityMirrorService entityMirrors) {
+    public EntitySeamListener(EntityMirrorService entityMirrors, PartnerTicketService partnerTickets) {
         this.entityMirrors = entityMirrors;
+        this.partnerTickets = partnerTickets;
     }
 
     @EventHandler(priority = EventPriority.LOWEST)
@@ -42,5 +44,10 @@ public final class EntitySeamListener implements Listener {
     @EventHandler
     public void onChunkLoad(ChunkLoadEvent event) {
         entityMirrors.cullStrayClones(event.getChunk());
+        for (Entity entity : event.getChunk().getEntities()) {
+            if (entity instanceof org.bukkit.entity.Mob mob) {
+                partnerTickets.reviewLoadedMob(mob);
+            }
+        }
     }
 }
