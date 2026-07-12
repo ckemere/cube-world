@@ -3,6 +3,8 @@ package com.ckemere.cubeworld;
 import com.ckemere.cubeworld.generation.CubeWorldChunkGenerator;
 import com.ckemere.cubeworld.geometry.CubeGeometry;
 import com.ckemere.cubeworld.geometry.CubeTopology;
+import com.ckemere.cubeworld.seam.MirrorService;
+import com.ckemere.cubeworld.seam.MirrorSyncListener;
 import com.ckemere.cubeworld.seam.SeamService;
 import com.ckemere.cubeworld.seam.SeamTeleportListener;
 import org.bukkit.command.PluginCommand;
@@ -16,14 +18,19 @@ public final class CubeWorldPlugin extends JavaPlugin {
     /** Edge length of one cube face in blocks (50 chunks). */
     public static final int FACE_SIZE = 50 * 16;
 
+    /** Depth of the mirrored seam margins in blocks (6 chunks; match view-distance). */
+    public static final int MARGIN_BLOCKS = 6 * 16;
+
     private final CubeGeometry geometry = new CubeGeometry(FACE_SIZE);
     private final CubeTopology topology = new CubeTopology(geometry);
     private final SeamService seams = new SeamService(topology);
+    private final MirrorService mirrors = new MirrorService(topology, MARGIN_BLOCKS);
 
     @Override
     public void onEnable() {
         getServer().getPluginManager().registerEvents(new SeamTeleportListener(seams), this);
-        CubeWorldCommand executor = new CubeWorldCommand(geometry, seams);
+        getServer().getPluginManager().registerEvents(new MirrorSyncListener(this, mirrors), this);
+        CubeWorldCommand executor = new CubeWorldCommand(geometry, seams, mirrors);
         PluginCommand command = getCommand("cubeworld");
         if (command != null) {
             command.setExecutor(executor);
@@ -44,8 +51,12 @@ public final class CubeWorldPlugin extends JavaPlugin {
         return seams;
     }
 
+    public MirrorService mirrors() {
+        return mirrors;
+    }
+
     @Override
     public @Nullable ChunkGenerator getDefaultWorldGenerator(@NotNull String worldName, @Nullable String id) {
-        return new CubeWorldChunkGenerator(geometry);
+        return new CubeWorldChunkGenerator(topology, MARGIN_BLOCKS);
     }
 }

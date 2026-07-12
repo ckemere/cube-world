@@ -161,6 +161,88 @@ public final class CubeTopology {
         return transformFor(fromFace, side);
     }
 
+    /** One direction of a stitched edge: the segment on {@code face}'s boundary, and the transform outward. */
+    private record DirectedEdge(EdgeLink link, CubeFace face, Vec2 s0, Vec2 s1, EdgeTransform outward) {
+    }
+
+    private List<DirectedEdge> directedEdges() {
+        List<DirectedEdge> dirs = new ArrayList<>();
+        for (EdgeLink l : links) {
+            dirs.add(new DirectedEdge(l, l.faceA(), l.a0(), l.a1(), l.aToB()));
+            dirs.add(new DirectedEdge(l, l.faceB(), l.b0(), l.b1(), l.aToB().inverse()));
+        }
+        return dirs;
+    }
+
+    /**
+     * Signed outward distance of (x, z) from the directed edge's boundary
+     * (positive = outside the face), or NaN when the point is beyond the
+     * segment's tangential span.
+     */
+    private double outwardDistance(DirectedEdge d, double x, double z) {
+        double len = geometry.faceSize();
+        double ux = Math.signum(d.s1().x() - d.s0().x());
+        double uz = Math.signum(d.s1().z() - d.s0().z());
+        double t = (x - d.s0().x()) * ux + (z - d.s0().z()) * uz;
+        if (t < 0 || t > len) {
+            return Double.NaN;
+        }
+        // Outward normal: perpendicular to the segment, away from the face center.
+        double cx = geometry.faceMinX(d.face()) + len / 2.0;
+        double cz = geometry.faceMinZ(d.face()) + len / 2.0;
+        double nx;
+        double nz;
+        if (ux == 0) { // segment runs along Z: normal is +-X
+            nx = Math.signum(d.s0().x() - cx);
+            nz = 0;
+        } else { // segment runs along X: normal is +-Z
+            nx = 0;
+            nz = Math.signum(d.s0().z() - cz);
+        }
+        return (x - d.s0().x()) * nx + (z - d.s0().z()) * nz;
+    }
+
+    /**
+     * Resolves a point in a seam margin to the real position it mirrors, or
+     * null when (x, z) is not within {@code margin} blocks beyond a stitched
+     * edge. At corner overlaps (two candidate edges) the first match wins;
+     * those wedges are pillar territory anyway.
+     */
+    public MarginSource marginSource(double x, double z, double margin) {
+        for (DirectedEdge d : directedEdges()) {
+            double out = outwardDistance(d, x, z);
+            if (!Double.isNaN(out) && out > 0 && out <= margin) {
+                return new MarginSource(d.link(), d.outward(), d.outward().applyPoint(x, z));
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Margin images of a real position: for a point on a face within
+     * {@code margin} blocks of one or more stitched edges, the mirrored
+     * position(s) in the partner faces' margins (with the transform that
+     * produced each, for rotating block states). Empty for points away from
+     * stitched edges.
+     */
+    public List<MarginSource> marginImages(double x, double z, double margin) {
+        List<MarginSource> images = new ArrayList<>();
+        CubeFace face = geometry.faceAt((int) Math.floor(x), (int) Math.floor(z));
+        if (face == null) {
+            return images;
+        }
+        for (DirectedEdge d : directedEdges()) {
+            if (d.face() != face) {
+                continue;
+            }
+            double out = outwardDistance(d, x, z);
+            if (!Double.isNaN(out) && out <= 0 && -out <= margin) {
+                images.add(new MarginSource(d.link(), d.outward(), d.outward().applyPoint(x, z)));
+            }
+        }
+        return images;
+    }
+
     /**
      * Net-plane images of the eight cube vertices: the deduplicated endpoints
      * of the stitched segments. These are the spots that cannot be rendered

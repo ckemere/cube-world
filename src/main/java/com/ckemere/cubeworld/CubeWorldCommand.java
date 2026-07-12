@@ -3,6 +3,7 @@ package com.ckemere.cubeworld;
 import com.ckemere.cubeworld.generation.CubeWorldChunkGenerator;
 import com.ckemere.cubeworld.geometry.CubeFace;
 import com.ckemere.cubeworld.geometry.CubeGeometry;
+import com.ckemere.cubeworld.seam.MirrorService;
 import com.ckemere.cubeworld.seam.SeamService;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,10 +22,12 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
 
     private final CubeGeometry geometry;
     private final SeamService seams;
+    private final MirrorService mirrors;
 
-    public CubeWorldCommand(CubeGeometry geometry, SeamService seams) {
+    public CubeWorldCommand(CubeGeometry geometry, SeamService seams, MirrorService mirrors) {
         this.geometry = geometry;
         this.seams = seams;
+        this.mirrors = mirrors;
     }
 
     @Override
@@ -46,6 +49,9 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
             }
             case "simulate" -> {
                 return handleSimulate(sender, args);
+            }
+            case "mirrorpush" -> {
+                return handleMirrorPush(sender, args);
             }
             default -> {
                 return false;
@@ -136,6 +142,33 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                     dest.getX(), dest.getZ(), dest.getYaw(),
                     face == null ? "VOID" : face.name()), NamedTextColor.AQUA));
         }
+        return true;
+    }
+
+    /**
+     * Debug hook: push a real block's state to its margin mirrors, exactly as
+     * the place/break listener would. Lets mirror sync be exercised over RCON
+     * (console setblock does not fire BlockPlaceEvent).
+     */
+    private boolean handleMirrorPush(CommandSender sender, String[] args) {
+        if (args.length != 4) {
+            sender.sendMessage(Component.text("Usage: /cubeworld mirrorpush <x> <y> <z>", NamedTextColor.RED));
+            return true;
+        }
+        int x;
+        int y;
+        int z;
+        try {
+            x = Integer.parseInt(args[1]);
+            y = Integer.parseInt(args[2]);
+            z = Integer.parseInt(args[3]);
+        } catch (NumberFormatException e) {
+            sender.sendMessage(Component.text("Coordinates must be integers.", NamedTextColor.RED));
+            return true;
+        }
+        org.bukkit.World world = org.bukkit.Bukkit.getWorlds().get(0);
+        mirrors.pushToMirrors(world.getBlockAt(x, y, z));
+        sender.sendMessage(Component.text("mirrorpush: done", NamedTextColor.AQUA));
         return true;
     }
 
