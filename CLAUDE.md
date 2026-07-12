@@ -19,8 +19,9 @@ Training-data Bukkit/Spigot patterns predate the 2026 Paper hard fork and are of
 
 ## Build & test workflow
 
-- `./gradlew build` — jar lands in `build/libs/`.
-- Dev server runs in tmux session `cubeworld` (`./gradlew runServer`, Paper 26.1.2, world/config in `run/`).
-- To restart with a new build: `tmux send-keys -t cubeworld 'stop' Enter`, wait for the Gradle task to exit, rebuild, then relaunch `./gradlew runServer` in the tmux session.
-- Server console: `tmux send-keys -t cubeworld '<command>' Enter`; log is visible via `tmux capture-pane -pt cubeworld`.
+- `./gradlew build` — jar lands in `build/libs/`; runs JUnit tests (geometry core is pure Java, test it hard).
+- Dev server runs in tmux session `cubeworld`: `./gradlew runServer --console=plain 2>&1 | tee <scratchpad>/runserver.log; exec bash`. Plain console + tee is required — Gradle's rich console silently swallows stdin, so console commands typed via tmux never reach the server.
+- Preferred way to drive the server: RCON (enabled in `run/server.properties`, port 25575, password `cubeworld-dev`), e.g. `python3 <scratchpad>/rcon.py '<command>' ...` — responses come back inline. Chunks are unloaded without players: `forceload add x1 z1 x2 z2` before block probes, `forceload remove all` after. Bare `execute if block ...` returns "Test passed/failed".
+- To restart with a new build: `tmux send-keys -t cubeworld 'stop' Enter` (works under plain console) or RCON `stop`; wait for exit, rebuild, relaunch runServer in the session.
+- The world generator is wired via `run/bukkit.yml` (`worlds.world.generator: CubeWorld`); plugin.yml needs `load: STARTUP` or the default world ignores the generator. Regenerating terrain requires deleting `run/world*`.
 - After implementing a feature: build, restart the dev server, and tell the user exactly what to type in-game to test it.
