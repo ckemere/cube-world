@@ -53,6 +53,22 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
             case "mirrorpush" -> {
                 return handleMirrorPush(sender, args);
             }
+            case "respawn" -> {
+                if (args.length != 2) {
+                    sender.sendMessage(Component.text("Usage: /cubeworld respawn <player>", NamedTextColor.RED));
+                    return true;
+                }
+                Player target = org.bukkit.Bukkit.getPlayerExact(args[1]);
+                if (target == null) {
+                    sender.sendMessage(Component.text("Player not found: " + args[1], NamedTextColor.RED));
+                } else if (!target.isDead()) {
+                    sender.sendMessage(Component.text(args[1] + " is not dead.", NamedTextColor.YELLOW));
+                } else {
+                    target.spigot().respawn();
+                    sender.sendMessage(Component.text("Respawned " + args[1] + ".", NamedTextColor.AQUA));
+                }
+                return true;
+            }
             case "marginbreak" -> {
                 return handleMarginEdit(sender, args, null);
             }
