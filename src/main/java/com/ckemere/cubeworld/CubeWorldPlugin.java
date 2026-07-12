@@ -33,7 +33,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
     @Override
     public void onEnable() {
         entityMirrors = new EntityMirrorService(this, topology, MARGIN_BLOCKS);
-        getServer().getPluginManager().registerEvents(new SeamTeleportListener(seams), this);
+        getServer().getPluginManager().registerEvents(new SeamTeleportListener(this, seams), this);
         getServer().getPluginManager().registerEvents(new MirrorSyncListener(this, mirrors), this);
         getServer().getPluginManager().registerEvents(new MarginInteractionListener(mirrors), this);
         getServer().getPluginManager().registerEvents(new EntitySeamListener(entityMirrors), this);
