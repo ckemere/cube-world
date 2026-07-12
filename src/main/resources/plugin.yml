@@ -8,4 +8,4 @@ author: ckemere
 commands:
   cubeworld:
     description: CubeWorld commands
-    usage: /cubeworld <ping|face>
+    usage: /cubeworld <ping|face|tp|simulate>
