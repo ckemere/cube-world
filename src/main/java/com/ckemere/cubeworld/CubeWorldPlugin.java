@@ -41,7 +41,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
         partnerTickets = new PartnerTicketService(this, topology, MARGIN_BLOCKS);
         getServer().getPluginManager().registerEvents(new SeamTeleportListener(this, seams), this);
         getServer().getPluginManager().registerEvents(new MirrorSyncListener(this, mirrors), this);
-        getServer().getPluginManager().registerEvents(new MarginInteractionListener(mirrors), this);
+        getServer().getPluginManager().registerEvents(new MarginInteractionListener(this, mirrors), this);
         getServer().getPluginManager().registerEvents(new EntitySeamListener(entityMirrors, partnerTickets), this);
         getServer().getPluginManager().registerEvents(new PillarGuardListener(topology, MARGIN_BLOCKS), this);
         getServer().getScheduler().runTaskTimer(this,

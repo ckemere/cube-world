@@ -278,7 +278,13 @@ public final class EntityMirrorService {
             drop.setWillAge(false);
             spawned = drop;
         } else {
-            spawned = world.spawnEntity(at, source.getType());
+            // Snapshot copies the full appearance NBT — carried blocks
+            // (endermen), wool colors, variants, equipment — so the clone
+            // looks like its source, not just its species.
+            org.bukkit.entity.EntitySnapshot snapshot = source.createSnapshot();
+            spawned = snapshot != null
+                    ? snapshot.createEntity(at)
+                    : world.spawnEntity(at, source.getType());
         }
         spawned.getPersistentDataContainer().set(cloneKey, PersistentDataType.STRING,
                 source.getUniqueId().toString());

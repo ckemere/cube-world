@@ -21,10 +21,22 @@ import org.bukkit.inventory.ItemStack;
  */
 public final class MarginInteractionListener implements Listener {
 
+    private final org.bukkit.plugin.Plugin plugin;
     private final MirrorService mirrors;
 
-    public MarginInteractionListener(MirrorService mirrors) {
+    public MarginInteractionListener(org.bukkit.plugin.Plugin plugin, MirrorService mirrors) {
+        this.plugin = plugin;
         this.mirrors = mirrors;
+    }
+
+    /**
+     * Cancelled place/break events restore their captured pre-event block
+     * state after handlers run, clobbering any mirror write made inside the
+     * handler — the forwarded change would vanish from the margin while the
+     * real side keeps it. Re-push the mirror a tick later, after cleanup.
+     */
+    private void repushLater(Block source) {
+        org.bukkit.Bukkit.getScheduler().runTask(plugin, () -> mirrors.pushToMirrors(source));
     }
 
     @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
@@ -47,10 +59,13 @@ public final class MarginInteractionListener implements Listener {
         }
         ItemStack tool = event.getPlayer().getInventory().getItemInMainHand();
         java.util.Collection<ItemStack> drops = source.getDrops(tool, event.getPlayer());
-        if (mirrors.forwardBreak(block) != null
-                && event.getPlayer().getGameMode() != GameMode.CREATIVE) {
-            for (ItemStack drop : drops) {
-                block.getWorld().dropItemNaturally(block.getLocation(), drop);
+        Block broken = mirrors.forwardBreak(block);
+        if (broken != null) {
+            repushLater(broken);
+            if (event.getPlayer().getGameMode() != GameMode.CREATIVE) {
+                for (ItemStack drop : drops) {
+                    block.getWorld().dropItemNaturally(block.getLocation(), drop);
+                }
             }
         }
     }
@@ -70,10 +85,12 @@ public final class MarginInteractionListener implements Listener {
             return; // real-side place: MirrorSyncListener pushes it out
         }
         event.setCancelled(true);
-        if (mirrors.forwardPlace(block, event.getBlockPlaced().getBlockData()) == null) {
+        Block placed = mirrors.forwardPlace(block, event.getBlockPlaced().getBlockData());
+        if (placed == null) {
             return;
         }
-        // The forward succeeded and the mirror now shows the block; consume
+        repushLater(placed);
+        // The forward succeeded and the mirror will show the block; consume
         // the item ourselves since the local placement was cancelled.
         if (event.getPlayer().getGameMode() != GameMode.CREATIVE) {
             ItemStack inHand = event.getItemInHand();
