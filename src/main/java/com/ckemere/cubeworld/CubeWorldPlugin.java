@@ -3,6 +3,7 @@ package com.ckemere.cubeworld;
 import com.ckemere.cubeworld.generation.CubeWorldChunkGenerator;
 import com.ckemere.cubeworld.geometry.CubeGeometry;
 import com.ckemere.cubeworld.geometry.CubeTopology;
+import com.ckemere.cubeworld.seam.MarginInteractionListener;
 import com.ckemere.cubeworld.seam.MirrorService;
 import com.ckemere.cubeworld.seam.MirrorSyncListener;
 import com.ckemere.cubeworld.seam.SeamService;
@@ -30,6 +31,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
     public void onEnable() {
         getServer().getPluginManager().registerEvents(new SeamTeleportListener(seams), this);
         getServer().getPluginManager().registerEvents(new MirrorSyncListener(this, mirrors), this);
+        getServer().getPluginManager().registerEvents(new MarginInteractionListener(mirrors), this);
         CubeWorldCommand executor = new CubeWorldCommand(geometry, seams, mirrors);
         PluginCommand command = getCommand("cubeworld");
         if (command != null) {

@@ -80,6 +80,46 @@ public final class MirrorService {
     }
 
     /**
+     * Forward a break made in a margin to the real block it mirrors: the real
+     * block becomes air and the change is reflected back into all its margin
+     * images. Returns the source block that was broken, or null if the
+     * position is not a forwardable margin block.
+     */
+    public Block forwardBreak(Block marginBlock) {
+        Block source = sourceBlock(marginBlock);
+        if (source == null || isPillar(source.getX() + 0.5, source.getZ() + 0.5)) {
+            return null;
+        }
+        source.setType(org.bukkit.Material.AIR, false);
+        pushToMirrors(source);
+        return source;
+    }
+
+    /**
+     * Forward a placement made in a margin to the real block it mirrors,
+     * rotating the placed state into the source frame, then reflect it back.
+     * Returns the source block, or null if not forwardable.
+     */
+    public Block forwardPlace(Block marginBlock, BlockData placedData) {
+        MarginSource sourcePos = topology.marginSource(
+                marginBlock.getX() + 0.5, marginBlock.getZ() + 0.5, marginBlocks);
+        if (sourcePos == null) {
+            return null;
+        }
+        int sx = (int) Math.floor(sourcePos.source().x());
+        int sz = (int) Math.floor(sourcePos.source().z());
+        if (isPillar(sx + 0.5, sz + 0.5)) {
+            return null;
+        }
+        Block source = marginBlock.getWorld().getBlockAt(sx, marginBlock.getY(), sz);
+        BlockData rotated = placedData.clone();
+        rotated.rotate(structureRotation(sourcePos.toSource().quarterTurns()));
+        source.setBlockData(rotated, false);
+        pushToMirrors(source);
+        return source;
+    }
+
+    /**
      * Our quarter turns are counter-clockwise viewed from above (east goes to
      * north at k=1); StructureRotation's clockwise turns run the other way.
      */

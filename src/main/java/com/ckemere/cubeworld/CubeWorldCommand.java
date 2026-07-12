@@ -53,6 +53,17 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
             case "mirrorpush" -> {
                 return handleMirrorPush(sender, args);
             }
+            case "marginbreak" -> {
+                return handleMarginEdit(sender, args, null);
+            }
+            case "marginplace" -> {
+                if (args.length != 5) {
+                    sender.sendMessage(Component.text(
+                            "Usage: /cubeworld marginplace <x> <y> <z> <material>", NamedTextColor.RED));
+                    return true;
+                }
+                return handleMarginEdit(sender, args, args[4]);
+            }
             default -> {
                 return false;
             }
@@ -169,6 +180,48 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
         org.bukkit.World world = org.bukkit.Bukkit.getWorlds().get(0);
         mirrors.pushToMirrors(world.getBlockAt(x, y, z));
         sender.sendMessage(Component.text("mirrorpush: done", NamedTextColor.AQUA));
+        return true;
+    }
+
+    /**
+     * Debug hook: forward a break (material == null) or placement at a margin
+     * position to its real source block, exactly as the margin interaction
+     * listener would for a player.
+     */
+    private boolean handleMarginEdit(CommandSender sender, String[] args, String material) {
+        int x;
+        int y;
+        int z;
+        try {
+            x = Integer.parseInt(args[1]);
+            y = Integer.parseInt(args[2]);
+            z = Integer.parseInt(args[3]);
+        } catch (NumberFormatException e) {
+            sender.sendMessage(Component.text("Coordinates must be integers.", NamedTextColor.RED));
+            return true;
+        }
+        org.bukkit.World world = org.bukkit.Bukkit.getWorlds().get(0);
+        org.bukkit.block.Block margin = world.getBlockAt(x, y, z);
+        org.bukkit.block.Block source;
+        if (material == null) {
+            source = mirrors.forwardBreak(margin);
+        } else {
+            org.bukkit.block.data.BlockData data;
+            try {
+                data = org.bukkit.Bukkit.createBlockData(material);
+            } catch (IllegalArgumentException e) {
+                sender.sendMessage(Component.text("Unknown block data: " + material, NamedTextColor.RED));
+                return true;
+            }
+            source = mirrors.forwardPlace(margin, data);
+        }
+        if (source == null) {
+            sender.sendMessage(Component.text("Not a forwardable margin position.", NamedTextColor.YELLOW));
+        } else {
+            sender.sendMessage(Component.text(String.format(Locale.ROOT,
+                    "forwarded to source (%d, %d, %d)", source.getX(), source.getY(), source.getZ()),
+                    NamedTextColor.AQUA));
+        }
         return true;
     }
 
