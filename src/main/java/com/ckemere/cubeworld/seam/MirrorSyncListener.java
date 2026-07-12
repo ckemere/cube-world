@@ -141,9 +141,28 @@ public final class MirrorSyncListener implements Listener {
 
     @EventHandler(ignoreCancelled = true)
     public void onLiquidFlow(BlockFromToEvent event) {
-        if (mirrors.isMargin(event.getToBlock().getX() + 0.5, event.getToBlock().getZ() + 0.5)) {
+        Block to = event.getToBlock();
+        if (mirrors.isMargin(to.getX() + 0.5, to.getZ() + 0.5)) {
+            // Flow hit the seam: keep the margin inert but continue the flow
+            // on the real far side.
             event.setCancelled(true);
+            mirrors.forwardLiquid(event.getBlock(), to, event.getFace());
         }
+    }
+
+    /** Real-side liquid movement near a seam must reach the mirrors too. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onLiquidFlowMirror(BlockFromToEvent event) {
+        Block to = event.getToBlock();
+        if (!mirrors.isMargin(to.getX() + 0.5, to.getZ() + 0.5)) {
+            pushLater(to);
+        }
+    }
+
+    /** Snow/ice forming, concrete solidifying, obsidian from lava, etc. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBlockForm(org.bukkit.event.block.BlockFormEvent event) {
+        pushLater(event.getBlock());
     }
 
     @EventHandler(ignoreCancelled = true)

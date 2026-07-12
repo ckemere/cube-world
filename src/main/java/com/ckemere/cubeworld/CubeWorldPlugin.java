@@ -7,6 +7,7 @@ import com.ckemere.cubeworld.geometry.CubeTopology;
 import com.ckemere.cubeworld.seam.EntityMirrorService;
 import com.ckemere.cubeworld.seam.EntitySeamListener;
 import com.ckemere.cubeworld.seam.MarginInteractionListener;
+import com.ckemere.cubeworld.seam.MarginReconciler;
 import com.ckemere.cubeworld.seam.MirrorService;
 import com.ckemere.cubeworld.seam.PartnerTicketService;
 import com.ckemere.cubeworld.seam.PillarGuardListener;
@@ -48,6 +49,12 @@ public final class CubeWorldPlugin extends JavaPlugin {
                 () -> entityMirrors.tick(getServer().getWorlds().get(0)), 1L, 1L);
         getServer().getScheduler().runTaskTimer(this,
                 () -> partnerTickets.refresh(getServer().getWorlds().get(0)), 40L, 20L);
+        MarginReconciler reconciler = new MarginReconciler(topology, MARGIN_BLOCKS);
+        getServer().getPluginManager().registerEvents(reconciler, this);
+        getServer().getScheduler().runTask(this,
+                () -> reconciler.bootstrap(getServer().getWorlds().get(0)));
+        getServer().getScheduler().runTaskTimer(this,
+                () -> reconciler.tick(getServer().getWorlds().get(0)), 60L, 1L);
         CubeWorldCommand executor = new CubeWorldCommand(geometry, seams, mirrors, maps);
         PluginCommand command = getCommand("cubeworld");
         if (command != null) {

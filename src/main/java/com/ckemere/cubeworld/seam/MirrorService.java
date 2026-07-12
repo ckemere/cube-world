@@ -120,6 +120,38 @@ public final class MirrorService {
     }
 
     /**
+     * Forward a liquid flow that hit a seam: the margin stays inert, but the
+     * flow continues on the real far side — the partner block of the margin
+     * target receives the next liquid level (with physics on, so vanilla
+     * spreads it from there), and the mirror reflects it back.
+     */
+    public void forwardLiquid(Block from, Block marginTo, org.bukkit.block.BlockFace face) {
+        Block target = sourceBlock(marginTo);
+        if (target == null || isPillar(target.getX() + 0.5, target.getZ() + 0.5)) {
+            return;
+        }
+        if (!(from.getBlockData() instanceof org.bukkit.block.data.Levelled liquid)) {
+            return;
+        }
+        org.bukkit.block.data.Levelled next = (org.bukkit.block.data.Levelled) liquid.clone();
+        if (face == org.bukkit.block.BlockFace.DOWN) {
+            next.setLevel(8); // falling
+        } else {
+            int level = liquid.getLevel();
+            int spread = level >= 8 ? 1 : level + 1;
+            if (spread > 7) {
+                return; // out of steam
+            }
+            next.setLevel(spread);
+        }
+        if (!target.getType().isAir() && target.getType() != next.getMaterial()) {
+            return; // don't overwrite solid terrain across the seam
+        }
+        target.setBlockData(next, true);
+        pushToMirrors(target);
+    }
+
+    /**
      * Our quarter turns are counter-clockwise viewed from above (east goes to
      * north at k=1); StructureRotation's clockwise turns run the other way.
      */
