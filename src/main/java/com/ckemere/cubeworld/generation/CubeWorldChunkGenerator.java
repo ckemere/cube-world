@@ -3,7 +3,6 @@ package com.ckemere.cubeworld.generation;
 import com.ckemere.cubeworld.geometry.CubeFace;
 import com.ckemere.cubeworld.geometry.CubeGeometry;
 import com.ckemere.cubeworld.geometry.CubeTopology;
-import com.ckemere.cubeworld.geometry.MarginSource;
 import java.util.Random;
 import org.bukkit.HeightMap;
 import org.bukkit.Material;
@@ -14,29 +13,27 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Flat test-world generator: each cube face is a uniform slab with its own
- * biome and surface blocks. The void strips within {@code marginBlocks} of a
- * stitched edge generate as mirrors of the terrain across the cube edge
- * (resolved per column through the seam transform), so approaching a seam
- * shows the far side. Everything else outside the cross is void.
- *
- * <p>Because the generator is deterministic, a margin column and its source
- * column always agree without any copying.
+ * Map-spec terrain: per-column height and theme from a {@link MapSampler},
+ * which resolves seam margins to their source terrain and interpolates
+ * heights across stitched edges. Corner pillars override everything at cube
+ * vertices; deep void (outside faces, margins, and pillars) stays empty.
  */
 public final class CubeWorldChunkGenerator extends ChunkGenerator {
 
-    public static final int SURFACE_Y = 63;
+    public static final int SEA_LEVEL = SphericalDemoSpec.SEA_LEVEL;
 
     private final CubeGeometry geometry;
     private final CubeTopology topology;
+    private final MapSampler sampler;
     private final int marginBlocks;
     private final CubeWorldBiomeProvider biomeProvider;
 
-    public CubeWorldChunkGenerator(CubeTopology topology, int marginBlocks) {
+    public CubeWorldChunkGenerator(CubeTopology topology, MapSampler sampler, int marginBlocks) {
         this.topology = topology;
         this.geometry = topology.geometry();
+        this.sampler = sampler;
         this.marginBlocks = marginBlocks;
-        this.biomeProvider = new CubeWorldBiomeProvider(topology, marginBlocks);
+        this.biomeProvider = new CubeWorldBiomeProvider(topology, sampler, marginBlocks);
     }
 
     @Override
@@ -44,65 +41,49 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                                 int chunkX, int chunkZ, @NotNull ChunkData chunkData) {
         int minY = chunkData.getMinHeight();
         int maxY = chunkData.getMaxHeight();
-        CubeFace face = geometry.faceAt(chunkX << 4, chunkZ << 4);
         boolean nearPillar = chunkNearPillar(chunkX, chunkZ);
-        if (face != null && !nearPillar) {
-            // Faces are chunk-aligned: the whole chunk shares one theme.
-            fillColumnRegion(chunkData, 0, 0, 16, 16, minY, FaceTheme.of(face));
-            return;
-        }
-        // Near a pillar or off the cross: per-column resolution.
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
                 double wx = (chunkX << 4) + lx + 0.5;
                 double wz = (chunkZ << 4) + lz + 0.5;
                 if (nearPillar && topology.inPillar(wx, wz, marginBlocks)) {
-                    // Cube-vertex pillar: unbreakable, full height.
                     chunkData.setRegion(lx, minY, lz, lx + 1, maxY, lz + 1, Material.BEDROCK);
                     continue;
                 }
-                FaceTheme theme = face != null ? FaceTheme.of(face) : marginTheme(wx, wz);
-                if (theme != null) {
-                    fillColumnRegion(chunkData, lx, lz, lx + 1, lz + 1, minY, theme);
+                boolean onFace = geometry.faceAt((int) Math.floor(wx), (int) Math.floor(wz)) != null;
+                boolean inMargin = !onFace && topology.marginSource(wx, wz, marginBlocks) != null;
+                if (!onFace && !inMargin) {
+                    continue; // deep void
+                }
+                int height = (int) Math.round(sampler.heightAt(wx, wz));
+                TerrainTheme theme = sampler.themeAt(wx, wz);
+                chunkData.setRegion(lx, minY, lz, lx + 1, minY + 1, lz + 1, Material.BEDROCK);
+                chunkData.setRegion(lx, minY + 1, lz, lx + 1, height - 3, lz + 1, Material.STONE);
+                chunkData.setRegion(lx, height - 3, lz, lx + 1, height, lz + 1,
+                        ThemeBlocks.fillerBlock(theme));
+                chunkData.setRegion(lx, height, lz, lx + 1, height + 1, lz + 1,
+                        ThemeBlocks.topBlock(theme));
+                if (height < SEA_LEVEL) {
+                    chunkData.setRegion(lx, height + 1, lz, lx + 1, SEA_LEVEL + 1, lz + 1,
+                            Material.WATER);
+                } else if (ThemeBlocks.snowCovered(theme)) {
+                    chunkData.setRegion(lx, height + 1, lz, lx + 1, height + 2, lz + 1,
+                            Material.SNOW);
                 }
             }
         }
     }
 
-    /** Cheap chunk-level pre-check: could any column of this chunk be in a pillar? */
     private boolean chunkNearPillar(int chunkX, int chunkZ) {
         double cx = (chunkX << 4) + 8;
         double cz = (chunkZ << 4) + 8;
-        // Chunk half-diagonal is ~11.4; pad generously.
         return topology.inPillar(cx, cz, marginBlocks + 12);
-    }
-
-    /** Theme of the real column this margin column mirrors, or null when not in a margin. */
-    private @Nullable FaceTheme marginTheme(double wx, double wz) {
-        MarginSource source = topology.marginSource(wx, wz, marginBlocks);
-        if (source == null) {
-            return null;
-        }
-        CubeFace sourceFace = geometry.faceAt(
-                (int) Math.floor(source.source().x()), (int) Math.floor(source.source().z()));
-        return sourceFace == null ? null : FaceTheme.of(sourceFace);
-    }
-
-    private void fillColumnRegion(ChunkData chunkData, int x0, int z0, int x1, int z1,
-                                  int minY, FaceTheme theme) {
-        chunkData.setRegion(x0, minY, z0, x1, minY + 1, z1, Material.BEDROCK);
-        chunkData.setRegion(x0, minY + 1, z0, x1, SURFACE_Y - 3, z1, Material.STONE);
-        chunkData.setRegion(x0, SURFACE_Y - 3, z0, x1, SURFACE_Y, z1, theme.fillerBlock());
-        chunkData.setRegion(x0, SURFACE_Y, z0, x1, SURFACE_Y + 1, z1, theme.topBlock());
-        if (theme.snowCovered()) {
-            chunkData.setRegion(x0, SURFACE_Y + 1, z0, x1, SURFACE_Y + 2, z1, Material.SNOW);
-        }
     }
 
     @Override
     public int getBaseHeight(@NotNull WorldInfo worldInfo, @NotNull Random random,
                              int x, int z, @NotNull HeightMap heightMap) {
-        return SURFACE_Y + 1;
+        return (int) Math.round(Math.max(sampler.heightAt(x + 0.5, z + 0.5), SEA_LEVEL)) + 1;
     }
 
     @Override

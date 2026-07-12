@@ -21,13 +21,14 @@ Because everything is done with standard teleports and block packets, **a stock 
 
 ## Status
 
-The core topology works end to end on a flat test world (six 800-block faces, one biome per face so seams are obvious):
+The core topology works end to end, now with map-driven terrain (per-chunk height + biome cells per face, rolling continents with oceans, beaches, highlands, and snowcaps):
 
 - **Geometry core** (`geometry/`, pure Java, unit-tested): the cross layout, the 7 stitched cube edges with their crossing transforms, margin/mirror mappings, and the 14 cube-vertex pillar sites.
 - **Seam teleportation**: players and all other entities crossing a stitched edge teleport with rotated position, view, and velocity. Walking east around the equator or south over the pole loops seamlessly.
 - **Mirrored margins**: 96 blocks of terrain beyond every stitched edge generate as a live view of the far side (matching biomes); player edits near seams propagate into mirrors, and edits *in* mirrors forward to the real blocks (block states rotated appropriately).
 - **Corner pillars**: full-height immutable bedrock cylinders at every net image of the 8 cube vertices, where consistent rendering is geometrically impossible.
 - **Virtual entities v1**: real entities near seams get AI-less clone puppets in the margin, synced every tick; damage to a clone forwards to its source. Player clones not yet implemented.
+- **Map-spec generation**: terrain is specified as a 50×50 grid of chunk cells per face, each with a height and terrain theme (`MapSpec`). Heights interpolate bilinearly between cell centers, and the interpolation neighborhood reaches *across* stitched seams through the edge transforms, so terrain is continuous over every boundary. The demo map samples a smooth function of the cube-surface embedding (`CubeSurface`: face + local → 3D point), which makes seam agreement automatic — the same plumbing will consume real Earth rasters (cube point → lat/lon → data).
 
 Next up: player clones across seams, sound/effect mirroring, and the Earth-map chunk generator (quadrilateralized spherical cube projection over real elevation/biome data).
 
