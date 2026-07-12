@@ -55,10 +55,12 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                 if (!onFace && !inMargin) {
                     continue; // deep void
                 }
-                int height = (int) Math.round(sampler.heightAt(wx, wz));
+                double exactHeight = sampler.heightAt(wx, wz);
+                int height = (int) Math.round(exactHeight);
                 TerrainTheme theme = sampler.themeAt(wx, wz);
                 chunkData.setRegion(lx, minY, lz, lx + 1, minY + 1, lz + 1, Material.BEDROCK);
-                chunkData.setRegion(lx, minY + 1, lz, lx + 1, height - 3, lz + 1, Material.STONE);
+                chunkData.setRegion(lx, minY + 1, lz, lx + 1, 0, lz + 1, Material.DEEPSLATE);
+                chunkData.setRegion(lx, 0, lz, lx + 1, height - 3, lz + 1, Material.STONE);
                 chunkData.setRegion(lx, height - 3, lz, lx + 1, height, lz + 1,
                         ThemeBlocks.fillerBlock(theme));
                 chunkData.setRegion(lx, height, lz, lx + 1, height + 1, lz + 1,
@@ -70,6 +72,23 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                     chunkData.setRegion(lx, height + 1, lz, lx + 1, height + 2, lz + 1,
                             Material.SNOW);
                 }
+                carveCaves(chunkData, lx, lz, wx, wz, minY, exactHeight);
+            }
+        }
+    }
+
+    /** Carve seam-consistent caves into a finished column (air, lava at the bottom). */
+    private void carveCaves(ChunkData chunkData, int lx, int lz, double wx, double wz,
+                            int minY, double surfaceHeight) {
+        com.ckemere.cubeworld.geometry.Vec3 p = sampler.cubePointAt(wx, wz);
+        if (p == null) {
+            return;
+        }
+        int top = (int) Math.floor(surfaceHeight - CaveCarver.ROOF);
+        for (int y = minY + 6; y <= top; y++) {
+            if (CaveCarver.carved(p, y, surfaceHeight)) {
+                chunkData.setBlock(lx, y, lz,
+                        y <= CaveCarver.LAVA_LEVEL ? Material.LAVA : Material.AIR);
             }
         }
     }
@@ -103,12 +122,37 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
 
     @Override
     public boolean shouldGenerateCaves() {
+        // Vanilla carvers do not engage with custom generators on 26.x (and
+        // are chunk-seeded, so they could never match across seams anyway);
+        // CaveCarver handles caves seam-consistently instead.
         return false;
     }
 
     @Override
     public boolean shouldGenerateDecorations() {
-        return false;
+        return true;
+    }
+
+    @Override
+    public boolean shouldGenerateDecorations(@NotNull WorldInfo worldInfo, @NotNull Random random,
+                                             int chunkX, int chunkZ) {
+        return vanillaAllowedIn(chunkX, chunkZ);
+    }
+
+    /**
+     * Vanilla features (trees, grass, ores, cave flora) run only on real face
+     * chunks away from pillars. Margins must stay a deterministic function of
+     * their source (features are seeded per chunk and would diverge from the
+     * terrain they mirror), so they get none; a follow-up could copy
+     * near-seam features into margins the way block edits already sync.
+     */
+    private boolean vanillaAllowedIn(int chunkX, int chunkZ) {
+        int wx = chunkX << 4;
+        int wz = chunkZ << 4;
+        if (geometry.faceAt(wx, wz) == null) {
+            return false;
+        }
+        return !chunkNearPillar(chunkX, chunkZ);
     }
 
     @Override

@@ -2,9 +2,11 @@ package com.ckemere.cubeworld.generation;
 
 import com.ckemere.cubeworld.geometry.CubeFace;
 import com.ckemere.cubeworld.geometry.CubeGeometry;
+import com.ckemere.cubeworld.geometry.CubeSurface;
 import com.ckemere.cubeworld.geometry.CubeTopology;
 import com.ckemere.cubeworld.geometry.MarginSource;
 import com.ckemere.cubeworld.geometry.Vec2;
+import com.ckemere.cubeworld.geometry.Vec3;
 
 /**
  * Samples a {@link MapSpec} at block resolution: bilinear interpolation
@@ -22,11 +24,13 @@ public final class MapSampler {
 
     private final CubeGeometry geometry;
     private final CubeTopology topology;
+    private final CubeSurface surface;
     private final MapSpec spec;
 
     public MapSampler(CubeTopology topology, MapSpec spec) {
         this.topology = topology;
         this.geometry = topology.geometry();
+        this.surface = new CubeSurface(topology.geometry());
         this.spec = spec;
     }
 
@@ -34,27 +38,50 @@ public final class MapSampler {
         return spec;
     }
 
+    /** A world position resolved onto a face: margins collapse to their source. */
+    private record Resolved(CubeFace face, double x, double z) {
+    }
+
+    private Resolved resolve(double worldX, double worldZ) {
+        CubeFace face = geometry.faceAt((int) Math.floor(worldX), (int) Math.floor(worldZ));
+        if (face != null) {
+            return new Resolved(face, worldX, worldZ);
+        }
+        MarginSource source = topology.marginSource(worldX, worldZ, 16 * 8);
+        if (source == null) {
+            return null;
+        }
+        double sx = source.source().x();
+        double sz = source.source().z();
+        CubeFace sourceFace = geometry.faceAt((int) Math.floor(sx), (int) Math.floor(sz));
+        return sourceFace == null ? null : new Resolved(sourceFace, sx, sz);
+    }
+
     /**
-     * Interpolated surface height at a world position on a face (margin
-     * positions should be resolved to their source first).
+     * The cube-surface 3D point for a world position (margins resolved to
+     * their source), or null off the net. Continuous input for any
+     * seam-consistent function of position (cave biomes, future climate...).
+     */
+    public Vec3 cubePointAt(double worldX, double worldZ) {
+        Resolved r = resolve(worldX, worldZ);
+        return r == null ? null : surface.point(r.face(), r.x(), r.z());
+    }
+
+    /**
+     * Interpolated surface height at a world position (margins resolved to
+     * their source).
      */
     public double heightAt(double worldX, double worldZ) {
-        CubeFace face = geometry.faceAt((int) Math.floor(worldX), (int) Math.floor(worldZ));
-        if (face == null) {
-            MarginSource source = topology.marginSource(worldX, worldZ, 16 * 8);
-            if (source == null) {
-                return SphericalDemoSpec.SEA_LEVEL; // deep void: irrelevant, pillars/void
-            }
-            worldX = source.source().x();
-            worldZ = source.source().z();
-            face = geometry.faceAt((int) Math.floor(worldX), (int) Math.floor(worldZ));
-            if (face == null) {
-                return SphericalDemoSpec.SEA_LEVEL;
-            }
+        Resolved r = resolve(worldX, worldZ);
+        if (r == null) {
+            return SphericalDemoSpec.SEA_LEVEL; // deep void: pillars/void only
         }
+        CubeFace face = r.face();
+        double worldXr = r.x();
+        double worldZr = r.z();
         // Continuous cell coordinates: cell centers at local 8, 24, 40, ...
-        double fx = (worldX - geometry.faceMinX(face) - 8.0) / 16.0;
-        double fz = (worldZ - geometry.faceMinZ(face) - 8.0) / 16.0;
+        double fx = (worldXr - geometry.faceMinX(face) - 8.0) / 16.0;
+        double fz = (worldZr - geometry.faceMinZ(face) - 8.0) / 16.0;
         int ix = (int) Math.floor(fx);
         int iz = (int) Math.floor(fz);
         double tx = fx - ix;
@@ -69,22 +96,13 @@ public final class MapSampler {
 
     /** Theme of the nearest cell (resolved through seams the same way). */
     public TerrainTheme themeAt(double worldX, double worldZ) {
-        CubeFace face = geometry.faceAt((int) Math.floor(worldX), (int) Math.floor(worldZ));
-        if (face == null) {
-            MarginSource source = topology.marginSource(worldX, worldZ, 16 * 8);
-            if (source == null) {
-                return TerrainTheme.OCEAN;
-            }
-            worldX = source.source().x();
-            worldZ = source.source().z();
-            face = geometry.faceAt((int) Math.floor(worldX), (int) Math.floor(worldZ));
-            if (face == null) {
-                return TerrainTheme.OCEAN;
-            }
+        Resolved r = resolve(worldX, worldZ);
+        if (r == null) {
+            return TerrainTheme.OCEAN;
         }
-        int cx = clampCell((int) Math.floor((worldX - geometry.faceMinX(face)) / 16.0));
-        int cz = clampCell((int) Math.floor((worldZ - geometry.faceMinZ(face)) / 16.0));
-        return spec.themeAt(face, cx, cz);
+        int cx = clampCell((int) Math.floor((r.x() - geometry.faceMinX(r.face())) / 16.0));
+        int cz = clampCell((int) Math.floor((r.z() - geometry.faceMinZ(r.face())) / 16.0));
+        return spec.themeAt(r.face(), cx, cz);
     }
 
     /**

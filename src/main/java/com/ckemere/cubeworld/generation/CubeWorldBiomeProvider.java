@@ -2,6 +2,7 @@ package com.ckemere.cubeworld.generation;
 
 import com.ckemere.cubeworld.geometry.CubeGeometry;
 import com.ckemere.cubeworld.geometry.CubeTopology;
+import com.ckemere.cubeworld.geometry.Vec3;
 import java.util.ArrayList;
 import java.util.List;
 import org.bukkit.block.Biome;
@@ -10,8 +11,11 @@ import org.bukkit.generator.WorldInfo;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * Biomes from the map spec (per chunk cell), continued into seam margins via
- * the sampler's source resolution; void far off the net.
+ * Three-dimensional biomes: at and near the surface, the map spec's theme
+ * (continued into seam margins via source resolution); deep underground,
+ * cave biomes selected by seam-consistent noise over the cube-surface point
+ * ({@link CaveBiomes}), so lush/dripstone/deep-dark patches continue across
+ * stitched edges like everything else. Void far off the net.
  */
 public final class CubeWorldBiomeProvider extends BiomeProvider {
 
@@ -33,7 +37,28 @@ public final class CubeWorldBiomeProvider extends BiomeProvider {
         if (!onFace && topology.marginSource(x + 0.5, z + 0.5, marginBlocks) == null) {
             return Biome.THE_VOID;
         }
-        return ThemeBlocks.biome(sampler.themeAt(x + 0.5, z + 0.5));
+        double wx = x + 0.5;
+        double wz = z + 0.5;
+        if (y < sampler.heightAt(wx, wz) - CaveBiomes.SURFACE_BUFFER) {
+            Vec3 p = sampler.cubePointAt(wx, wz);
+            if (p != null) {
+                switch (CaveBiomes.at(p, y)) {
+                    case LUSH -> {
+                        return Biome.LUSH_CAVES;
+                    }
+                    case DRIPSTONE -> {
+                        return Biome.DRIPSTONE_CAVES;
+                    }
+                    case DEEP_DARK -> {
+                        return Biome.DEEP_DARK;
+                    }
+                    case NONE -> {
+                        // fall through to the surface theme
+                    }
+                }
+            }
+        }
+        return ThemeBlocks.biome(sampler.themeAt(wx, wz));
     }
 
     @Override
@@ -42,6 +67,9 @@ public final class CubeWorldBiomeProvider extends BiomeProvider {
         for (TerrainTheme theme : TerrainTheme.values()) {
             biomes.add(ThemeBlocks.biome(theme));
         }
+        biomes.add(Biome.LUSH_CAVES);
+        biomes.add(Biome.DRIPSTONE_CAVES);
+        biomes.add(Biome.DEEP_DARK);
         biomes.add(Biome.THE_VOID);
         return biomes;
     }
