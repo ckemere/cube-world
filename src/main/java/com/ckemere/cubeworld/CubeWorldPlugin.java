@@ -6,6 +6,7 @@ import com.ckemere.cubeworld.geometry.CubeGeometry;
 import com.ckemere.cubeworld.geometry.CubeTopology;
 import com.ckemere.cubeworld.seam.EntityMirrorService;
 import com.ckemere.cubeworld.seam.EntitySeamListener;
+import com.ckemere.cubeworld.seam.LiquidSeamService;
 import com.ckemere.cubeworld.seam.MarginInteractionListener;
 import com.ckemere.cubeworld.seam.MarginReconciler;
 import com.ckemere.cubeworld.seam.MirrorService;
@@ -40,8 +41,12 @@ public final class CubeWorldPlugin extends JavaPlugin {
     public void onEnable() {
         entityMirrors = new EntityMirrorService(this, topology, MARGIN_BLOCKS);
         partnerTickets = new PartnerTicketService(this, topology, MARGIN_BLOCKS);
+        LiquidSeamService liquidSeams = new LiquidSeamService(topology, mirrors);
+        getServer().getPluginManager().registerEvents(liquidSeams, this);
+        getServer().getScheduler().runTaskTimer(this,
+                () -> liquidSeams.tick(getServer().getWorlds().get(0)), 100L, 5L);
         getServer().getPluginManager().registerEvents(new SeamTeleportListener(this, seams), this);
-        getServer().getPluginManager().registerEvents(new MirrorSyncListener(this, mirrors), this);
+        getServer().getPluginManager().registerEvents(new MirrorSyncListener(this, mirrors, liquidSeams), this);
         getServer().getPluginManager().registerEvents(new MarginInteractionListener(this, mirrors), this);
         getServer().getPluginManager().registerEvents(new EntitySeamListener(entityMirrors, partnerTickets), this);
         getServer().getPluginManager().registerEvents(new PillarGuardListener(topology, MARGIN_BLOCKS), this);

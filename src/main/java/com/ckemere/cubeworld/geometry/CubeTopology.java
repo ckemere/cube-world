@@ -211,6 +211,37 @@ public final class CubeTopology {
         return (x - d.s0().x()) * nx + (z - d.s0().z()) * nz;
     }
 
+    /** Outward normal (unit, axis-aligned) of a directed edge's boundary. */
+    private double[] outwardNormal(DirectedEdge d) {
+        double len = geometry.faceSize();
+        double ux = Math.signum(d.s1().x() - d.s0().x());
+        double cx = geometry.faceMinX(d.face()) + len / 2.0;
+        double cz = geometry.faceMinZ(d.face()) + len / 2.0;
+        if (ux == 0) {
+            return new double[] {Math.signum(d.s0().x() - cx), 0};
+        }
+        return new double[] {0, Math.signum(d.s0().z() - cz)};
+    }
+
+    /**
+     * For a real position within one block of a stitched edge: the real
+     * position topologically adjacent to it across the seam (the partner of
+     * the margin cell one step outward). Null away from stitched edges.
+     */
+    public MarginSource acrossSeam(double x, double z) {
+        for (DirectedEdge d : directedEdges()) {
+            double out = outwardDistance(d, x, z);
+            if (!Double.isNaN(out) && out <= 0 && -out <= 1.0) {
+                double[] n = outwardNormal(d);
+                MarginSource neighbor = marginSource(x + n[0], z + n[1], 2.0);
+                if (neighbor != null) {
+                    return neighbor;
+                }
+            }
+        }
+        return null;
+    }
+
     /**
      * Resolves a point in a seam margin to the real position it mirrors, or
      * null when (x, z) is not within {@code margin} blocks beyond a stitched

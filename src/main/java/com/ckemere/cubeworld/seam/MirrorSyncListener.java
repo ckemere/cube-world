@@ -26,10 +26,12 @@ public final class MirrorSyncListener implements Listener {
 
     private final Plugin plugin;
     private final MirrorService mirrors;
+    private final LiquidSeamService liquidSeams;
 
-    public MirrorSyncListener(Plugin plugin, MirrorService mirrors) {
+    public MirrorSyncListener(Plugin plugin, MirrorService mirrors, LiquidSeamService liquidSeams) {
         this.plugin = plugin;
         this.mirrors = mirrors;
+        this.liquidSeams = liquidSeams;
     }
 
     /** Push blocks to their mirrors next tick, once the change has applied. */
@@ -144,9 +146,12 @@ public final class MirrorSyncListener implements Listener {
         Block to = event.getToBlock();
         if (mirrors.isMargin(to.getX() + 0.5, to.getZ() + 0.5)) {
             // Flow hit the seam: keep the margin inert but continue the flow
-            // on the real far side.
+            // on the real far side, and watch it so it drains when unfed.
             event.setCancelled(true);
-            mirrors.forwardLiquid(event.getBlock(), to, event.getFace());
+            Block forwarded = mirrors.forwardLiquid(event.getBlock(), to, event.getFace());
+            if (forwarded != null) {
+                liquidSeams.watch(forwarded);
+            }
         }
     }
 
