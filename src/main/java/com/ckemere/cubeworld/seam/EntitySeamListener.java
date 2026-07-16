@@ -16,10 +16,35 @@ public final class EntitySeamListener implements Listener {
 
     private final EntityMirrorService entityMirrors;
     private final PartnerTicketService partnerTickets;
+    private final MirrorService mirrors;
 
-    public EntitySeamListener(EntityMirrorService entityMirrors, PartnerTicketService partnerTickets) {
+    public EntitySeamListener(EntityMirrorService entityMirrors, PartnerTicketService partnerTickets,
+                              MirrorService mirrors) {
         this.entityMirrors = entityMirrors;
         this.partnerTickets = partnerTickets;
+        this.mirrors = mirrors;
+    }
+
+    /**
+     * Margin portals are functional replicas of real portals across the seam,
+     * but their coordinates map to a divergent nether location (margin/8 !=
+     * source/8) — and clones must never leave their manager's world. Verified
+     * live: an unguarded clone rode a mirrored portal to the nether and left
+     * a duplicate cart plus a junk portal behind.
+     */
+    @EventHandler(ignoreCancelled = true)
+    public void onEntityPortal(org.bukkit.event.entity.EntityPortalEvent event) {
+        if (entityMirrors.isClone(event.getEntity())
+                || mirrors.isMargin(event.getFrom().getX(), event.getFrom().getZ())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onPlayerPortal(org.bukkit.event.player.PlayerPortalEvent event) {
+        if (mirrors.isMargin(event.getFrom().getX(), event.getFrom().getZ())) {
+            event.setCancelled(true);
+        }
     }
 
     @EventHandler(priority = EventPriority.LOWEST)

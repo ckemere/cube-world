@@ -109,12 +109,15 @@ public final class EntityMirrorService {
             handleCrossing(entity);
             syncClones(entity);
         }
-        // Drop registry entries whose source disappeared.
+        // Drop registry entries whose source disappeared — including sources
+        // that left this world (e.g. rode a nether portal): getEntity is a
+        // global lookup, and a clone must not outlive its source's presence
+        // in the world it mirrors.
         Iterator<Map.Entry<UUID, List<Clone>>> it = clones.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<UUID, List<Clone>> entry = it.next();
             Entity source = org.bukkit.Bukkit.getEntity(entry.getKey());
-            if (source == null || !source.isValid()) {
+            if (source == null || !source.isValid() || !source.getWorld().equals(world)) {
                 for (Clone c : entry.getValue()) {
                     c.entity().remove();
                 }
@@ -292,6 +295,8 @@ public final class EntityMirrorService {
         spawned.setSilent(true);
         spawned.setInvulnerable(true);
         spawned.setGravity(false);
+        // A clone inside a mirrored portal must never travel dimensions.
+        spawned.setPortalCooldown(Integer.MAX_VALUE);
         if (spawned instanceof LivingEntity living) {
             living.setAI(false);
             living.setCollidable(false);
