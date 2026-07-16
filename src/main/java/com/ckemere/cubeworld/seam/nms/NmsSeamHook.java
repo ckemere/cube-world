@@ -1,6 +1,7 @@
 package com.ckemere.cubeworld.seam.nms;
 
 import com.ckemere.cubeworld.geometry.CubeTopology;
+import com.ckemere.cubeworld.seam.MirrorService;
 import java.lang.reflect.Field;
 import java.util.logging.Logger;
 import net.minecraft.server.level.ServerLevel;
@@ -21,11 +22,12 @@ public final class NmsSeamHook {
     private NmsSeamHook() {
     }
 
-    public static boolean install(World world, CubeTopology topology, Plugin plugin, Logger log) {
+    public static boolean install(World world, CubeTopology topology, MirrorService mirrors,
+                                  Plugin plugin, Logger log) {
         try {
             ServerLevel level = ((CraftWorld) world).getHandle();
             SeamNeighborUpdater updater = new SeamNeighborUpdater(level,
-                    level.getServer().getMaxChainedNeighborUpdates(), topology, plugin);
+                    level.getServer().getMaxChainedNeighborUpdates(), topology, mirrors, plugin);
             Field field = null;
             for (Field candidate : Level.class.getDeclaredFields()) {
                 if (candidate.getType() == CollectingNeighborUpdater.class) {

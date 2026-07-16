@@ -56,7 +56,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
                 () -> partnerTickets.refresh(getServer().getWorlds().get(0)), 40L, 20L);
         getServer().getScheduler().runTask(this, () ->
                 com.ckemere.cubeworld.seam.nms.NmsSeamHook.install(
-                        getServer().getWorlds().get(0), topology, this, getLogger()));
+                        getServer().getWorlds().get(0), topology, mirrors, this, getLogger()));
         MarginReconciler reconciler = new MarginReconciler(topology, MARGIN_BLOCKS);
         getServer().getPluginManager().registerEvents(reconciler, this);
         getServer().getScheduler().runTask(this,
