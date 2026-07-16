@@ -1,6 +1,7 @@
 plugins {
     java
     id("xyz.jpenilla.run-paper") version "3.0.2"
+    id("io.papermc.paperweight.userdev") version "2.0.0-beta.21"
 }
 
 group = "com.ckemere"
@@ -17,7 +18,7 @@ repositories {
 }
 
 dependencies {
-    compileOnly("io.papermc.paper:paper-api:26.2.build.60-beta")
+    paperweight.paperDevBundle("26.2.build.60-beta")
     testImplementation(platform("org.junit:junit-bom:6.1.1"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

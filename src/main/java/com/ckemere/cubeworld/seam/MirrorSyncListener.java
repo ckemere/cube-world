@@ -170,6 +170,16 @@ public final class MirrorSyncListener implements Listener {
         pushLater(event.getBlock());
     }
 
+    /**
+     * Redstone power changes carry no place/break event; mirror them
+     * immediately so cross-seam neighbor pokes (2 ticks later) read fresh
+     * margin state.
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBlockRedstone(org.bukkit.event.block.BlockRedstoneEvent event) {
+        pushLater(event.getBlock());
+    }
+
     @EventHandler(ignoreCancelled = true)
     public void onCreatureSpawn(CreatureSpawnEvent event) {
         if (event.getSpawnReason() != CreatureSpawnEvent.SpawnReason.NATURAL) {
