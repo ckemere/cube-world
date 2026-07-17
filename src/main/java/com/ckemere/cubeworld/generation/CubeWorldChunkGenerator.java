@@ -160,11 +160,57 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
 
     @Override
     public boolean shouldGenerateMobs() {
-        return false;
+        return true;
+    }
+
+    @Override
+    public boolean shouldGenerateMobs(@NotNull WorldInfo worldInfo, @NotNull Random random,
+                                      int chunkX, int chunkZ) {
+        return vanillaAllowedIn(chunkX, chunkZ);
     }
 
     @Override
     public boolean shouldGenerateStructures() {
-        return false;
+        return true;
+    }
+
+    @Override
+    public boolean shouldGenerateStructures(@NotNull WorldInfo worldInfo, @NotNull Random random,
+                                            int chunkX, int chunkZ) {
+        return structuresAllowedIn(chunkX, chunkZ);
+    }
+
+    /**
+     * Chunks of face-edge buffer inside which no structure may start. Jigsaw
+     * structures (villages, outposts) sprawl at most 80 blocks from their
+     * start, so 8 chunks keeps every piece on-face while letting villages
+     * reach into the mirror zone (visible across the seam once reconciled).
+     */
+    private static final int STRUCTURE_EDGE_BUFFER_CHUNKS = 8;
+
+    /**
+     * Structures are chunk-seeded and plane-local: one straddling a stitched
+     * edge would be chopped by the margin (which always mirrors the far
+     * side). Sprawlier underground structures (mineshafts, strongholds) may
+     * still poke past the buffer; margin overhangs from those are erased by
+     * the reconciler, and on-face truncation is underground and benign.
+     */
+    private boolean structuresAllowedIn(int chunkX, int chunkZ) {
+        int wx = chunkX << 4;
+        int wz = chunkZ << 4;
+        CubeFace face = geometry.faceAt(wx + 8, wz + 8);
+        if (face == null) {
+            return false;
+        }
+        int lx = (wx + 8 - geometry.faceMinX(face)) >> 4;
+        int lz = (wz + 8 - geometry.faceMinZ(face)) >> 4;
+        int faceChunks = geometry.faceSize() >> 4;
+        int edge = Math.min(Math.min(lx, faceChunks - 1 - lx),
+                Math.min(lz, faceChunks - 1 - lz));
+        if (edge < STRUCTURE_EDGE_BUFFER_CHUNKS) {
+            return false;
+        }
+        return !topology.inPillar(wx + 8, wz + 8,
+                marginBlocks + STRUCTURE_EDGE_BUFFER_CHUNKS * 16);
     }
 }

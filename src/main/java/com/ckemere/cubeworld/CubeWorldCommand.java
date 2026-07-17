@@ -81,6 +81,24 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                 }
                 return true;
             }
+            case "blockat" -> {
+                if (args.length != 4) {
+                    sender.sendMessage(Component.text("Usage: /cubeworld blockat <x> <y> <z>", NamedTextColor.RED));
+                    return true;
+                }
+                try {
+                    int bx = Integer.parseInt(args[1]);
+                    int by = Integer.parseInt(args[2]);
+                    int bz = Integer.parseInt(args[3]);
+                    org.bukkit.World world = org.bukkit.Bukkit.getWorlds().get(0);
+                    sender.sendMessage(Component.text(String.format(Locale.ROOT, "(%d,%d,%d): %s",
+                            bx, by, bz, world.getBlockAt(bx, by, bz).getBlockData().getAsString()),
+                            NamedTextColor.AQUA));
+                } catch (NumberFormatException e) {
+                    sender.sendMessage(Component.text("Coordinates must be integers.", NamedTextColor.RED));
+                }
+                return true;
+            }
             case "respawn" -> {
                 if (args.length != 2) {
                     sender.sendMessage(Component.text("Usage: /cubeworld respawn <player>", NamedTextColor.RED));
