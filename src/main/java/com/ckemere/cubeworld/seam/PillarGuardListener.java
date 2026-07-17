@@ -15,10 +15,13 @@ import org.bukkit.event.player.PlayerMoveEvent;
  */
 public final class PillarGuardListener implements Listener {
 
+    private final com.ckemere.cubeworld.CubeWorldPlugin plugin;
     private final CubeTopology topology;
     private final int radius;
 
-    public PillarGuardListener(CubeTopology topology, int radius) {
+    public PillarGuardListener(com.ckemere.cubeworld.CubeWorldPlugin plugin,
+                               CubeTopology topology, int radius) {
+        this.plugin = plugin;
         this.topology = topology;
         this.radius = radius;
     }
@@ -26,6 +29,9 @@ public final class PillarGuardListener implements Listener {
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onPlayerMove(PlayerMoveEvent event) {
         Location to = event.getTo();
+        if (!plugin.isCubeWorld(to.getWorld())) {
+            return;
+        }
         int maxHeight = to.getWorld().getMaxHeight();
         if (to.getY() < maxHeight || !topology.inPillar(to.getX(), to.getZ(), radius)) {
             return;

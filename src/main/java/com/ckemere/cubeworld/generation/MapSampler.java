@@ -98,7 +98,7 @@ public final class MapSampler {
     public TerrainTheme themeAt(double worldX, double worldZ) {
         Resolved r = resolve(worldX, worldZ);
         if (r == null) {
-            return TerrainTheme.OCEAN;
+            return spec.fallbackTheme();
         }
         int cx = clampCell((int) Math.floor((r.x() - geometry.faceMinX(r.face())) / 16.0));
         int cz = clampCell((int) Math.floor((r.z() - geometry.faceMinZ(r.face())) / 16.0));

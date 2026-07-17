@@ -22,4 +22,9 @@ public interface MapSpec {
 
     /** Terrain theme for a cell. */
     TerrainTheme themeAt(CubeFace face, int cellX, int cellZ);
+
+    /** Theme reported for positions that resolve to nothing (off the net). */
+    default TerrainTheme fallbackTheme() {
+        return TerrainTheme.OCEAN;
+    }
 }

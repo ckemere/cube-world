@@ -10,5 +10,11 @@ public enum TerrainTheme {
     BEACH,
     PLAINS,
     HIGHLANDS,
-    SNOWCAP
+    SNOWCAP,
+    // Nether surface themes (the cube nether is an open hellscape).
+    NETHER_WASTES,
+    CRIMSON_FOREST,
+    WARPED_FOREST,
+    SOUL_SAND_VALLEY,
+    BASALT_DELTAS
 }

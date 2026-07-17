@@ -82,21 +82,57 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                 return true;
             }
             case "blockat" -> {
-                if (args.length != 4) {
-                    sender.sendMessage(Component.text("Usage: /cubeworld blockat <x> <y> <z>", NamedTextColor.RED));
+                if (args.length != 4 && args.length != 5) {
+                    sender.sendMessage(Component.text(
+                            "Usage: /cubeworld blockat <x> <y> <z> [world]", NamedTextColor.RED));
                     return true;
                 }
                 try {
                     int bx = Integer.parseInt(args[1]);
                     int by = Integer.parseInt(args[2]);
                     int bz = Integer.parseInt(args[3]);
-                    org.bukkit.World world = org.bukkit.Bukkit.getWorlds().get(0);
-                    sender.sendMessage(Component.text(String.format(Locale.ROOT, "(%d,%d,%d): %s",
-                            bx, by, bz, world.getBlockAt(bx, by, bz).getBlockData().getAsString()),
+                    org.bukkit.World world = args.length == 5
+                            ? org.bukkit.Bukkit.getWorld(args[4])
+                            : org.bukkit.Bukkit.getWorlds().get(0);
+                    if (world == null) {
+                        sender.sendMessage(Component.text("Unknown world: " + args[4], NamedTextColor.RED));
+                        return true;
+                    }
+                    sender.sendMessage(Component.text(String.format(Locale.ROOT, "%s(%d,%d,%d): %s",
+                            world.getName(), bx, by, bz,
+                            world.getBlockAt(bx, by, bz).getBlockData().getAsString()),
                             NamedTextColor.AQUA));
                 } catch (NumberFormatException e) {
                     sender.sendMessage(Component.text("Coordinates must be integers.", NamedTextColor.RED));
                 }
+                return true;
+            }
+            case "fluidprobe" -> {
+                if (args.length != 4 && args.length != 5) {
+                    sender.sendMessage(Component.text(
+                            "Usage: /cubeworld fluidprobe <x> <y> <z> [world]", NamedTextColor.RED));
+                    return true;
+                }
+                int fx = Integer.parseInt(args[1]);
+                int fy = Integer.parseInt(args[2]);
+                int fz = Integer.parseInt(args[3]);
+                org.bukkit.World bworld = args.length == 5
+                        ? org.bukkit.Bukkit.getWorld(args[4])
+                        : org.bukkit.Bukkit.getWorlds().get(0);
+                net.minecraft.server.level.ServerLevel level =
+                        ((org.bukkit.craftbukkit.CraftWorld) bworld).getHandle();
+                net.minecraft.core.BlockPos pos = new net.minecraft.core.BlockPos(fx, fy, fz);
+                long before = level.getFluidTicks().count();
+                boolean willTick = level.getFluidTicks().willTickThisTick(pos,
+                        net.minecraft.world.level.material.Fluids.WATER);
+                boolean pending = level.getFluidTicks().hasScheduledTick(pos,
+                        net.minecraft.world.level.material.Fluids.WATER);
+                level.scheduleTick(pos, net.minecraft.world.level.material.Fluids.WATER, 1);
+                long after = level.getFluidTicks().count();
+                sender.sendMessage(Component.text(String.format(Locale.ROOT,
+                        "fluidticks count %d -> %d (pending@pos=%s willTick=%s) gametime=%d",
+                        before, after, pending, willTick, level.getGameTime()),
+                        NamedTextColor.AQUA));
                 return true;
             }
             case "respawn" -> {

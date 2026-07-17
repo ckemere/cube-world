@@ -21,10 +21,10 @@ import org.bukkit.inventory.ItemStack;
  */
 public final class MarginInteractionListener implements Listener {
 
-    private final org.bukkit.plugin.Plugin plugin;
+    private final com.ckemere.cubeworld.CubeWorldPlugin plugin;
     private final MirrorService mirrors;
 
-    public MarginInteractionListener(org.bukkit.plugin.Plugin plugin, MirrorService mirrors) {
+    public MarginInteractionListener(com.ckemere.cubeworld.CubeWorldPlugin plugin, MirrorService mirrors) {
         this.plugin = plugin;
         this.mirrors = mirrors;
     }
@@ -42,6 +42,9 @@ public final class MarginInteractionListener implements Listener {
     @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
     public void onBreak(BlockBreakEvent event) {
         Block block = event.getBlock();
+        if (!plugin.isCubeWorld(block.getWorld())) {
+            return;
+        }
         double x = block.getX() + 0.5;
         double z = block.getZ() + 0.5;
         if (mirrors.isPillar(x, z)) {
@@ -73,6 +76,9 @@ public final class MarginInteractionListener implements Listener {
     @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
     public void onPlace(BlockPlaceEvent event) {
         Block block = event.getBlock();
+        if (!plugin.isCubeWorld(block.getWorld())) {
+            return;
+        }
         double x = block.getX() + 0.5;
         double z = block.getZ() + 0.5;
         if (mirrors.isPillar(x, z)) {
@@ -105,6 +111,9 @@ public final class MarginInteractionListener implements Listener {
             return;
         }
         Block block = event.getClickedBlock();
+        if (!plugin.isCubeWorld(block.getWorld())) {
+            return;
+        }
         if (!mirrors.isMargin(block.getX() + 0.5, block.getZ() + 0.5)) {
             return;
         }

@@ -24,16 +24,19 @@ import org.bukkit.util.Vector;
  */
 public final class SeamTeleportListener implements Listener {
 
-    private final Plugin plugin;
+    private final com.ckemere.cubeworld.CubeWorldPlugin plugin;
     private final SeamService seams;
 
-    public SeamTeleportListener(Plugin plugin, SeamService seams) {
+    public SeamTeleportListener(com.ckemere.cubeworld.CubeWorldPlugin plugin, SeamService seams) {
         this.plugin = plugin;
         this.seams = seams;
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onPlayerMove(PlayerMoveEvent event) {
+        if (!plugin.isCubeWorld(event.getFrom().getWorld())) {
+            return;
+        }
         Location dest = seams.seamDestination(event.getFrom(), event.getTo());
         if (dest == null) {
             return;

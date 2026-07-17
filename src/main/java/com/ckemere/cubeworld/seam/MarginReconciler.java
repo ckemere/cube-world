@@ -30,14 +30,16 @@ public final class MarginReconciler implements Listener {
 
     private final CubeTopology topology;
     private final int marginBlocks;
+    private final World world;
     private final Set<Long> loadedMarginChunks = new LinkedHashSet<>();
     private final ArrayDeque<Long> queue = new ArrayDeque<>();
     private long currentChunk;
     private int cursor = -1;
 
-    public MarginReconciler(CubeTopology topology, int marginBlocks) {
+    public MarginReconciler(CubeTopology topology, int marginBlocks, World world) {
         this.topology = topology;
         this.marginBlocks = marginBlocks;
+        this.world = world;
     }
 
     public void bootstrap(World world) {
@@ -48,12 +50,16 @@ public final class MarginReconciler implements Listener {
 
     @EventHandler
     public void onChunkLoad(ChunkLoadEvent event) {
-        noteLoaded(event.getChunk());
+        if (event.getChunk().getWorld().equals(world)) {
+            noteLoaded(event.getChunk());
+        }
     }
 
     @EventHandler
     public void onChunkUnload(ChunkUnloadEvent event) {
-        loadedMarginChunks.remove(key(event.getChunk().getX(), event.getChunk().getZ()));
+        if (event.getChunk().getWorld().equals(world)) {
+            loadedMarginChunks.remove(key(event.getChunk().getX(), event.getChunk().getZ()));
+        }
     }
 
     private void noteLoaded(Chunk chunk) {
@@ -98,7 +104,12 @@ public final class MarginReconciler implements Listener {
             int chunkX = (int) (currentChunk >> 32);
             int chunkZ = (int) (long) currentChunk;
             if (!world.isChunkLoaded(chunkX, chunkZ)) {
+                // Stale entry (unload raced the event): drop it and charge the
+                // budget — a tick must always make forward progress, or a set
+                // full of unloaded chunks spins this loop forever.
+                loadedMarginChunks.remove(currentChunk);
                 cursor = -1;
+                budget--;
                 continue;
             }
             while (cursor < 256 && budget > 0) {

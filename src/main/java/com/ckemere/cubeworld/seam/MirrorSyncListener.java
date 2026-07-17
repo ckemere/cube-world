@@ -24,18 +24,20 @@ import org.bukkit.plugin.Plugin;
  */
 public final class MirrorSyncListener implements Listener {
 
-    private final Plugin plugin;
+    private final com.ckemere.cubeworld.CubeWorldPlugin plugin;
     private final MirrorService mirrors;
-    private final LiquidSeamService liquidSeams;
 
-    public MirrorSyncListener(Plugin plugin, MirrorService mirrors, LiquidSeamService liquidSeams) {
+    public MirrorSyncListener(com.ckemere.cubeworld.CubeWorldPlugin plugin, MirrorService mirrors) {
         this.plugin = plugin;
         this.mirrors = mirrors;
-        this.liquidSeams = liquidSeams;
     }
 
     /** Push blocks to their mirrors next tick, once the change has applied. */
     private void pushLater(Iterable<Block> blocks) {
+        java.util.Iterator<Block> probe = blocks.iterator();
+        if (!probe.hasNext() || !plugin.isCubeWorld(probe.next().getWorld())) {
+            return;
+        }
         Bukkit.getScheduler().runTask(plugin, () -> {
             for (Block block : blocks) {
                 mirrors.pushToMirrors(block);
@@ -136,6 +138,9 @@ public final class MirrorSyncListener implements Listener {
 
     @EventHandler(ignoreCancelled = true)
     public void onBlockPhysics(BlockPhysicsEvent event) {
+        if (!plugin.isCubeWorld(event.getBlock().getWorld())) {
+            return;
+        }
         if (mirrors.isMargin(event.getBlock().getX() + 0.5, event.getBlock().getZ() + 0.5)) {
             event.setCancelled(true);
         }
@@ -143,6 +148,10 @@ public final class MirrorSyncListener implements Listener {
 
     @EventHandler(ignoreCancelled = true)
     public void onLiquidFlow(BlockFromToEvent event) {
+        var services = plugin.servicesFor(event.getBlock().getWorld());
+        if (services == null) {
+            return;
+        }
         Block to = event.getToBlock();
         if (mirrors.isMargin(to.getX() + 0.5, to.getZ() + 0.5)) {
             // Flow hit the seam: keep the margin inert but continue the flow
@@ -150,7 +159,7 @@ public final class MirrorSyncListener implements Listener {
             event.setCancelled(true);
             Block forwarded = mirrors.forwardLiquid(event.getBlock(), to, event.getFace());
             if (forwarded != null) {
-                liquidSeams.watch(forwarded);
+                services.liquids().watch(forwarded);
             }
         }
     }
@@ -183,6 +192,9 @@ public final class MirrorSyncListener implements Listener {
     @EventHandler(ignoreCancelled = true)
     public void onCreatureSpawn(CreatureSpawnEvent event) {
         if (event.getSpawnReason() != CreatureSpawnEvent.SpawnReason.NATURAL) {
+            return;
+        }
+        if (!plugin.isCubeWorld(event.getLocation().getWorld())) {
             return;
         }
         if (mirrors.isMargin(event.getLocation().getX(), event.getLocation().getZ())) {

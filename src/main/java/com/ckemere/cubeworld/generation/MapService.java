@@ -13,7 +13,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class MapService {
 
     /** Everything the generator needs for one world seed. */
-    public record CubeWorldMap(long seed, MapSampler sampler, CaveCarver carver, CaveBiomes caveBiomes) {
+    public record CubeWorldMap(long seed, MapSampler sampler, MapSampler netherSampler,
+                               CaveCarver carver, CaveBiomes caveBiomes) {
     }
 
     private final CubeTopology topology;
@@ -28,7 +29,10 @@ public final class MapService {
             WorldSeeds seeds = WorldSeeds.from(s);
             MapSampler sampler = new MapSampler(topology,
                     new SphericalDemoSpec(topology.geometry(), seeds));
-            return new CubeWorldMap(s, sampler, new CaveCarver(seeds), new CaveBiomes(seeds));
+            MapSampler netherSampler = new MapSampler(topology,
+                    new NetherDemoSpec(topology.geometry(), seeds));
+            return new CubeWorldMap(s, sampler, netherSampler,
+                    new CaveCarver(seeds), new CaveBiomes(seeds));
         });
     }
 }

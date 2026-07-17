@@ -11,12 +11,13 @@ package com.ckemere.cubeworld.generation;
  * different but still seam-consistent world.
  *
  * <p>Phases are drawn from a SplitMix64 stream over disjoint index ranges:
- * 0–3 terrain height, 4–12 cave carver, 13–16 cave biomes. Add new consumers
- * at the end; never reorder, or existing seeds change meaning.
+ * 0–3 terrain height, 4–12 cave carver, 13–16 cave biomes, 17–20 nether
+ * height, 21–23 nether theme field. Add new consumers at the end; never
+ * reorder, or existing seeds change meaning.
  */
 public final class WorldSeeds {
 
-    private static final int PHASE_COUNT = 24;
+    private static final int PHASE_COUNT = 32;
 
     private final long seed;
     private final double[] phases;

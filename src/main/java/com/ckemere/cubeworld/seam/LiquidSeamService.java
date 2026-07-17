@@ -29,11 +29,13 @@ public final class LiquidSeamService implements Listener {
 
     private final CubeTopology topology;
     private final MirrorService mirrors;
+    private final World world;
     private final Set<Long> watched = new HashSet<>();
 
-    public LiquidSeamService(CubeTopology topology, MirrorService mirrors) {
+    public LiquidSeamService(CubeTopology topology, MirrorService mirrors, World world) {
         this.topology = topology;
         this.mirrors = mirrors;
+        this.world = world;
     }
 
     /** Register a block that received liquid forwarded across a seam. */
@@ -45,7 +47,9 @@ public final class LiquidSeamService implements Listener {
     @EventHandler
     public void onChunkLoad(ChunkLoadEvent event) {
         Chunk chunk = event.getChunk();
-        World world = chunk.getWorld();
+        if (!chunk.getWorld().equals(this.world)) {
+            return;
+        }
         int baseX = chunk.getX() << 4;
         int baseZ = chunk.getZ() << 4;
         for (int lx = 0; lx < 16; lx++) {

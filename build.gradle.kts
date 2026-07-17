@@ -31,6 +31,10 @@ tasks {
 
     runServer {
         minecraftVersion("26.2")
+        // Pin the Paper build. Without a pin, run-paper silently upgrades to
+        // the latest beta on its update-check TTL, changing the server under
+        // the dev world between sessions. Bump deliberately.
+        build(60)
     }
 
     processResources {
