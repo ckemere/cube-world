@@ -107,6 +107,48 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                 }
                 return true;
             }
+            case "scan" -> {
+                if (args.length != 8 && args.length != 9) {
+                    sender.sendMessage(Component.text(
+                            "Usage: /cubeworld scan <x1> <y1> <z1> <x2> <y2> <z2> <material> [world]",
+                            NamedTextColor.RED));
+                    return true;
+                }
+                int[] c = new int[6];
+                for (int i = 0; i < 6; i++) {
+                    c[i] = Integer.parseInt(args[i + 1]);
+                }
+                org.bukkit.Material want = org.bukkit.Material.matchMaterial(args[7]);
+                if (want == null) {
+                    sender.sendMessage(Component.text("Unknown material: " + args[7], NamedTextColor.RED));
+                    return true;
+                }
+                org.bukkit.World sworld = args.length == 9
+                        ? org.bukkit.Bukkit.getWorld(args[8])
+                        : org.bukkit.Bukkit.getWorlds().get(0);
+                if (sworld == null) {
+                    sender.sendMessage(Component.text("Unknown world: " + args[8], NamedTextColor.RED));
+                    return true;
+                }
+                int count = 0;
+                StringBuilder first = new StringBuilder();
+                for (int x = Math.min(c[0], c[3]); x <= Math.max(c[0], c[3]); x++) {
+                    for (int y = Math.min(c[1], c[4]); y <= Math.max(c[1], c[4]); y++) {
+                        for (int z = Math.min(c[2], c[5]); z <= Math.max(c[2], c[5]); z++) {
+                            if (sworld.getBlockAt(x, y, z).getType() == want) {
+                                if (count < 5) {
+                                    first.append(String.format(Locale.ROOT, " (%d,%d,%d)", x, y, z));
+                                }
+                                count++;
+                            }
+                        }
+                    }
+                }
+                sender.sendMessage(Component.text(String.format(Locale.ROOT,
+                        "scan %s in %s: %d match(es)%s", want, sworld.getName(), count, first),
+                        NamedTextColor.AQUA));
+                return true;
+            }
             case "fluidprobe" -> {
                 if (args.length != 4 && args.length != 5) {
                     sender.sendMessage(Component.text(
