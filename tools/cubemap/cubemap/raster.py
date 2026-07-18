@@ -26,6 +26,15 @@ class EquirectRaster:
             g = g[::-1]
         return cls(g)
 
+    @classmethod
+    def load_geotiff(cls, path):
+        """Load a north-up global equirectangular GeoTIFF (e.g. WorldClim),
+        masking the -3.4e38 nodata to NaN."""
+        import tifffile
+        g = tifffile.imread(path).astype(np.float32)
+        g = np.where(g < -1e30, np.nan, g)
+        return cls(g)
+
     def sample(self, lon, lat):
         """Bilinear sample at lon/lat arrays (degrees). Returns float array."""
         fx = (lon + 180.0) / 360.0 * self.w
@@ -85,6 +94,68 @@ def _ramp(val, table):
         out[..., k] = np.where(below, end_lo[k], out[..., k])
         out[..., k] = np.where(above, end_hi[k], out[..., k])
     return out
+
+
+# Whittaker biome color field: rows = temperature anchors (cold->hot),
+# cols = precipitation anchors (dry->wet). Bilinear-interpolated for smoothness.
+_TEMP_ANCHORS = np.array([-15.0, 0.0, 10.0, 22.0, 30.0])
+_PREC_ANCHORS = np.array([0.0, 250.0, 600.0, 1200.0, 2500.0])
+_BIOME_GRID = np.array([
+    # arid        semi-arid      moderate       wet            very wet
+    [[214,216,222],[168,172,158],[150,158,140],[236,240,246],[236,240,246]],  # -15 arctic/tundra
+    [[150,150,120],[96,120,86],  [70,102,72],   [56,92,64],    [50,86,60]],    #   0 boreal/taiga
+    [[178,172,112],[156,166,102],[100,140,82],  [82,128,74],   [60,110,70]],   #  10 temperate
+    [[216,194,150],[192,180,112],[150,162,88],  [98,148,74],   [60,124,66]],   #  22 warm/subtropical
+    [[222,200,150],[204,186,120],[178,174,92],  [92,148,70],   [46,114,58]],   #  30 hot/tropical
+], dtype=np.float32)
+
+
+def _bilerp_grid(temp, precip):
+    t = np.clip(temp, _TEMP_ANCHORS[0], _TEMP_ANCHORS[-1])
+    p = np.clip(precip, _PREC_ANCHORS[0], _PREC_ANCHORS[-1])
+    ti = np.clip(np.searchsorted(_TEMP_ANCHORS, t) - 1, 0, len(_TEMP_ANCHORS) - 2)
+    pi = np.clip(np.searchsorted(_PREC_ANCHORS, p) - 1, 0, len(_PREC_ANCHORS) - 2)
+    tf = (t - _TEMP_ANCHORS[ti]) / (_TEMP_ANCHORS[ti + 1] - _TEMP_ANCHORS[ti])
+    pf = (p - _PREC_ANCHORS[pi]) / (_PREC_ANCHORS[pi + 1] - _PREC_ANCHORS[pi])
+    tf = tf[..., None]; pf = pf[..., None]
+    c00 = _BIOME_GRID[ti, pi]; c01 = _BIOME_GRID[ti, pi + 1]
+    c10 = _BIOME_GRID[ti + 1, pi]; c11 = _BIOME_GRID[ti + 1, pi + 1]
+    return (c00 * (1 - tf) * (1 - pf) + c01 * (1 - tf) * pf
+            + c10 * tf * (1 - pf) + c11 * tf * pf)
+
+
+def biome_rgb(elev, temp, precip, lat):
+    """Realistic land color from climate (temp/precip) + elevation relief +
+    latitude snow line; bathymetry for ocean. Arrays throughout."""
+    elev = np.asarray(elev, dtype=np.float32)
+    lat = np.asarray(lat, dtype=np.float32)
+    temp = np.asarray(temp, dtype=np.float32)
+    precip = np.asarray(precip, dtype=np.float32)
+    # climate nodata on coastal land: fall back to a latitude temp proxy + mild precip
+    temp = np.where(np.isnan(temp), 27.0 - np.abs(lat) * 0.65, temp)
+    precip = np.where(np.isnan(precip), 700.0, precip)
+
+    land = elev >= 0
+    sea = _ramp(elev, _SEA)
+    col = _bilerp_grid(temp, precip)
+
+    # rock browning on high slopes
+    rock = np.clip((elev - 2400.0) / 1600.0, 0, 1)[..., None]
+    col = col * (1 - rock) + np.array([150, 134, 118], np.float32) * rock
+    # Snow/ice from CLIMATE, not latitude: WorldClim temp already bakes in the
+    # elevation lapse, so permanent ice = very cold annual temp (Greenland,
+    # Antarctica), and alpine snow = above a temp-set snow line (peaks only).
+    # This keeps cold-but-forested Siberia/Canada as taiga, not ice.
+    ice_f = np.clip((-14.0 - temp) / 6.0, 0, 1)
+    snowline = 3200.0 + temp * 70.0
+    snow_f = np.clip((elev - snowline) / 500.0, 0, 1)
+    white_f = np.maximum(ice_f, snow_f)[..., None]
+    col = col * (1 - white_f) + np.array([248, 249, 252], np.float32) * white_f
+
+    out = np.where(land[..., None], col, sea)
+    ice = (~land) & (np.abs(lat) > 70)
+    out = np.where(ice[..., None], np.array([228, 236, 244], np.float32), out)
+    return out.astype(np.uint8)
 
 
 def hypsometric_rgb(elev, lat):

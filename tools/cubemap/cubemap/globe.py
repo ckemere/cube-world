@@ -10,7 +10,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from .geometry import CubeProjection, FACES
-from .raster import hypsometric_rgb
+from .raster import hypsometric_rgb, biome_rgb, EquirectRaster
 
 RIVER_COL = (70, 120, 175)
 LAKE_COL = (52, 118, 150)
@@ -63,10 +63,16 @@ def _project_runs(proj, verts, face, size):
 FACE_ORDER = ["NORTH_POLE", "SOUTH_POLE", "EQ_PRIME", "EQ_BACK", "EQ_EAST", "EQ_WEST"]
 
 
-def render_face(proj: CubeProjection, raster, face, size=1024, rivers=None, lakes=None):
+def render_face(proj: CubeProjection, raster, face, size=1024, rivers=None, lakes=None,
+                climate=None):
     lon, lat = proj.face_lonlat_grid(face, size)
     elev = raster.sample(lon, lat)
-    rgb = hypsometric_rgb(elev, lat)
+    if climate is not None:
+        temp = climate[0].sample(lon, lat)
+        precip = climate[1].sample(lon, lat)
+        rgb = biome_rgb(elev, temp, precip, lat)
+    else:
+        rgb = hypsometric_rgb(elev, lat)
     if rivers or lakes:
         im = Image.fromarray(rgb)
         d = ImageDraw.Draw(im)
@@ -104,13 +110,18 @@ def _img_data_uri(rgb, quality=88):
 
 def build_html(proj: CubeProjection, raster, face_size=1024, title="CubeWorld — Earth",
                data_dir=None):
-    rivers = lakes = None
+    rivers = lakes = climate = None
     if data_dir:
         rp = os.path.join(data_dir, "ne_10m_rivers_lake_centerlines.geojson")
         lp = os.path.join(data_dir, "ne_10m_lakes.geojson")
         rivers = _load_lines(rp) if os.path.exists(rp) else None
         lakes = _load_rings(lp) if os.path.exists(lp) else None
-    faces = {f: _img_data_uri(render_face(proj, raster, f, face_size, rivers, lakes)[0])
+        tp = os.path.join(data_dir, "wc2.1_10m_bio_1.tif")
+        pp = os.path.join(data_dir, "wc2.1_10m_bio_12.tif")
+        if os.path.exists(tp) and os.path.exists(pp):
+            climate = (EquirectRaster.load_geotiff(tp), EquirectRaster.load_geotiff(pp))
+    faces = {f: _img_data_uri(
+                 render_face(proj, raster, f, face_size, rivers, lakes, climate)[0])
              for f in FACES}
     # order the six data URIs to match the JS FACE_ORDER
     uris = [faces[f] for f in FACE_ORDER]
