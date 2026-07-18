@@ -69,8 +69,16 @@ def rotation_matrix(roll_deg, tilt_deg):
     return rx @ ry
 
 
+# Locked Earth-map orientation (chosen 2026-07-18): roll -70 about the polar
+# axis, poles pinned to geographic poles. Best balance found over the full
+# 90-degree period — 2 land pillars (US Southwest, Iran), clean Atlantic +
+# Pacific seams, lowest seam-over-land (7%). See tools/cubemap analysis.
+EARTH_ROLL_DEG = -70.0
+EARTH_TILT_DEG = 0.0
+
+
 class CubeProjection:
-    def __init__(self, roll_deg=-75.0, tilt_deg=0.0):
+    def __init__(self, roll_deg=EARTH_ROLL_DEG, tilt_deg=EARTH_TILT_DEG):
         self.roll_deg = roll_deg
         self.tilt_deg = tilt_deg
         self.R = rotation_matrix(roll_deg, tilt_deg)
