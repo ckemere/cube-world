@@ -98,6 +98,28 @@ public final class CubeWorldPlugin extends JavaPlugin {
                 }
             }
         });
+        // Exploration achievements: write the advancement datapack into each
+        // cube overworld (reloading data only when it is first created), then
+        // poll for poles / summits / circumnavigation once a second.
+        ExplorationAchievements exploration = new ExplorationAchievements(this, maps);
+        getServer().getScheduler().runTask(this, () -> {
+            boolean wrote = false;
+            for (World world : getServer().getWorlds()) {
+                if (isCubeWorld(world) && world.getEnvironment() == World.Environment.NORMAL) {
+                    // getWorldFolder() points at the dimension subfolder on
+                    // Paper 26.x; datapacks are scanned from the world root.
+                    java.io.File worldRoot =
+                            new java.io.File(getServer().getWorldContainer(), world.getName());
+                    wrote |= ExplorationAchievements.writeDatapack(worldRoot);
+                }
+            }
+            if (wrote) {
+                getLogger().info("Exploration datapack written; reloading data.");
+                getServer().reloadData();
+            }
+        });
+        getServer().getScheduler().runTaskTimer(this, exploration::tick, 100L, 20L);
+
         CubeWorldCommand executor = new CubeWorldCommand(geometry, seams, mirrors, maps);
         PluginCommand command = getCommand("cubeworld");
         if (command != null) {
