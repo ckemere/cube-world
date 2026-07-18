@@ -57,7 +57,7 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                 if (!onFace && !inMargin) {
                     continue; // deep void
                 }
-                double exactHeight = sampler.heightAt(wx, wz);
+                double exactHeight = sampler.heightAt(wx, wz) + ridgeDetail(sampler, wx, wz);
                 int height = (int) Math.round(exactHeight);
                 TerrainTheme theme = sampler.themeAt(wx, wz);
                 chunkData.setRegion(lx, minY, lz, lx + 1, minY + 1, lz + 1, Material.BEDROCK);
@@ -77,6 +77,38 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                 carveCaves(map, chunkData, lx, lz, wx, wz, minY, exactHeight);
             }
         }
+    }
+
+    /**
+     * Per-block ridge roughness for mountains: the elevation raster is coarse
+     * (2 arc-min), so peaks come out smooth. Add high-frequency noise of the
+     * cube point (seam-safe), scaled by local ruggedness so lowlands stay flat
+     * and only real mountains get jagged — recovering some peak sharpness the
+     * data resolution can't provide.
+     */
+    private double ridgeDetail(MapSampler sampler, double wx, double wz) {
+        EarthData earth = maps.earthData();
+        if (earth == null) {
+            return 0.0;
+        }
+        com.ckemere.cubeworld.geometry.Vec3 p = sampler.cubePointAt(wx, wz);
+        if (p == null) {
+            return 0.0;
+        }
+        double[] ll = earth.toLonLat(p);
+        double elev = earth.sample("height", ll[0], ll[1]);
+        if (elev < 350) {
+            return 0.0;                        // lowlands stay smooth
+        }
+        double rugged = EarthClimate.ruggedness(earth, ll[0], ll[1], elev);
+        double amp = Math.min((rugged - 150.0) / 700.0, 1.0) * 16.0;
+        if (amp <= 0) {
+            return 0.0;
+        }
+        double n = Math.sin(430 * p.x() + 0.3) * Math.cos(410 * p.z() - 0.7)
+                + 0.6 * Math.sin(770 * p.y() + 1.1) * Math.cos(690 * p.x())
+                + 0.3 * Math.sin(1500 * p.z() + 0.5) * Math.cos(1400 * p.x());
+        return amp * Math.max(-1.0, Math.min(1.0, n / 1.7));
     }
 
     /** Carve seam-consistent caves into a finished column (air, lava at the bottom). */
