@@ -50,6 +50,42 @@ class EquirectRaster:
         return v
 
 
+class SeaIceRaster:
+    """NSIDC G10010 Arctic sea-ice concentration climatology (Northern
+    Hemisphere only, 30-90N). sample() returns mean % concentration, or NaN
+    outside coverage so callers can fall back to a proxy for the south."""
+
+    def __init__(self, grid, lat, lon):
+        self.grid = grid
+        self.lat, self.lon = lat, lon
+        self.lat0, self.dlat = lat[0], lat[1] - lat[0]
+        self.lon0, self.dlon = lon[0], lon[1] - lon[0]
+        self.nlat, self.nlon = len(lat), len(lon)
+
+    @classmethod
+    def load_g10010(cls, path, years=30):
+        import netCDF4
+        d = netCDF4.Dataset(path)
+        conc = d.variables["seaice_conc"]
+        a = conc[-years * 12:].astype(np.float32)
+        a = np.where(a > 100, np.nan, a)          # land / flag codes -> NaN
+        with np.errstate(invalid="ignore"):
+            import warnings
+            warnings.filterwarnings("ignore", "Mean of empty slice")
+            clim = np.nanmean(a, axis=0)          # 30-year monthly mean (land -> NaN)
+        lat = np.asarray(d.variables["latitude"][:])
+        lon = np.asarray(d.variables["longitude"][:])
+        return cls(clim, lat, lon)
+
+    def sample(self, lon, lat):
+        lonq = np.mod(lon, 360.0)
+        i = np.round((lat - self.lat0) / self.dlat).astype(int)
+        j = np.mod(np.round((lonq - self.lon0) / self.dlon).astype(int), self.nlon)
+        inside = (i >= 0) & (i < self.nlat)
+        v = self.grid[np.clip(i, 0, self.nlat - 1), j]
+        return np.where(inside, v, np.nan)
+
+
 # hypsometric palette: (elevation_m, (r,g,b)). Land above 0, bathymetry below.
 _LAND = [
     (0,    (96, 150, 82)),
@@ -124,9 +160,11 @@ def _bilerp_grid(temp, precip):
             + c10 * tf * (1 - pf) + c11 * tf * pf)
 
 
-def biome_rgb(elev, temp, precip, lat):
+def biome_rgb(elev, temp, precip, lat, lon=None, seaice=None):
     """Realistic land color from climate (temp/precip) + elevation relief +
-    latitude snow line; bathymetry for ocean. Arrays throughout."""
+    latitude snow line; bathymetry for ocean. Arrays throughout. If a
+    SeaIceRaster and lon are given, real Arctic ice concentration replaces the
+    latitude proxy wherever the dataset has coverage (Northern Hemisphere)."""
     elev = np.asarray(elev, dtype=np.float32)
     lat = np.asarray(lat, dtype=np.float32)
     temp = np.asarray(temp, dtype=np.float32)
@@ -152,11 +190,16 @@ def biome_rgb(elev, temp, precip, lat):
     white_f = np.maximum(ice_f, snow_f)[..., None]
     col = col * (1 - white_f) + np.array([248, 249, 252], np.float32) * white_f
 
-    # Sea ice: no SST/sea-ice dataset yet, so a latitude proxy — but ramp it
-    # (68->80) instead of a hard cut, or the constant-latitude circles on the
-    # polar faces render as a crisp artificial disk.
-    sea_ice = np.clip((np.abs(lat) - 68.0) / 12.0, 0, 1)[..., None]
-    sea = sea * (1 - sea_ice) + np.array([228, 236, 244], np.float32) * sea_ice
+    # Sea ice: real NSIDC concentration where covered (N. Hemisphere), else a
+    # softened latitude proxy (Southern Ocean — no SH dataset loaded).
+    proxy = np.clip((np.abs(lat) - 68.0) / 12.0, 0, 1)
+    if seaice is not None and lon is not None:
+        conc = seaice.sample(lon, lat) / 100.0
+        ice_f = np.where(np.isnan(conc), proxy, np.clip(conc, 0, 1))
+    else:
+        ice_f = proxy
+    ice_f = ice_f[..., None]
+    sea = sea * (1 - ice_f) + np.array([228, 236, 244], np.float32) * ice_f
     out = np.where(land[..., None], col, sea)
     return out.astype(np.uint8)
 
