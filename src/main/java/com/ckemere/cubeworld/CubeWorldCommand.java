@@ -238,6 +238,9 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                 }
                 return true;
             }
+            case "biomecensus" -> {
+                return handleBiomeCensus(sender, args);
+            }
             case "marginbreak" -> {
                 return handleMarginEdit(sender, args, null);
             }
@@ -253,6 +256,66 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                 return false;
             }
         }
+    }
+
+    /**
+     * Tally the surface biome over the whole planet (all six faces) on a grid,
+     * scaling each sample to step*step blocks. Runs on the calling thread (the
+     * biome function is the same one chunk gen uses concurrently), so a coarse
+     * step keeps the pause short. Usage: /cubeworld biomecensus [step].
+     */
+    private boolean handleBiomeCensus(CommandSender sender, String[] args) {
+        int step = 64;
+        if (args.length >= 2) {
+            try {
+                step = Math.max(16, Integer.parseInt(args[1]));
+            } catch (NumberFormatException e) {
+                sender.sendMessage(Component.text("step must be an integer (>=16).", NamedTextColor.RED));
+                return true;
+            }
+        }
+        org.bukkit.World world = org.bukkit.Bukkit.getWorlds().get(0);
+        if (!(world.getGenerator() instanceof
+                com.ckemere.cubeworld.generation.CubeWorldChunkGenerator gen)) {
+            sender.sendMessage(Component.text("Overworld is not a cube world.", NamedTextColor.RED));
+            return true;
+        }
+        com.ckemere.cubeworld.generation.CubeWorldBiomeProvider bp = gen.biomeProvider();
+        java.util.Map<org.bukkit.block.Biome, Long> counts = new java.util.HashMap<>();
+        long samples = 0;
+        int size = geometry.faceSize();
+        long t0 = System.currentTimeMillis();
+        for (CubeFace face : CubeFace.values()) {
+            int minX = geometry.faceMinX(face);
+            int minZ = geometry.faceMinZ(face);
+            for (int x = minX + step / 2; x < minX + size; x += step) {
+                for (int z = minZ + step / 2; z < minZ + size; z += step) {
+                    counts.merge(bp.surfaceBiome(world, x, z), 1L, Long::sum);
+                    samples++;
+                }
+            }
+        }
+        long blocksPerSample = (long) step * step;
+        long ms = System.currentTimeMillis() - t0;
+        java.util.List<java.util.Map.Entry<org.bukkit.block.Biome, Long>> sorted =
+                new java.util.ArrayList<>(counts.entrySet());
+        sorted.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
+        sender.sendMessage(Component.text(String.format(Locale.ROOT,
+                "Biome census  (step %d, %,d samples, %d biomes, %dms)  1 block ~ 0.95 km2:",
+                step, samples, counts.size(), ms), NamedTextColor.GOLD));
+        sender.sendMessage(Component.text(String.format(Locale.ROOT,
+                "%-26s %16s  %7s", "biome", "blocks", "share"), NamedTextColor.GRAY));
+        for (java.util.Map.Entry<org.bukkit.block.Biome, Long> e : sorted) {
+            sender.sendMessage(Component.text(String.format(Locale.ROOT,
+                    "%-26s %,16d  %6.2f%%",
+                    e.getKey().getKey().getKey(),
+                    e.getValue() * blocksPerSample,
+                    100.0 * e.getValue() / samples), NamedTextColor.AQUA));
+        }
+        sender.sendMessage(Component.text(String.format(Locale.ROOT,
+                "TOTAL surface: %,d blocks  (6 faces x %d^2)",
+                samples * blocksPerSample, size), NamedTextColor.GOLD));
+        return true;
     }
 
     private boolean handleFace(CommandSender sender) {

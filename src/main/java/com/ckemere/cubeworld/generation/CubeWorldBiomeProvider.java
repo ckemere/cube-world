@@ -85,6 +85,16 @@ public final class CubeWorldBiomeProvider extends BiomeProvider {
         return ThemeBlocks.biome(sampler.themeAt(wx, wz));
     }
 
+    /**
+     * The biome at the top of a column — the surface height's biome, used by
+     * the biome-census command to tally the whole planet surface.
+     */
+    public Biome surfaceBiome(WorldInfo worldInfo, int x, int z) {
+        MapSampler sampler = maps.mapFor(worldInfo.getSeed()).sampler();
+        int y = (int) Math.round(sampler.heightAt(x + 0.5, z + 0.5));
+        return getBiome(worldInfo, x, y, z);
+    }
+
     private Biome earthBiome(EarthData earth, MapSampler sampler, double wx, double wz, int y) {
         double[] c = EarthClimate.params(earth, sampler, wx, wz, y);
         if (c == null) {

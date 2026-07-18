@@ -208,6 +208,11 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
         return biomeProvider;
     }
 
+    /** The cube biome provider (for the biome-census command). */
+    public CubeWorldBiomeProvider biomeProvider() {
+        return biomeProvider;
+    }
+
     @Override
     public boolean shouldGenerateNoise() {
         // Demo world: vanilla fills terrain/caves/aquifers/ores from the folded
