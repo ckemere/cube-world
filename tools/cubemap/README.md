@@ -20,14 +20,29 @@ of the OS packages.)
 Run from this directory (`tools/cubemap`):
 
 ```bash
-python -m cubemap all   --roll -75            # base + overlay + net
-python -m cubemap orient --roll -75           # equirect with seam/pillar overlay
-python -m cubemap net    --roll -75 --face-px 400
-python -m cubemap sweep  --from -90 --to -60 --step 5   # contact sheet
+python -m cubemap all   --roll -70            # base + overlay + net
+python -m cubemap orient --roll -70           # equirect with seam/pillar overlay
+python -m cubemap net    --roll -70 --face-px 400
+python -m cubemap sweep  --from -90 --to -60 --step 5 --mode overlay   # contact sheet
+python -m cubemap globe                        # spinnable WebGL globe (real elevation)
 ```
 
 Outputs land in `out/`. Natural Earth coastline data auto-downloads to `data/`
-on first run.
+on first run. The default orientation is the locked `EARTH_ROLL_DEG` (−70°).
+
+### globe
+
+`globe` reprojects real ETOPO 2022 elevation onto the six faces (hypsometric
+tint + latitude snow line), inlines them as JPEG data URIs, and emits a
+self-contained `out/globe.html` — a drag-to-spin cube that morphs to a sphere,
+raw WebGL so it runs under the artifact CSP with no libraries. It needs the
+ETOPO grid at `data/etopo_60s.nc`:
+
+```bash
+curl -o data/etopo_60s.nc \
+  "https://www.ngdc.noaa.gov/thredds/fileServer/global/ETOPO2022/60s/60s_surface_elev_netcdf/ETOPO_2022_v1_60s_N90W180_surface.nc"
+python3 -m pip install --user --break-system-packages netCDF4
+```
 
 - **red lines** = the 4 equatorial seams + the 2 polar-face boundaries
 - **yellow dot** = pillar over ocean, **orange dot** = pillar over land

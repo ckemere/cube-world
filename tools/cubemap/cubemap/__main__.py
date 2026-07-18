@@ -55,8 +55,30 @@ def main(argv=None):
     ps.add_argument("--face-px", type=int, default=200)
     ps.add_argument("--mode", choices=["net", "overlay"], default="net")
 
+    pg = sub.add_parser("globe", help="spinnable WebGL globe from real elevation (ETOPO)")
+    pg.add_argument("--roll", type=float, default=None)
+    pg.add_argument("--tilt", type=float, default=0.0)
+    pg.add_argument("--etopo", default=os.path.join(DATA, "etopo_60s.nc"))
+    pg.add_argument("--face-px", type=int, default=1024)
+
     a = p.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
+
+    if a.cmd == "globe":
+        from .raster import EquirectRaster
+        from .geometry import CubeProjection, EARTH_ROLL_DEG
+        from .globe import build_html
+        roll = EARTH_ROLL_DEG if a.roll is None else a.roll
+        raster = EquirectRaster.load_etopo(a.etopo)
+        proj = CubeProjection(roll, a.tilt)
+        html = build_html(proj, raster, face_size=a.face_px,
+                          title=f"CubeWorld - Earth at roll {roll:g}")
+        f = os.path.join(a.out, "globe.html")
+        with open(f, "w") as fh:
+            fh.write(html)
+        print(f"wrote {f} ({len(html)/1e6:.2f} MB)")
+        return
+
     base = get_base(a.width)
 
     if a.cmd in ("orient", "all"):
