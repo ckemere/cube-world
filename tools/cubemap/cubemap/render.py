@@ -134,11 +134,15 @@ def sweep(base, rolls, face_px=200, tilt=0.0, mode="net", thumb_w=760, per_row=N
     if per_row is None:
         per_row = 3 if mode == "overlay" else min(4, len(tiles))
     nrows = (len(tiles) + per_row - 1) // per_row
-    pad = 6
+    pad = 14 if mode == "net" else 6
+    bg = (52, 54, 60) if mode == "net" else (10, 10, 12)
     sheet = Image.new("RGB", (per_row * tw + (per_row + 1) * pad,
-                              nrows * th + (nrows + 1) * pad), (10, 10, 12))
+                              nrows * th + (nrows + 1) * pad), bg)
+    sd = ImageDraw.Draw(sheet)
     for i, t in enumerate(tiles):
         x = pad + (i % per_row) * (tw + pad)
         y = pad + (i // per_row) * (th + pad)
         sheet.paste(t, (x, y))
+        if mode == "net":
+            sd.rectangle([x - 2, y - 2, x + tw + 1, y + th + 1], outline=(230, 230, 235), width=2)
     return sheet
