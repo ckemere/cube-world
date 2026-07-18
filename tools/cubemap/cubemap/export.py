@@ -25,8 +25,8 @@ NODATA = -32768
 
 def _encode(a, scale):
     r = np.round(np.asarray(a, dtype=np.float64) / scale)
-    r = np.where(np.isnan(a), NODATA, r)
-    r = np.clip(r, -32767, 32767)
+    r = np.clip(r, -32767, 32767)                 # clip valid range FIRST
+    r = np.where(np.isnan(a), NODATA, r)           # ...so NODATA (-32768) survives
     return r.astype("<i2")
 
 

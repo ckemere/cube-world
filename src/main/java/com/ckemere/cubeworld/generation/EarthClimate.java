@@ -2,6 +2,8 @@ package com.ckemere.cubeworld.generation;
 
 import com.ckemere.cubeworld.geometry.Vec3;
 
+/* imports for params() below are fully-qualified to keep this list short. */
+
 /**
  * Turns real Earth data into vanilla's six climate parameters (roughly
  * [-1, 1]) so {@link VanillaBiomeMapper} can pick the biome vanilla would.
@@ -30,14 +32,15 @@ public final class EarthClimate {
     private static final double[] TE = {-20, -8, -3, 5, 12, 18, 25, 32};
     private static final double[] TT = {-1.0, -0.5, -0.3, -0.05, 0.2, 0.42, 0.7, 1.0};
 
-    public static double temperature(double tempC, double humidityParam) {
+    public static double temperature(double tempC, double humidityParam, boolean land) {
         double base = interp(tempC, TE, TT);
-        // Vanilla's hottest row is desert regardless of moisture, and jungle/
-        // savanna live one row cooler. Real tropics (desert, savanna, jungle)
-        // all share ~hot mean temps, so: keep only genuinely arid tropics in
-        // the hot row (desert); drop the rest to the warm row, where humidity
-        // then selects jungle (wet) vs savanna (dry).
-        if (base > 0.55 && humidityParam >= -0.65) {
+        // Land only: vanilla's hottest row is desert regardless of moisture,
+        // and jungle/savanna live one row cooler. Real tropics (desert,
+        // savanna, jungle) share ~hot mean temps, so keep only genuinely arid
+        // tropics in the hot row (desert) and drop the rest to the warm row,
+        // where humidity selects jungle (wet) vs savanna (dry). Over ocean we
+        // skip this so tropical seas stay warm (coral) rather than lukewarm.
+        if (land && base > 0.55 && humidityParam >= -0.65) {
             base = 0.35;
         }
         return clamp(base, -1, 1);
@@ -81,7 +84,57 @@ public final class EarthClimate {
     }
 
     public static double depth(double surfaceY, int y) {
-        return clamp((surfaceY - y) / 48.0, -0.1, 1.2);
+        // Cave biomes live at depth 0.2-0.9; cap there so the deep underground
+        // sits firmly in that band (surface biome fades out ~14 blocks down).
+        return clamp((surfaceY - y) / 70.0, -0.1, 0.9);
+    }
+
+    /**
+     * The full 6-parameter vanilla climate at a world position, plus the raw
+     * elev/temp/precip for debugging. Returns null off the net. Layout:
+     * [temperature, humidity, continentalness, erosion, depth, weirdness,
+     *  elevM, tempC, precipMm].
+     */
+    public static double[] params(EarthData earth, MapSampler sampler,
+                                  double wx, double wz, int y) {
+        Vec3 p = sampler.cubePointAt(wx, wz);
+        if (p == null) {
+            return null;
+        }
+        double[] ll = earth.toLonLat(p);
+        double lon = ll[0];
+        double lat = ll[1];
+        double elev = earth.sample("height", lon, lat);
+        double temp = earth.sample("temp", lon, lat);
+        double precip = earth.sample("precip", lon, lat);
+        boolean land = elev >= 0;
+        if (Double.isNaN(temp)) {
+            // WorldClim is land-only; oceans use a gentle latitude proxy (water
+            // is thermally milder than the air-temp lapse, so a soft slope).
+            temp = 27.0 - Math.abs(lat) * 0.45;
+        }
+        if (Double.isNaN(precip)) {
+            precip = 700.0;
+        }
+        double rugged = ruggedness(earth, lon, lat, elev);
+        double surfaceY = sampler.heightAt(wx, wz);
+        double h = humidity(precip);
+        return new double[] {
+                temperature(temp, h, land), h, continentalness(elev), erosion(rugged),
+                depth(surfaceY, y), weirdness(p, elev), elev, temp, precip};
+    }
+
+    /** Local relief in metres, ~0.08 deg (~9 km) around the point. */
+    public static double ruggedness(EarthData earth, double lon, double lat, double elev) {
+        double d = 0.08;
+        double max = 0;
+        for (double[] o : new double[][] {{d, 0}, {-d, 0}, {0, d}, {0, -d}}) {
+            double hh = earth.sample("height", lon + o[0], lat + o[1]);
+            if (!Double.isNaN(hh)) {
+                max = Math.max(max, Math.abs(hh - elev));
+            }
+        }
+        return max;
     }
 
     private static double interp(double x, double[] xs, double[] ys) {

@@ -107,6 +107,31 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                 }
                 return true;
             }
+            case "climateat" -> {
+                if (args.length != 3 && args.length != 4) {
+                    sender.sendMessage(Component.text("Usage: /cubeworld climateat <x> <z> [y]", NamedTextColor.RED));
+                    return true;
+                }
+                int bx = Integer.parseInt(args[1]);
+                int bz = Integer.parseInt(args[2]);
+                com.ckemere.cubeworld.generation.EarthData earth = maps.earthData();
+                if (earth == null) {
+                    sender.sendMessage(Component.text("No Earth data loaded.", NamedTextColor.YELLOW));
+                    return true;
+                }
+                int by = args.length == 4 ? Integer.parseInt(args[3])
+                        : (int) Math.round(sampler().heightAt(bx + 0.5, bz + 0.5));
+                double[] c = com.ckemere.cubeworld.generation.EarthClimate.params(
+                        earth, sampler(), bx + 0.5, bz + 0.5, by);
+                if (c == null) {
+                    sender.sendMessage(Component.text("off net", NamedTextColor.YELLOW));
+                    return true;
+                }
+                sender.sendMessage(Component.text(String.format(Locale.ROOT,
+                        "T=%.2f H=%.2f C=%.2f E=%.2f D=%.2f W=%.2f | elev=%.0f temp=%.1f precip=%.0f",
+                        c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8]), NamedTextColor.AQUA));
+                return true;
+            }
             case "biomeat" -> {
                 if (args.length != 3 && args.length != 4) {
                     sender.sendMessage(Component.text("Usage: /cubeworld biomeat <x> <z> [y]", NamedTextColor.RED));

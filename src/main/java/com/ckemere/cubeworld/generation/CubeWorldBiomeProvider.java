@@ -86,45 +86,11 @@ public final class CubeWorldBiomeProvider extends BiomeProvider {
     }
 
     private Biome earthBiome(EarthData earth, MapSampler sampler, double wx, double wz, int y) {
-        Vec3 p = sampler.cubePointAt(wx, wz);
-        if (p == null) {
+        double[] c = EarthClimate.params(earth, sampler, wx, wz, y);
+        if (c == null) {
             return Biome.THE_VOID;
         }
-        double[] ll = earth.toLonLat(p);
-        double lon = ll[0];
-        double lat = ll[1];
-        double elev = earth.sample("height", lon, lat);
-        double temp = earth.sample("temp", lon, lat);
-        double precip = earth.sample("precip", lon, lat);
-        if (Double.isNaN(temp)) {
-            temp = 27.0 - Math.abs(lat) * 0.65;
-        }
-        if (Double.isNaN(precip)) {
-            precip = 700.0;
-        }
-        double rugged = ruggedness(earth, lon, lat, elev);
-        double surfaceY = sampler.heightAt(wx, wz);
-        double humidityParam = EarthClimate.humidity(precip);
-        return vanilla().biome(
-                EarthClimate.temperature(temp, humidityParam),
-                humidityParam,
-                EarthClimate.continentalness(elev),
-                EarthClimate.erosion(rugged),
-                EarthClimate.depth(surfaceY, y),
-                EarthClimate.weirdness(p, elev));
-    }
-
-    /** Local relief in metres, ~0.08 deg (~9 km) around the point. */
-    private static double ruggedness(EarthData earth, double lon, double lat, double elev) {
-        double d = 0.08;
-        double max = 0;
-        for (double[] o : new double[][] {{d, 0}, {-d, 0}, {0, d}, {0, -d}}) {
-            double h = earth.sample("height", lon + o[0], lat + o[1]);
-            if (!Double.isNaN(h)) {
-                max = Math.max(max, Math.abs(h - elev));
-            }
-        }
-        return max;
+        return vanilla().biome(c[0], c[1], c[2], c[3], c[4], c[5]);
     }
 
     @Override
