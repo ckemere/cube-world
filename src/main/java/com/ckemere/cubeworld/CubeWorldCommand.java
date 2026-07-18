@@ -107,6 +107,26 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                 }
                 return true;
             }
+            case "biomeat" -> {
+                if (args.length != 3 && args.length != 4) {
+                    sender.sendMessage(Component.text("Usage: /cubeworld biomeat <x> <z> [y]", NamedTextColor.RED));
+                    return true;
+                }
+                try {
+                    int bx = Integer.parseInt(args[1]);
+                    int bz = Integer.parseInt(args[2]);
+                    org.bukkit.World world = org.bukkit.Bukkit.getWorlds().get(0);
+                    world.getChunkAt(bx >> 4, bz >> 4).load(true);
+                    int by = args.length == 4 ? Integer.parseInt(args[3])
+                            : (int) Math.round(sampler().heightAt(bx + 0.5, bz + 0.5));
+                    org.bukkit.block.Biome b = world.getBiome(bx, by, bz);
+                    sender.sendMessage(Component.text(String.format(Locale.ROOT,
+                            "biome at (%d,%d,%d): %s", bx, by, bz, b.getKey()), NamedTextColor.AQUA));
+                } catch (NumberFormatException e) {
+                    sender.sendMessage(Component.text("Coordinates must be integers.", NamedTextColor.RED));
+                }
+                return true;
+            }
             case "scan" -> {
                 if (args.length != 8 && args.length != 9) {
                     sender.sendMessage(Component.text(

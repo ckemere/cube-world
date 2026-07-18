@@ -36,6 +36,10 @@ public final class MapService {
         return earth != null;
     }
 
+    public EarthData earthData() {
+        return earth;
+    }
+
     public CubeWorldMap mapFor(long seed) {
         return cache.computeIfAbsent(seed, s -> {
             WorldSeeds seeds = WorldSeeds.from(s);

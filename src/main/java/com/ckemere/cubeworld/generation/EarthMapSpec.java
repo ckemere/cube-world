@@ -24,9 +24,13 @@ public final class EarthMapSpec implements MapSpec {
 
     public static final int SEA_LEVEL = SphericalDemoSpec.SEA_LEVEL;
 
-    private static final double LAND_EXAGGERATION = 0.020;   // blocks per metre up
+    // ~28.5x vertical exaggeration on land: Everest (8849 m) lands ~252 blocks
+    // above sea, just under the build ceiling, so the full vertical range is
+    // used and every mountain is proportionally taller. Ocean is gentler so
+    // the deepest trench (-10935 m) still clears bedrock.
+    private static final double LAND_EXAGGERATION = 0.0285;  // blocks per metre up
     private static final double OCEAN_SCALE = 0.01145;       // blocks per metre down
-    private static final double LAND_CAP = 250.0;
+    private static final double LAND_CAP = 253.0;
     private static final double OCEAN_CAP = -125.0;
 
     private final CubeGeometry geometry;
