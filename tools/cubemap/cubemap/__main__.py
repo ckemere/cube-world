@@ -53,6 +53,7 @@ def main(argv=None):
     ps.add_argument("--step", type=float, default=15.0)
     ps.add_argument("--tilt", type=float, default=0.0)
     ps.add_argument("--face-px", type=int, default=200)
+    ps.add_argument("--mode", choices=["net", "overlay"], default="net")
 
     a = p.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
@@ -79,8 +80,8 @@ def main(argv=None):
         while x <= a.hi + 1e-6:
             rolls.append(round(x, 3))
             x += a.step
-        f = os.path.join(a.out, f"sweep_{a.lo:g}_{a.hi:g}_{a.step:g}.png")
-        render.sweep(base, rolls, face_px=a.face_px, tilt=a.tilt).save(f)
+        f = os.path.join(a.out, f"sweep_{a.mode}_{a.lo:g}_{a.hi:g}_{a.step:g}.png")
+        render.sweep(base, rolls, face_px=a.face_px, tilt=a.tilt, mode=a.mode).save(f)
         print("wrote", f)
 
 

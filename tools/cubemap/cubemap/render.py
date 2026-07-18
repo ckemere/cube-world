@@ -100,17 +100,27 @@ def net(base, proj: CubeProjection, face_px=360, label=True):
     return img
 
 
-def sweep(base, rolls, face_px=200, tilt=0.0):
-    """Contact sheet of net previews across a list of rolls."""
+def sweep(base, rolls, face_px=200, tilt=0.0, mode="net", thumb_w=760):
+    """Contact sheet across a list of rolls.
+
+    mode='net'     -> cube-net thumbnails (see continent splits)
+    mode='overlay' -> equirect+seam/pillar thumbnails (see where pillars land)
+    """
     tiles = []
     for roll in rolls:
         proj = CubeProjection(roll_deg=roll, tilt_deg=tilt)
-        im = net(base, proj, face_px=face_px, label=False).convert("RGB")
+        if mode == "overlay":
+            im = overlay(base, proj, label=False).convert("RGB")
+            h = int(im.height * thumb_w / im.width)
+            im = im.resize((thumb_w, h))
+        else:
+            im = net(base, proj, face_px=face_px, label=False).convert("RGB")
         d = ImageDraw.Draw(im)
-        d.text((6, 6), f"roll {roll:g}", fill=(255, 255, 40), font=_font(max(16, face_px // 10)))
+        d.text((6, 6), f"roll {roll:g}", fill=(255, 255, 40),
+               font=_font(max(16, im.width // 24)))
         tiles.append(im)
     tw, th = tiles[0].size
-    per_row = min(4, len(tiles))
+    per_row = 2 if mode == "overlay" else min(4, len(tiles))
     nrows = (len(tiles) + per_row - 1) // per_row
     sheet = Image.new("RGB", (per_row * tw, nrows * th), (10, 10, 12))
     for i, t in enumerate(tiles):
