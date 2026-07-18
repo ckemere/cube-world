@@ -185,8 +185,8 @@ public final class ExplorationAchievements {
             Files.createDirectories(adv);
             boolean[] changed = {false};
             writeIfChanged(root.resolve("pack.mcmeta"),
-                    "{\"pack\":{\"pack_format\":107,"
-                            + "\"description\":\"CubeWorld exploration achievements\"}}", changed);
+                    "{\"pack\":{\"description\":\"CubeWorld exploration achievements\","
+                            + "\"min_format\":[107,0],\"max_format\":107}}", changed);
 
             write(adv, "root", advRoot(), changed);
             write(adv, "north_pole", adv("root", "Top of the World",
