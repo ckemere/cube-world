@@ -138,6 +138,10 @@ MARKER_OVERLAY = r"""
     catch(e){}
     setTimeout(poll,1500);
   }
+  // outward normal of each cube face (globe coords); the marker shows only
+  // when the face the player stands on is turned toward the viewer.
+  var FACE_N={NORTH_POLE:[0,1,0],SOUTH_POLE:[0,-1,0],EQ_PRIME:[0,0,1],
+              EQ_BACK:[0,0,-1],EQ_EAST:[1,0,0],EQ_WEST:[-1,0,0]};
   function loop(){
     // reuse the globe's own matrices + view state (shared script scope)
     var model=mul(rotX(pitch),rotY(yaw));
@@ -150,14 +154,18 @@ MARKER_OVERLAY = r"""
       var pos=[p[0]+(sph[0]-p[0])*morph,p[1]+(sph[1]-p[1])*morph,p[2]+(sph[2]-p[2])*morph];
       var out=1.04, pp=[pos[0]*out,pos[1]*out,pos[2]*out];
       var c=mvv(mvp,[pp[0],pp[1],pp[2],1]);
-      var vz=model[2]*sph[0]+model[6]*sph[1]+model[10]*sph[2]; // near-side test
+      // cull by the player's FACE normal (cube), easing to the position normal
+      // as the cube morphs to a sphere, so the pin only appears on that face.
+      var fn=FACE_N[pl.face]||sph;
+      var cn=[fn[0]+(sph[0]-fn[0])*morph,fn[1]+(sph[1]-fn[1])*morph,fn[2]+(sph[2]-fn[2])*morph];
+      var vz=model[2]*cn[0]+model[6]*cn[1]+model[10]*cn[2]; // face-toward-camera test
       var el=els[pl.name];
       if(!el){el=document.createElement('div');el.className='pmk';
         el.innerHTML='<div class="dot"></div><div class="lbl"></div>';
         cont.appendChild(el);els[pl.name]=el;
         el.querySelector('.lbl').textContent=pl.name;}
       seen[pl.name]=1;
-      if(c[3]>0 && vz>-0.12){
+      if(c[3]>0 && vz>0.15){
         var sx=(c[0]/c[3]*0.5+0.5)*cv.clientWidth;
         var sy=(1-(c[1]/c[3]*0.5+0.5))*cv.clientHeight;
         el.style.display='block';el.style.left=sx+'px';el.style.top=sy+'px';
