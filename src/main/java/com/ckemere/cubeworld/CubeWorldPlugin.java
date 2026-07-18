@@ -118,6 +118,10 @@ public final class CubeWorldPlugin extends JavaPlugin {
             world.setSpawnLocation(SPAWN_X, Math.max(sy, 64), SPAWN_Z);
             getLogger().info("Overworld spawn set to Ethiopia (" + SPAWN_X + ", " + sy + ", " + SPAWN_Z + ")");
         }
+        if (world.getEnvironment() == World.Environment.NORMAL) {
+            com.ckemere.cubeworld.seam.nms.StrongholdSphereHook.install(
+                    world, geometry, topology, MARGIN_BLOCKS, this, getLogger());
+        }
         LiquidSeamService liquids = new LiquidSeamService(topology, mirrors, world);
         EntityMirrorService entityMirrors = new EntityMirrorService(this, topology, MARGIN_BLOCKS);
         PartnerTicketService tickets = new PartnerTicketService(this, topology, MARGIN_BLOCKS);
