@@ -152,9 +152,12 @@ def biome_rgb(elev, temp, precip, lat):
     white_f = np.maximum(ice_f, snow_f)[..., None]
     col = col * (1 - white_f) + np.array([248, 249, 252], np.float32) * white_f
 
+    # Sea ice: no SST/sea-ice dataset yet, so a latitude proxy — but ramp it
+    # (68->80) instead of a hard cut, or the constant-latitude circles on the
+    # polar faces render as a crisp artificial disk.
+    sea_ice = np.clip((np.abs(lat) - 68.0) / 12.0, 0, 1)[..., None]
+    sea = sea * (1 - sea_ice) + np.array([228, 236, 244], np.float32) * sea_ice
     out = np.where(land[..., None], col, sea)
-    ice = (~land) & (np.abs(lat) > 70)
-    out = np.where(ice[..., None], np.array([228, 236, 244], np.float32), out)
     return out.astype(np.uint8)
 
 
@@ -171,7 +174,8 @@ def hypsometric_rgb(elev, lat):
     white = np.array([248, 249, 252], dtype=np.float32)
     frac = np.clip((elev - snow_line) / 600.0, 0, 1)[..., None]
     col = np.where(snow[..., None], col * (1 - frac) + white * frac, col)
-    # polar sea ice
-    ice = (~land) & (np.abs(lat) > 70)
-    col = np.where(ice[..., None], np.array([228, 236, 244], dtype=np.float32), col)
+    # polar sea ice, ramped (68->80) so polar faces don't show a hard disk
+    sea_ice = np.clip((np.abs(lat) - 68.0) / 12.0, 0, 1)[..., None]
+    seaice_col = np.array([228, 236, 244], dtype=np.float32)
+    col = np.where(land[..., None], col, col * (1 - sea_ice) + seaice_col * sea_ice)
     return col.astype(np.uint8)
