@@ -16,6 +16,12 @@ public final class ThemeBlocks {
             case PLAINS -> Biome.PLAINS;
             case HIGHLANDS -> Biome.WINDSWEPT_HILLS;
             case SNOWCAP -> Biome.SNOWY_PLAINS;
+            case DESERT -> Biome.DESERT;
+            case SAVANNA -> Biome.SAVANNA;
+            case FOREST -> Biome.FOREST;
+            case JUNGLE -> Biome.JUNGLE;
+            case TAIGA -> Biome.TAIGA;
+            case TUNDRA -> Biome.SNOWY_TAIGA;
             case NETHER_WASTES -> Biome.NETHER_WASTES;
             case CRIMSON_FOREST -> Biome.CRIMSON_FOREST;
             case WARPED_FOREST -> Biome.WARPED_FOREST;
@@ -30,6 +36,9 @@ public final class ThemeBlocks {
             case BEACH -> Material.SAND;
             case PLAINS, HIGHLANDS -> Material.GRASS_BLOCK;
             case SNOWCAP -> Material.SNOW_BLOCK;
+            case DESERT -> Material.SAND;
+            case SAVANNA, FOREST, JUNGLE, TAIGA -> Material.GRASS_BLOCK;
+            case TUNDRA -> Material.GRASS_BLOCK;
             case NETHER_WASTES -> Material.NETHERRACK;
             case CRIMSON_FOREST -> Material.CRIMSON_NYLIUM;
             case WARPED_FOREST -> Material.WARPED_NYLIUM;
@@ -44,6 +53,8 @@ public final class ThemeBlocks {
             case BEACH -> Material.SANDSTONE;
             case PLAINS -> Material.DIRT;
             case HIGHLANDS, SNOWCAP -> Material.STONE;
+            case DESERT -> Material.SANDSTONE;
+            case SAVANNA, FOREST, JUNGLE, TAIGA, TUNDRA -> Material.DIRT;
             case NETHER_WASTES, CRIMSON_FOREST, WARPED_FOREST -> Material.NETHERRACK;
             case SOUL_SAND_VALLEY -> Material.SOUL_SOIL;
             case BASALT_DELTAS -> Material.BLACKSTONE;
@@ -51,6 +62,6 @@ public final class ThemeBlocks {
     }
 
     public static boolean snowCovered(TerrainTheme theme) {
-        return theme == TerrainTheme.SNOWCAP;
+        return theme == TerrainTheme.SNOWCAP || theme == TerrainTheme.TUNDRA;
     }
 }

@@ -19,16 +19,30 @@ public final class MapService {
 
     private final CubeTopology topology;
     private final Map<Long, CubeWorldMap> cache = new ConcurrentHashMap<>();
+    private volatile EarthData earth;
 
     public MapService(CubeTopology topology) {
         this.topology = topology;
     }
 
+    /** Supply real Earth rasters; when set, the overworld uses {@link EarthMapSpec}
+     * instead of the demo spec. Call before any chunk generates. */
+    public void setEarthData(EarthData earth) {
+        this.earth = earth;
+        cache.clear();
+    }
+
+    public boolean hasEarthData() {
+        return earth != null;
+    }
+
     public CubeWorldMap mapFor(long seed) {
         return cache.computeIfAbsent(seed, s -> {
             WorldSeeds seeds = WorldSeeds.from(s);
-            MapSampler sampler = new MapSampler(topology,
-                    new SphericalDemoSpec(topology.geometry(), seeds));
+            MapSpec overworldSpec = earth != null
+                    ? new EarthMapSpec(topology.geometry(), earth)
+                    : new SphericalDemoSpec(topology.geometry(), seeds);
+            MapSampler sampler = new MapSampler(topology, overworldSpec);
             MapSampler netherSampler = new MapSampler(topology,
                     new NetherDemoSpec(topology.geometry(), seeds));
             return new CubeWorldMap(s, sampler, netherSampler,

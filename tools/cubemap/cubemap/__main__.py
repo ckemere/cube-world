@@ -61,8 +61,25 @@ def main(argv=None):
     pg.add_argument("--etopo", default=os.path.join(DATA, "etopo_60s.nc"))
     pg.add_argument("--face-px", type=int, default=1024)
 
+    pe = sub.add_parser("export", help="export Earth rasters as the CWE1 binary for the plugin")
+    pe.add_argument("--roll", type=float, default=None)
+    pe.add_argument("--height-step", type=int, default=2, help="ETOPO downsample (2 = 2 arc-min)")
+    pe.add_argument("--dest", default=os.path.join(OUT, "earth.dat"))
+
     a = p.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
+
+    if a.cmd == "export":
+        from .raster import EquirectRaster
+        from .geometry import EARTH_ROLL_DEG
+        from .export import export_earth
+        roll = EARTH_ROLL_DEG if a.roll is None else a.roll
+        etopo = EquirectRaster.load_etopo(os.path.join(DATA, "etopo_60s.nc"))
+        temp = EquirectRaster.load_geotiff(os.path.join(DATA, "wc2.1_10m_bio_1.tif"))
+        precip = EquirectRaster.load_geotiff(os.path.join(DATA, "wc2.1_10m_bio_12.tif"))
+        info = export_earth(a.dest, etopo, temp, precip, roll, a.height_step)
+        print(f"wrote {a.dest} ({info['bytes']/1e6:.1f} MB) layers={info['layers']}")
+        return
 
     if a.cmd == "globe":
         from .raster import EquirectRaster

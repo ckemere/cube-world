@@ -11,6 +11,13 @@ public enum TerrainTheme {
     PLAINS,
     HIGHLANDS,
     SNOWCAP,
+    // Earth-map surface themes (climate-classified from real temp/precip).
+    DESERT,
+    SAVANNA,
+    FOREST,
+    JUNGLE,
+    TAIGA,
+    TUNDRA,
     // Nether surface themes (the cube nether is an open hellscape).
     NETHER_WASTES,
     CRIMSON_FOREST,
