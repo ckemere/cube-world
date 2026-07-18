@@ -101,6 +101,24 @@ class CubeProjection:
         x, y, z = cube_point(face, u, v)
         return self.dir_to_lonlat(x, y, z)
 
+    def lonlat_to_face_uv(self, lon_deg, lat_deg):
+        """Inverse of the face reprojection: geographic (lon, lat) -> the face
+        it lands on and its (u, v) in [-1, 1]. Used to draw vector features
+        (rivers, lakes) onto the face textures."""
+        la = math.radians(lat_deg)
+        lo = math.radians(lon_deg)
+        g = np.array([math.cos(la) * math.sin(lo), math.sin(la), math.cos(la) * math.cos(lo)])
+        d = self.R.T @ g  # inverse rotation (R orthonormal)
+        ax, ay, az = abs(d[0]), abs(d[1]), abs(d[2])
+        if ay >= ax and ay >= az:
+            p = d / ay
+            return ("NORTH_POLE", p[0], p[2]) if d[1] > 0 else ("SOUTH_POLE", p[0], -p[2])
+        if az >= ax:
+            p = d / az
+            return ("EQ_PRIME", p[0], -p[1]) if d[2] > 0 else ("EQ_BACK", p[0], p[1])
+        p = d / ax
+        return ("EQ_EAST", -p[1], p[2]) if d[0] > 0 else ("EQ_WEST", p[1], p[2])
+
     def pillars(self):
         """The 8 cube vertices as (lon, lat)."""
         out = []

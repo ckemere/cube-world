@@ -4,20 +4,82 @@ blocks CDN scripts)."""
 from __future__ import annotations
 import base64
 import io
+import json
+import os
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from .geometry import CubeProjection, FACES
 from .raster import hypsometric_rgb
+
+RIVER_COL = (70, 120, 175)
+LAKE_COL = (52, 118, 150)
+
+
+def _load_lines(path):
+    d = json.load(open(path))
+    out = []
+    for feat in d["features"]:
+        g = feat.get("geometry")
+        if not g:
+            continue
+        if g["type"] == "LineString":
+            out.append(g["coordinates"])
+        elif g["type"] == "MultiLineString":
+            out.extend(g["coordinates"])
+    return out
+
+
+def _load_rings(path):
+    d = json.load(open(path))
+    out = []
+    for feat in d["features"]:
+        g = feat.get("geometry")
+        if not g:
+            continue
+        if g["type"] == "Polygon":
+            out.append(g["coordinates"][0])
+        elif g["type"] == "MultiPolygon":
+            for poly in g["coordinates"]:
+                out.append(poly[0])
+    return out
+
+
+def _project_runs(proj, verts, face, size):
+    """Project a lon/lat vertex list to pixel coords on `face`, split into
+    runs that stay on this face (segments crossing to another face break)."""
+    runs, cur = [], []
+    for lon, lat in verts:
+        f, u, v = proj.lonlat_to_face_uv(lon, lat)
+        if f == face:
+            cur.append(((u + 1) / 2 * (size - 1), (v + 1) / 2 * (size - 1)))
+        elif cur:
+            runs.append(cur); cur = []
+    if cur:
+        runs.append(cur)
+    return runs
 
 # Cube net order used by the shader/JS. Each face gets its own texture.
 FACE_ORDER = ["NORTH_POLE", "SOUTH_POLE", "EQ_PRIME", "EQ_BACK", "EQ_EAST", "EQ_WEST"]
 
 
-def render_face(proj: CubeProjection, raster, face, size=1024):
+def render_face(proj: CubeProjection, raster, face, size=1024, rivers=None, lakes=None):
     lon, lat = proj.face_lonlat_grid(face, size)
     elev = raster.sample(lon, lat)
     rgb = hypsometric_rgb(elev, lat)
+    if rivers or lakes:
+        im = Image.fromarray(rgb)
+        d = ImageDraw.Draw(im)
+        for ring in (lakes or []):
+            for run in _project_runs(proj, ring, face, size):
+                if len(run) >= 3:
+                    d.polygon(run, fill=LAKE_COL)
+        w = max(1, size // 700)
+        for line in (rivers or []):
+            for run in _project_runs(proj, line, face, size):
+                if len(run) >= 2:
+                    d.line(run, fill=RIVER_COL, width=w, joint="curve")
+        rgb = np.array(im)
     return rgb, elev
 
 
@@ -40,8 +102,16 @@ def _img_data_uri(rgb, quality=88):
     return "data:image/jpeg;base64," + b64
 
 
-def build_html(proj: CubeProjection, raster, face_size=1024, title="CubeWorld — Earth"):
-    faces = {f: _img_data_uri(render_face(proj, raster, f, face_size)[0]) for f in FACES}
+def build_html(proj: CubeProjection, raster, face_size=1024, title="CubeWorld — Earth",
+               data_dir=None):
+    rivers = lakes = None
+    if data_dir:
+        rp = os.path.join(data_dir, "ne_10m_rivers_lake_centerlines.geojson")
+        lp = os.path.join(data_dir, "ne_10m_lakes.geojson")
+        rivers = _load_lines(rp) if os.path.exists(rp) else None
+        lakes = _load_rings(lp) if os.path.exists(lp) else None
+    faces = {f: _img_data_uri(render_face(proj, raster, f, face_size, rivers, lakes)[0])
+             for f in FACES}
     # order the six data URIs to match the JS FACE_ORDER
     uris = [faces[f] for f in FACE_ORDER]
     uris_js = ",\n".join(f'"{u}"' for u in uris)

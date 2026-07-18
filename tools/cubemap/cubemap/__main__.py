@@ -72,7 +72,7 @@ def main(argv=None):
         raster = EquirectRaster.load_etopo(a.etopo)
         proj = CubeProjection(roll, a.tilt)
         html = build_html(proj, raster, face_size=a.face_px,
-                          title=f"CubeWorld - Earth at roll {roll:g}")
+                          title=f"CubeWorld - Earth at roll {roll:g}", data_dir=DATA)
         f = os.path.join(a.out, "globe.html")
         with open(f, "w") as fh:
             fh.write(html)
