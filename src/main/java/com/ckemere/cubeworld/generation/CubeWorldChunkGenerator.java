@@ -70,6 +70,11 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                 if (height < SEA_LEVEL) {
                     chunkData.setRegion(lx, height + 1, lz, lx + 1, SEA_LEVEL + 1, lz + 1,
                             Material.WATER);
+                } else if (isRiver(sampler, wx, wz)) {
+                    // incise a shallow channel and fill with water (real river path)
+                    chunkData.setBlock(lx, height, lz, Material.AIR);
+                    chunkData.setRegion(lx, height - 3, lz, lx + 1, height, lz + 1, Material.WATER);
+                    chunkData.setBlock(lx, height - 4, lz, Material.GRAVEL);
                 } else if (ThemeBlocks.snowCovered(theme)) {
                     chunkData.setRegion(lx, height + 1, lz, lx + 1, height + 2, lz + 1,
                             Material.SNOW);
@@ -109,6 +114,20 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                 + 0.6 * Math.sin(770 * p.y() + 1.1) * Math.cos(690 * p.x())
                 + 0.3 * Math.sin(1500 * p.z() + 0.5) * Math.cos(1400 * p.x());
         return amp * Math.max(-1.0, Math.min(1.0, n / 1.7));
+    }
+
+    /** True where the Earth river/lake mask marks a watercourse (above sea). */
+    private boolean isRiver(MapSampler sampler, double wx, double wz) {
+        EarthData earth = maps.earthData();
+        if (earth == null || !earth.hasLayer("river")) {
+            return false;
+        }
+        com.ckemere.cubeworld.geometry.Vec3 p = sampler.cubePointAt(wx, wz);
+        if (p == null) {
+            return false;
+        }
+        double[] ll = earth.toLonLat(p);
+        return earth.sample("river", ll[0], ll[1]) > 0.2;
     }
 
     /** Carve seam-consistent caves into a finished column (air, lava at the bottom). */

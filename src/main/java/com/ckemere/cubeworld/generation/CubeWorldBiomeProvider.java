@@ -90,6 +90,23 @@ public final class CubeWorldBiomeProvider extends BiomeProvider {
         if (c == null) {
             return Biome.THE_VOID;
         }
+        // River biome along the real watercourses, at/near the surface only
+        // (c[4]=depth ~0 at surface, c[6]=elev>=0 land, c[7]=tempC).
+        if (c[4] < 0.15 && c[6] >= 0 && earth.hasLayer("river")) {
+            // sample a small neighbourhood so the 4-wide biome cell catches the
+            // thin river the generator carved (rivers are only a few blocks wide)
+            double rmax = 0;
+            for (double[] o : new double[][] {{0, 0}, {2, 0}, {-2, 0}, {0, 2}, {0, -2}}) {
+                Vec3 p = sampler.cubePointAt(wx + o[0], wz + o[1]);
+                if (p != null) {
+                    double[] ll = earth.toLonLat(p);
+                    rmax = Math.max(rmax, earth.sample("river", ll[0], ll[1]));
+                }
+            }
+            if (rmax > 0.2) {
+                return c[7] < -2 ? Biome.FROZEN_RIVER : Biome.RIVER;
+            }
+        }
         return vanilla().biome(c[0], c[1], c[2], c[3], c[4], c[5]);
     }
 

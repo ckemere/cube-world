@@ -77,7 +77,7 @@ def main(argv=None):
         etopo = EquirectRaster.load_etopo(os.path.join(DATA, "etopo_60s.nc"))
         temp = EquirectRaster.load_geotiff(os.path.join(DATA, "wc2.1_10m_bio_1.tif"))
         precip = EquirectRaster.load_geotiff(os.path.join(DATA, "wc2.1_10m_bio_12.tif"))
-        info = export_earth(a.dest, etopo, temp, precip, roll, a.height_step)
+        info = export_earth(a.dest, etopo, temp, precip, roll, a.height_step, DATA)
         print(f"wrote {a.dest} ({info['bytes']/1e6:.1f} MB) layers={info['layers']}")
         return
 
