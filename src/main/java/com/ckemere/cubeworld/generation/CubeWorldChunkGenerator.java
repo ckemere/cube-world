@@ -37,13 +37,15 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
     }
 
     /**
-     * Vanilla places every block on the demo world: the world's noise router is
+     * Vanilla places every block on both worlds: the world's noise router is
      * folded onto the sphere ({@link com.ckemere.cubeworld.generation.SphereDensity}),
-     * so terrain, caves, aquifers and ores come from vanilla's own generator but
-     * seam-consistently. The Earth world keeps its real-elevation column fill.
+     * so terrain, caves, aquifers, lava and ores come from vanilla's own
+     * generator but seam-consistently. On the Earth world the fold also pins the
+     * surface to real elevation (the hybrid); the demo world uses vanilla noise.
+     * Our {@code generateSurface} then only masks off-net gaps and pillars.
      */
     private boolean vanillaTerrain() {
-        return !maps.hasEarthData();
+        return true;
     }
 
     @Override

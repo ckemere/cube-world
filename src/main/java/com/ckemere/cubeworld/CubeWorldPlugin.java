@@ -80,10 +80,12 @@ public final class CubeWorldPlugin extends JavaPlugin {
             @org.bukkit.event.EventHandler
             public void onWorldInit(org.bukkit.event.world.WorldInitEvent e) {
                 World w = e.getWorld();
-                if (isCubeWorld(w) && w.getEnvironment() == World.Environment.NORMAL
-                        && !maps.hasEarthData()) {
+                if (isCubeWorld(w) && w.getEnvironment() == World.Environment.NORMAL) {
+                    // Earth world: terrain follows real elevation (hybrid); demo
+                    // world: pure vanilla noise. Either way vanilla places blocks.
                     com.ckemere.cubeworld.seam.nms.SphereRouterHook.install(
-                            w, maps.mapFor(w.getSeed()).sampler(), FACE_SIZE, getLogger());
+                            w, maps.mapFor(w.getSeed()).sampler(), FACE_SIZE,
+                            maps.hasEarthData(), getLogger());
                 }
             }
         }, this);

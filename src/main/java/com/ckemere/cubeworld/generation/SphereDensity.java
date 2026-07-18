@@ -2,6 +2,7 @@ package com.ckemere.cubeworld.generation;
 
 import com.ckemere.cubeworld.geometry.Vec3;
 import net.minecraft.world.level.levelgen.DensityFunction;
+import net.minecraft.world.level.levelgen.DensityFunctions;
 import net.minecraft.world.level.levelgen.NoiseRouter;
 
 /**
@@ -30,16 +31,31 @@ public final class SphereDensity {
      */
     private static final double RADIUS_FACTOR = 0.64;
 
+    /** Blocks of y per unit of vanilla "depth" (yClampedGradient -64..320, 1.5..-1.5). */
+    private static final double DEPTH_SLOPE = 128.0;
+
     private final MapSampler sampler;
     private final double radius;
+    private final boolean earthHeight;
 
-    private SphereDensity(MapSampler sampler, int faceSize) {
+    private SphereDensity(MapSampler sampler, int faceSize, boolean earthHeight) {
         this.sampler = sampler;
         this.radius = RADIUS_FACTOR * faceSize;
+        this.earthHeight = earthHeight;
     }
 
     public static SphereDensity forSampler(MapSampler sampler, int faceSize) {
-        return new SphereDensity(sampler, faceSize);
+        return new SphereDensity(sampler, faceSize, false);
+    }
+
+    /**
+     * @param earthHeight when true, the terrain surface follows the sampler's
+     *     Earth elevation ({@link MapSampler#heightAt}) instead of vanilla's
+     *     noise offset — the Earth "hybrid": real macro-shape, vanilla caves,
+     *     aquifers, ores and surface underneath.
+     */
+    public static SphereDensity forSampler(MapSampler sampler, int faceSize, boolean earthHeight) {
+        return new SphereDensity(sampler, faceSize, earthHeight);
     }
 
     /** A copy of {@code router} whose noise sampling is folded onto the sphere. */
@@ -166,13 +182,92 @@ public final class SphereDensity {
     private final class SphereVisitor implements DensityFunction.Visitor {
         @Override
         public DensityFunction apply(DensityFunction node) {
-            if (node instanceof Remap) {
+            if (node instanceof Remap || node instanceof EarthDepth) {
                 return node;
             }
-            return switch (node.getClass().getSimpleName()) {
-                case "Noise", "Shift", "ShiftA", "ShiftB", "ShiftedNoise" -> new Remap(node);
-                default -> node;
-            };
+            switch (node.getClass().getSimpleName()) {
+                case "Noise", "Shift", "ShiftA", "ShiftB", "ShiftedNoise" -> {
+                    return new Remap(node);
+                }
+                default -> {
+                }
+            }
+            if (earthHeight && isOffsetToDepth(node)) {
+                return new EarthDepth();
+            }
+            return node;
+        }
+    }
+
+    /**
+     * True for vanilla's {@code depth} node: {@code add(yClampedGradient(-64,
+     * 320, 1.5, -1.5), offset)}. That exact gradient signature is unique to
+     * {@code offsetToDepth}, so matching it (and its use in the preliminary
+     * surface level) swaps every height reference to Earth's in one pass.
+     */
+    private static boolean isOffsetToDepth(DensityFunction node) {
+        if (!(node instanceof DensityFunctions.TwoArgumentSimpleFunction two)
+                || !"ADD".equals(two.type().name())) {
+            return false;
+        }
+        return isDepthGradient(two.argument1()) || isDepthGradient(two.argument2());
+    }
+
+    private static boolean isDepthGradient(DensityFunction df) {
+        if (!"YClampedGradient".equals(df.getClass().getSimpleName())) {
+            return false;
+        }
+        // The record is package-private (reflective accessors throw), so probe
+        // its output instead: offsetToDepth's gradient is -64..320 -> 1.5..-1.5,
+        // i.e. 1.5 at y=-64, 0 at y=128, -1.5 at y=320.
+        return near(df.compute(atY(-64)), 1.5)
+                && near(df.compute(atY(128)), 0.0)
+                && near(df.compute(atY(320)), -1.5);
+    }
+
+    private static DensityFunction.FunctionContext atY(int y) {
+        return new DensityFunction.SinglePointContext(0, y, 0);
+    }
+
+    private static boolean near(double a, double b) {
+        return Math.abs(a - b) < 1e-4;
+    }
+
+    /**
+     * Replacement for vanilla's {@code depth}: 0 at the Earth surface, sloping
+     * -1/128 per block of Y (matching vanilla's gradient) so all the downstream
+     * factor/jaggedness/cheese/cave/aquifer maths behave identically, just
+     * re-centred on the real elevation instead of vanilla's noise offset.
+     */
+    private final class EarthDepth implements DensityFunction {
+        @Override
+        public double compute(FunctionContext c) {
+            double h = sampler.heightAt(c.blockX() + 0.5, c.blockZ() + 0.5);
+            return (h - c.blockY()) / DEPTH_SLOPE;
+        }
+
+        @Override
+        public void fillArray(double[] out, ContextProvider provider) {
+            for (int i = 0; i < out.length; i++) {
+                out[i] = compute(provider.forIndex(i));
+            }
+        }
+
+        @Override
+        public DensityFunction mapAll(Visitor visitor) {
+            return visitor.apply(this);
+        }
+
+        @Override
+        public DensityFunction mapChildren(Visitor visitor) {
+            return this;
+        }
+
+        @Override public double minValue() { return -4.0; }
+        @Override public double maxValue() { return 4.0; }
+        @Override
+        public net.minecraft.util.KeyDispatchDataCodec<? extends DensityFunction> codec() {
+            throw new UnsupportedOperationException("EarthDepth is not serializable");
         }
     }
 }
