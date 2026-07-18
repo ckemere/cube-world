@@ -28,10 +28,13 @@ public final class EarthMapSpec implements MapSpec {
     // above sea, just under the build ceiling, so the full vertical range is
     // used and every mountain is proportionally taller. Ocean is gentler so
     // the deepest trench (-10935 m) still clears bedrock.
-    private static final double LAND_EXAGGERATION = 0.0285;  // blocks per metre up
+    private static final double LAND_EXAGGERATION = 0.0285;  // blocks per metre up (<=HIGH_BREAK)
+    private static final double HIGH_BREAK = 4000.0;         // metres: exaggeration knee
+    private static final double HIGH_EXAGGERATION = 0.0146;  // blocks per metre above HIGH_BREAK
     private static final double OCEAN_SCALE = 0.01145;       // blocks per metre down
     private static final double LAND_CAP = 253.0;
     private static final double OCEAN_CAP = -125.0;
+    private static final double TERRAIN_CEIL = 250.0;        // just under vanilla's top slide
 
     private final CubeGeometry geometry;
     private final CubeSurface surface;
@@ -52,14 +55,25 @@ public final class EarthMapSpec implements MapSpec {
         return earth.toLonLat(p);
     }
 
-    private static double elevationToBlockY(double meters) {
+    public static double elevationToBlockY(double meters) {
         double y;
         if (meters >= 0) {
-            y = SEA_LEVEL + Math.min(meters * LAND_EXAGGERATION, LAND_CAP);
+            // Full exaggeration up to HIGH_BREAK so ordinary ranges tower;
+            // gentler above it so the 6000-8849 m giants stay correctly ordered
+            // and fit under vanilla's terrain top-slide (~y252), which otherwise
+            // clips every 8000er to the same ceiling.
+            double blocks;
+            if (meters <= HIGH_BREAK) {
+                blocks = meters * LAND_EXAGGERATION;
+            } else {
+                blocks = HIGH_BREAK * LAND_EXAGGERATION
+                        + (meters - HIGH_BREAK) * HIGH_EXAGGERATION;
+            }
+            y = SEA_LEVEL + Math.min(blocks, LAND_CAP);
         } else {
             y = SEA_LEVEL + Math.max(meters * OCEAN_SCALE, OCEAN_CAP);
         }
-        return Math.max(-60.0, Math.min(315.0, y));
+        return Math.max(-60.0, Math.min(TERRAIN_CEIL, y));
     }
 
     private static TerrainTheme classify(double elev, double temp, double precip) {

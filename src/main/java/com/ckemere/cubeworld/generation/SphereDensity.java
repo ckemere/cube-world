@@ -37,25 +37,33 @@ public final class SphereDensity {
     private final MapSampler sampler;
     private final double radius;
     private final boolean earthHeight;
+    private final EarthData earth;
+    private final PeakField peaks;
 
-    private SphereDensity(MapSampler sampler, int faceSize, boolean earthHeight) {
+    private SphereDensity(MapSampler sampler, int faceSize, boolean earthHeight, EarthData earth) {
         this.sampler = sampler;
         this.radius = RADIUS_FACTOR * faceSize;
         this.earthHeight = earthHeight;
+        this.earth = earth;
+        this.peaks = (earthHeight && earth != null) ? PeakField.get() : null;
     }
 
     public static SphereDensity forSampler(MapSampler sampler, int faceSize) {
-        return new SphereDensity(sampler, faceSize, false);
+        return new SphereDensity(sampler, faceSize, false, null);
     }
 
     /**
      * @param earthHeight when true, the terrain surface follows the sampler's
      *     Earth elevation ({@link MapSampler#heightAt}) instead of vanilla's
      *     noise offset — the Earth "hybrid": real macro-shape, vanilla caves,
-     *     aquifers, ores and surface underneath.
+     *     aquifers, ores and surface underneath. Real >=6000 m summits
+     *     ({@link PeakField}) are restored on top, since the raster averages
+     *     them down.
+     * @param earth the Earth data (for lon/lat lookup of peaks); may be null.
      */
-    public static SphereDensity forSampler(MapSampler sampler, int faceSize, boolean earthHeight) {
-        return new SphereDensity(sampler, faceSize, earthHeight);
+    public static SphereDensity forSampler(MapSampler sampler, int faceSize,
+                                           boolean earthHeight, EarthData earth) {
+        return new SphereDensity(sampler, faceSize, earthHeight, earth);
     }
 
     /** A copy of {@code router} whose noise sampling is folded onto the sphere. */
@@ -242,7 +250,25 @@ public final class SphereDensity {
     private final class EarthDepth implements DensityFunction {
         @Override
         public double compute(FunctionContext c) {
-            double h = sampler.heightAt(c.blockX() + 0.5, c.blockZ() + 0.5);
+            double wx = c.blockX() + 0.5;
+            double wz = c.blockZ() + 0.5;
+            double h = sampler.heightAt(wx, wz);
+            // Restore real summits the coarse raster averaged down: lift the
+            // surface to the nearest >=6000 m (or prominent) peak's cone. Only
+            // where the cone rises above the base, so ranges keep their shape.
+            if (peaks != null) {
+                Vec3 p = sampler.cubePointAt(wx, wz);
+                if (p != null) {
+                    double[] ll = earth.toLonLat(p);
+                    double cone = peaks.coneElevation(ll[0], ll[1]);
+                    if (cone > 0) {
+                        double ph = EarthMapSpec.elevationToBlockY(cone);
+                        if (ph > h) {
+                            h = ph;
+                        }
+                    }
+                }
+            }
             return (h - c.blockY()) / DEPTH_SLOPE;
         }
 

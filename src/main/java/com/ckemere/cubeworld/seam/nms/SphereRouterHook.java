@@ -29,7 +29,8 @@ public final class SphereRouterHook {
     }
 
     public static boolean install(World world, MapSampler sampler, int faceSize,
-                                  boolean earthHeight, Logger log) {
+                                  boolean earthHeight,
+                                  com.ckemere.cubeworld.generation.EarthData earth, Logger log) {
         try {
             ServerLevel level = ((CraftWorld) world).getHandle();
             RandomState rs = level.getChunkSource().randomState();
@@ -37,7 +38,7 @@ public final class SphereRouterHook {
                 log.warning("Sphere router hook: no RandomState yet for '" + world.getName() + "'.");
                 return false;
             }
-            NoiseRouter folded = SphereDensity.forSampler(sampler, faceSize, earthHeight)
+            NoiseRouter folded = SphereDensity.forSampler(sampler, faceSize, earthHeight, earth)
                     .fold(rs.router());
             putFinalObject(rs, RandomState.class.getDeclaredField("router"), folded);
             log.info("Sphere router hook: vanilla terrain folded onto the cube for '"

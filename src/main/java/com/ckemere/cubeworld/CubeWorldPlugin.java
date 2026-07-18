@@ -85,7 +85,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
                     // world: pure vanilla noise. Either way vanilla places blocks.
                     com.ckemere.cubeworld.seam.nms.SphereRouterHook.install(
                             w, maps.mapFor(w.getSeed()).sampler(), FACE_SIZE,
-                            maps.hasEarthData(), getLogger());
+                            maps.hasEarthData(), maps.earthData(), getLogger());
                 }
             }
         }, this);
