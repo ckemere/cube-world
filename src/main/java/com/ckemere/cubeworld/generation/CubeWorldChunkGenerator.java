@@ -36,9 +36,23 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
         this.biomeProvider = new CubeWorldBiomeProvider(topology, maps, marginBlocks);
     }
 
+    /**
+     * Vanilla places every block on the demo world: the world's noise router is
+     * folded onto the sphere ({@link com.ckemere.cubeworld.generation.SphereDensity}),
+     * so terrain, caves, aquifers and ores come from vanilla's own generator but
+     * seam-consistently. The Earth world keeps its real-elevation column fill.
+     */
+    private boolean vanillaTerrain() {
+        return !maps.hasEarthData();
+    }
+
     @Override
     public void generateSurface(@NotNull WorldInfo worldInfo, @NotNull Random random,
                                 int chunkX, int chunkZ, @NotNull ChunkData chunkData) {
+        if (vanillaTerrain()) {
+            maskVanillaColumns(chunkX, chunkZ, chunkData);
+            return;
+        }
         MapService.CubeWorldMap map = maps.mapFor(worldInfo.getSeed());
         MapSampler sampler = map.sampler();
         int minY = chunkData.getMinHeight();
@@ -146,6 +160,34 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
         }
     }
 
+    /**
+     * With vanilla driving block placement we only override the two things the
+     * fold cannot express: the off-net cross gaps (cleared to void) and the
+     * corner pillars (solid bedrock). On-net and margin columns keep vanilla's
+     * blocks — margins already match their source because both fold to the same
+     * cube point.
+     */
+    private void maskVanillaColumns(int chunkX, int chunkZ, ChunkData chunkData) {
+        int minY = chunkData.getMinHeight();
+        int maxY = chunkData.getMaxHeight();
+        boolean nearPillar = chunkNearPillar(chunkX, chunkZ);
+        for (int lx = 0; lx < 16; lx++) {
+            for (int lz = 0; lz < 16; lz++) {
+                double wx = (chunkX << 4) + lx + 0.5;
+                double wz = (chunkZ << 4) + lz + 0.5;
+                if (nearPillar && topology.inPillar(wx, wz, marginBlocks)) {
+                    chunkData.setRegion(lx, minY, lz, lx + 1, maxY, lz + 1, Material.BEDROCK);
+                    continue;
+                }
+                boolean onFace = geometry.faceAt((int) Math.floor(wx), (int) Math.floor(wz)) != null;
+                boolean inMargin = !onFace && topology.marginSource(wx, wz, marginBlocks) != null;
+                if (!onFace && !inMargin) {
+                    chunkData.setRegion(lx, minY, lz, lx + 1, maxY, lz + 1, Material.AIR);
+                }
+            }
+        }
+    }
+
     private boolean chunkNearPillar(int chunkX, int chunkZ) {
         double cx = (chunkX << 4) + 8;
         double cz = (chunkZ << 4) + 8;
@@ -166,12 +208,15 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
 
     @Override
     public boolean shouldGenerateNoise() {
-        return false;
+        // Demo world: vanilla fills terrain/caves/aquifers/ores from the folded
+        // router. Earth world: our real-elevation column fill in generateSurface.
+        return vanillaTerrain();
     }
 
     @Override
     public boolean shouldGenerateSurface() {
-        return false;
+        // Demo world: vanilla surface rules (grass/sand/gravel by biome).
+        return vanillaTerrain();
     }
 
     @Override

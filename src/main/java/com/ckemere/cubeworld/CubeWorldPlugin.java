@@ -72,6 +72,21 @@ public final class CubeWorldPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new PillarGuardListener(this, topology, MARGIN_BLOCKS), this);
         getServer().getPluginManager().registerEvents(new PortalLinkListener(this, geometry, maps), this);
         loadEarthData();
+        // Fold vanilla's terrain router onto the sphere BEFORE spawn chunks
+        // generate. WorldInitEvent fires during world load (this STARTUP plugin
+        // is already enabled), which is early enough; the first server tick is
+        // not. Demo world only — the Earth world keeps its real-elevation fill.
+        getServer().getPluginManager().registerEvents(new org.bukkit.event.Listener() {
+            @org.bukkit.event.EventHandler
+            public void onWorldInit(org.bukkit.event.world.WorldInitEvent e) {
+                World w = e.getWorld();
+                if (isCubeWorld(w) && w.getEnvironment() == World.Environment.NORMAL
+                        && !maps.hasEarthData()) {
+                    com.ckemere.cubeworld.seam.nms.SphereRouterHook.install(
+                            w, maps.mapFor(w.getSeed()).sampler(), FACE_SIZE, getLogger());
+                }
+            }
+        }, this);
         // Worlds are not loaded yet during onEnable (load: STARTUP); wire the
         // per-world services on the first server tick.
         getServer().getScheduler().runTask(this, () -> {
