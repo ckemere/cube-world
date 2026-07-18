@@ -152,7 +152,10 @@ MARKER_OVERLAY = r"""
       var pl=players[k], p=pl.p, n=Math.hypot(p[0],p[1],p[2]);
       var sph=[p[0]/n,p[1]/n,p[2]/n];
       var pos=[p[0]+(sph[0]-p[0])*morph,p[1]+(sph[1]-p[1])*morph,p[2]+(sph[2]-p[2])*morph];
-      var out=1.04, pp=[pos[0]*out,pos[1]*out,pos[2]*out];
+      // sit the pin flush on the surface (was 1.04, which parallaxed the pin
+      // outward onto adjacent geography near the globe's limb). The marker is
+      // an HTML overlay drawn on top, so it is never occluded by the globe.
+      var out=1.0, pp=[pos[0]*out,pos[1]*out,pos[2]*out];
       var c=mvv(mvp,[pp[0],pp[1],pp[2],1]);
       // cull by the player's FACE normal (cube), easing to the position normal
       // as the cube morphs to a sphere, so the pin only appears on that face.
