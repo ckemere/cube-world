@@ -91,16 +91,27 @@ def net(base, proj: CubeProjection, face_px=360, label=True):
     img = Image.fromarray(canvas)
     d = ImageDraw.Draw(img)
     fnt = _font(max(14, face_px // 16))
+    r = max(4, face_px // 45)
     for face in FACES:
         gc, gr = GRID[face]
         cx, cy = (gc + 1) * face_px, (gr + 1) * face_px
         d.rectangle([cx, cy, cx + face_px - 1, cy + face_px - 1], outline=BORDER, width=2)
+        # pillar dots at the four face corners (cube vertices), land/ocean colored
+        for cu in (-1.0, 1.0):
+            for cv in (-1.0, 1.0):
+                from .geometry import cube_point
+                x, y, z = cube_point(face, cu, cv)
+                lon, lat = proj.dir_to_lonlat(np.array([x]), np.array([y]), np.array([z]))
+                col = PILLAR_LAND if _is_land(base, float(lon[0]), float(lat[0])) else PILLAR
+                px = cx + int((cu + 1) / 2 * (face_px - 1))
+                py = cy + int((cv + 1) / 2 * (face_px - 1))
+                d.ellipse([px - r, py - r, px + r, py + r], fill=col, outline=(0, 0, 0))
         if label:
             d.text((cx + 6, cy + 6), FACE_LABEL[face], fill=(255, 255, 40), font=fnt)
     return img
 
 
-def sweep(base, rolls, face_px=200, tilt=0.0, mode="net", thumb_w=760):
+def sweep(base, rolls, face_px=200, tilt=0.0, mode="net", thumb_w=760, per_row=None):
     """Contact sheet across a list of rolls.
 
     mode='net'     -> cube-net thumbnails (see continent splits)
@@ -120,9 +131,14 @@ def sweep(base, rolls, face_px=200, tilt=0.0, mode="net", thumb_w=760):
                font=_font(max(16, im.width // 24)))
         tiles.append(im)
     tw, th = tiles[0].size
-    per_row = 2 if mode == "overlay" else min(4, len(tiles))
+    if per_row is None:
+        per_row = 3 if mode == "overlay" else min(4, len(tiles))
     nrows = (len(tiles) + per_row - 1) // per_row
-    sheet = Image.new("RGB", (per_row * tw, nrows * th), (10, 10, 12))
+    pad = 6
+    sheet = Image.new("RGB", (per_row * tw + (per_row + 1) * pad,
+                              nrows * th + (nrows + 1) * pad), (10, 10, 12))
     for i, t in enumerate(tiles):
-        sheet.paste(t, ((i % per_row) * tw, (i // per_row) * th))
+        x = pad + (i % per_row) * (tw + pad)
+        y = pad + (i // per_row) * (th + pad)
+        sheet.paste(t, (x, y))
     return sheet
