@@ -119,6 +119,15 @@ public final class EarthClimate {
         double rugged = ruggedness(earth, lon, lat, elev);
         double surfaceY = sampler.heightAt(wx, wz);
         double h = humidity(precip);
+        // Boreal correction: cold forests grow on modest rainfall because cold
+        // means low evaporation, so real taiga looks "dry" by precipitation
+        // alone and would read as cold steppe (plains). Floor the effective
+        // moisture in the cold band so Siberia/Canada come out taiga, while
+        // genuinely frozen (polar) and warm bands are untouched.
+        double baseTemp = interp(temp, TE, TT);
+        if (land && baseTemp >= -0.45 && baseTemp < -0.05) {
+            h = Math.max(h, 0.12);
+        }
         return new double[] {
                 temperature(temp, h, land), h, continentalness(elev), erosion(rugged),
                 depth(surfaceY, y), weirdness(p, elev), elev, temp, precip};
