@@ -41,6 +41,9 @@ public final class SphereRouterHook {
             NoiseRouter folded = SphereDensity.forSampler(sampler, faceSize, earthHeight, earth)
                     .fold(rs.router());
             putFinalObject(rs, RandomState.class.getDeclaredField("router"), folded);
+            if (earthHeight) {
+                disableAquifers(level, log);
+            }
             log.info("Sphere router hook: vanilla terrain folded onto the cube for '"
                     + world.getName() + "'"
                     + (earthHeight ? " (Earth elevation)" : " (vanilla noise)") + ".");
@@ -48,6 +51,49 @@ public final class SphereRouterHook {
         } catch (Throwable t) {
             log.warning("Sphere router hook failed (" + t + "); demo terrain remains.");
             return false;
+        }
+    }
+
+    /**
+     * Disable aquifers so vanilla's global fluid picker fills every open space
+     * below sea level with water AND never schedules a fluid update for it
+     * (Aquifer.createDisabled.shouldScheduleFluidUpdate() == false), so ocean
+     * water is consistent and never flows/drains. Swap the generator's settings
+     * Holder for a copy with aquifersEnabled=false (the flag is a record
+     * component and can't be poked in place).
+     */
+    private static void disableAquifers(ServerLevel level, Logger log) {
+        try {
+            net.minecraft.world.level.chunk.ChunkGenerator gen =
+                    level.getChunkSource().getGenerator();
+            if (gen instanceof org.bukkit.craftbukkit.generator.CustomChunkGenerator ccg) {
+                gen = ccg.getDelegate();
+            }
+            if (!(gen instanceof net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator nbcg)) {
+                log.warning("Aquifer disable: not a noise generator.");
+                return;
+            }
+            net.minecraft.world.level.levelgen.NoiseGeneratorSettings old =
+                    nbcg.generatorSettings().value();
+            net.minecraft.world.level.levelgen.NoiseGeneratorSettings copy =
+                    new net.minecraft.world.level.levelgen.NoiseGeneratorSettings(
+                            old.noiseSettings(), old.defaultBlock(), old.defaultFluid(),
+                            old.noiseRouter(), old.surfaceRule(), old.spawnTarget(),
+                            old.seaLevel(), old.disableMobGeneration(),
+                            false, old.oreVeinsEnabled(), old.useLegacyRandomSource());
+            // Swapping the delegate's `settings` field alone doesn't take (the
+            // final field read is cached), so build a FRESH generator with the
+            // disabled settings and rebind the CustomChunkGenerator's delegate.
+            net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator fresh =
+                    new net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator(
+                            nbcg.getBiomeSource(), net.minecraft.core.Holder.direct(copy));
+            putFinalObject(level.getChunkSource().getGenerator(),
+                    org.bukkit.craftbukkit.generator.CustomChunkGenerator.class
+                            .getDeclaredField("delegate"),
+                    fresh);
+            log.info("Aquifers disabled (ocean water is now stable source, no fluid ticks).");
+        } catch (Throwable t) {
+            log.warning("Could not disable aquifers (" + t + "); oceans may show artifacts.");
         }
     }
 

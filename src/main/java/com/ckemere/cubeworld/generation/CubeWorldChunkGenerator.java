@@ -224,28 +224,32 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
         int minY = chunkData.getMinHeight();
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
-                double wx = (chunkX << 4) + lx + 0.5;
-                double wz = (chunkZ << 4) + lz + 0.5;
-                // Ocean / below-sea: no solid at sea level means the surface sits
-                // underwater. The aquifer fills these with inconsistent perched
-                // water that drains and spawns flowing sources when the chunk
-                // ticks, so replace it with a clean column of source water from
-                // the seabed height up to sea level on a gravel floor — every
-                // ocean column then holds the same level, grounded, so nothing
-                // flows. Bounded by the ~45-block ocean depth cap.
-                if (!chunkData.getType(lx, SEA_LEVEL, lz).isSolid()) {
-                    double h = sampler.heightAt(wx, wz);
-                    if (h < SEA_LEVEL) {
-                        int seabed = (int) Math.round(h);
-                        // A thick solid floor seals seabed caves so the water
-                        // can't drain sideways into them and start flowing.
-                        chunkData.setRegion(lx, Math.max(minY, seabed - 8), lz, lx + 1,
-                                seabed + 1, lz + 1, Material.GRAVEL);
+                // Ocean: aquifers are disabled (SphereRouterHook), so the water
+                // that IS placed is stable source (no fluid ticks). But density
+                // caves in the seabed can leave air pockets right under the
+                // surface water. Fill any such gap down to the first solid seabed
+                // with source water — it stays put because nothing ticks it.
+                if (chunkData.getType(lx, SEA_LEVEL - 1, lz) == Material.WATER) {
+                    int y = SEA_LEVEL - 1;
+                    while (y >= minY && chunkData.getType(lx, y, lz) == Material.WATER) {
+                        y--;
+                    }
+                    if (y >= minY && !chunkData.getType(lx, y, lz).isSolid()) {
+                        int seabed = y;
+                        while (seabed >= minY && !chunkData.getType(lx, seabed, lz).isSolid()) {
+                            seabed--;
+                        }
                         chunkData.setRegion(lx, seabed + 1, lz, lx + 1, SEA_LEVEL, lz + 1,
                                 Material.WATER);
                     }
                     continue;
                 }
+                // Void / dry sub-sea: nothing without solid or surface water here.
+                if (!chunkData.getType(lx, SEA_LEVEL, lz).isSolid()) {
+                    continue;
+                }
+                double wx = (chunkX << 4) + lx + 0.5;
+                double wz = (chunkZ << 4) + lz + 0.5;
                 // Land: a shoal (bump in an ocean cell) or a river.
                 com.ckemere.cubeworld.geometry.Vec3 p = sampler.cubePointAt(wx, wz);
                 if (p == null) {
