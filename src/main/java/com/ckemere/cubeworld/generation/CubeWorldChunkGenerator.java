@@ -220,6 +220,13 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
         int minY = chunkData.getMinHeight();
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
+                // Cheap gate first: open water/air at sea level means nothing to
+                // do (deep ocean is already filled, and land/rivers always have
+                // solid here). This skips the costly cube-point lookup for the
+                // ~70% of the world that is open ocean.
+                if (!chunkData.getType(lx, SEA_LEVEL, lz).isSolid()) {
+                    continue;
+                }
                 double wx = (chunkX << 4) + lx + 0.5;
                 double wz = (chunkZ << 4) + lz + 0.5;
                 com.ckemere.cubeworld.geometry.Vec3 p = sampler.cubePointAt(wx, wz);
@@ -230,23 +237,21 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                 double elev = earth.sample("height", ll[0], ll[1]);
 
                 if (elev < 0) {
-                    // Sea: only touch columns where solid stuck up to sea level.
-                    if (chunkData.getType(lx, SEA_LEVEL, lz).isSolid()) {
-                        int seabed = Math.min((int) Math.round(sampler.heightAt(wx, wz)),
-                                SEA_LEVEL - 2);
-                        int bumpTop = SEA_LEVEL;
-                        for (int y = SEA_LEVEL + 32; y > SEA_LEVEL; y--) {
-                            if (chunkData.getType(lx, y, lz).isSolid()) {
-                                bumpTop = y;
-                                break;
-                            }
+                    // Sea with solid poking to sea level: drop it and fill water.
+                    int seabed = Math.min((int) Math.round(sampler.heightAt(wx, wz)),
+                            SEA_LEVEL - 2);
+                    int bumpTop = SEA_LEVEL;
+                    for (int y = SEA_LEVEL + 32; y > SEA_LEVEL; y--) {
+                        if (chunkData.getType(lx, y, lz).isSolid()) {
+                            bumpTop = y;
+                            break;
                         }
-                        for (int y = bumpTop; y > seabed; y--) {
-                            chunkData.setBlock(lx, y, lz, Material.AIR);
-                        }
-                        chunkData.setRegion(lx, seabed + 1, lz, lx + 1, SEA_LEVEL, lz + 1,
-                                Material.WATER);
                     }
+                    for (int y = bumpTop; y > seabed; y--) {
+                        chunkData.setBlock(lx, y, lz, Material.AIR);
+                    }
+                    chunkData.setRegion(lx, seabed + 1, lz, lx + 1, SEA_LEVEL, lz + 1,
+                            Material.WATER);
                     continue;
                 }
 

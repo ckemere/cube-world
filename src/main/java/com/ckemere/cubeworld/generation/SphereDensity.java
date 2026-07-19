@@ -102,6 +102,13 @@ public final class SphereDensity {
         return new Vec3(p.x() / n, p.y() / n, p.z() / n);
     }
 
+    // Per-thread cache of the last column's unit direction: [wx, wz, dx, dy, dz,
+    // present]. Every noise node folds through sphereFrom with the same context,
+    // and columns repeat across Y, so this collapses ~20 cube-point resolves per
+    // density sample (and per Y) down to one.
+    private final ThreadLocal<double[]> unitCache =
+            ThreadLocal.withInitial(() -> new double[] {Double.NaN, Double.NaN, 0, 0, 0, 0});
+
     private SphereContext sphereFrom(DensityFunction.FunctionContext c) {
         if (c instanceof SphereContext s) {
             return s;
@@ -110,16 +117,31 @@ public final class SphereDensity {
             return new SphereContext(d.sx, d.sy, d.sz);
         }
         // Any other context (vanilla NoiseChunk cells, nested probes): fold it
-        // from the real coordinates it carries.
-        Vec3 dir = unit(c.blockX() + 0.5, c.blockZ() + 0.5);
-        if (dir == null) {
+        // from the real coordinates it carries, reusing the cached direction.
+        double qx = c.blockX() + 0.5;
+        double qz = c.blockZ() + 0.5;
+        double[] u = unitCache.get();
+        if (u[0] != qx || u[1] != qz) {
+            Vec3 dir = unit(qx, qz);
+            u[0] = qx;
+            u[1] = qz;
+            if (dir != null) {
+                u[2] = dir.x();
+                u[3] = dir.y();
+                u[4] = dir.z();
+                u[5] = 1;
+            } else {
+                u[5] = 0;
+            }
+        }
+        if (u[5] == 0) {
             return new SphereContext(c.blockX(), c.blockY(), c.blockZ());
         }
         double r = radius + c.blockY();
         return new SphereContext(
-                (int) Math.round(dir.x() * r),
-                (int) Math.round(dir.y() * r),
-                (int) Math.round(dir.z() * r));
+                (int) Math.round(u[2] * r),
+                (int) Math.round(u[3] * r),
+                (int) Math.round(u[4] * r));
     }
 
     /** Carries both real coords (for depth gradients) and pre-folded coords. */
@@ -247,11 +269,31 @@ public final class SphereDensity {
      * factor/jaggedness/cheese/cave/aquifer maths behave identically, just
      * re-centred on the real elevation instead of vanilla's noise offset.
      */
+    /**
+     * The surface height is independent of Y, but vanilla samples density at
+     * many Y per column, so cache it per (x, z) per thread — a big saving since
+     * each miss does a cube-point resolve, an elevation lookup and a peak scan.
+     */
     private final class EarthDepth implements DensityFunction {
+        private final ThreadLocal<double[]> cache =
+                ThreadLocal.withInitial(() -> new double[] {Double.NaN, Double.NaN, 0.0});
+
         @Override
         public double compute(FunctionContext c) {
-            double wx = c.blockX() + 0.5;
-            double wz = c.blockZ() + 0.5;
+            double[] cc = cache.get();
+            double h;
+            if (cc[0] == c.blockX() && cc[1] == c.blockZ()) {
+                h = cc[2];
+            } else {
+                h = surfaceHeight(c.blockX() + 0.5, c.blockZ() + 0.5);
+                cc[0] = c.blockX();
+                cc[1] = c.blockZ();
+                cc[2] = h;
+            }
+            return (h - c.blockY()) / DEPTH_SLOPE;
+        }
+
+        private double surfaceHeight(double wx, double wz) {
             double h = sampler.heightAt(wx, wz);
             // Restore real summits the coarse raster averaged down: lift the
             // surface to the nearest >=6000 m (or prominent) peak's cone. Only
@@ -269,7 +311,7 @@ public final class SphereDensity {
                     }
                 }
             }
-            return (h - c.blockY()) / DEPTH_SLOPE;
+            return h;
         }
 
         @Override
