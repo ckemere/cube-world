@@ -95,29 +95,98 @@ public final class CubeWorldBiomeProvider extends BiomeProvider {
         return getBiome(worldInfo, x, y, z);
     }
 
+    /**
+     * Per-thread, per-column biome cache. Climate params (temperature/humidity/
+     * continentalness/erosion/weirdness/elevation) depend only on (x, z), and
+     * depth — the one y-dependent param — is clamped to [-0.1, 0.9], so nearly
+     * every cell in a column shares one of the two clamp values and thus one
+     * biome. Caching the column's params + its river class + the deep/shallow
+     * biomes turns ~96 full biome lookups per column into ~16. Output-identical:
+     * the deep/shallow biomes are keyed on the exact clamp values.
+     */
+    private static final class Col {
+        int x = Integer.MIN_VALUE;
+        int z = Integer.MIN_VALUE;
+        double[] c;
+        double surfaceY;
+        int river; // 0 none, 1 river, 2 frozen
+        Biome deep;    // biome at depth 0.9 (clamped underground)
+        Biome shallow; // biome at depth -0.1 (clamped above surface)
+    }
+
+    // A chunk has only 16 biome columns but they are queried interleaved across
+    // ~96 Y levels, so a direct-mapped set of slots (not one) keeps them all hot.
+    private static final int COL_SLOTS = 64;
+    private final ThreadLocal<Col[]> colCache = ThreadLocal.withInitial(() -> {
+        Col[] a = new Col[COL_SLOTS];
+        for (int i = 0; i < a.length; i++) {
+            a[i] = new Col();
+        }
+        return a;
+    });
+
     private Biome earthBiome(EarthData earth, MapSampler sampler, double wx, double wz, int y) {
-        double[] c = EarthClimate.params(earth, sampler, wx, wz, y);
+        int cx = (int) Math.floor(wx);
+        int cz = (int) Math.floor(wz);
+        Col col = colCache.get()[(cx * 31 + cz) & (COL_SLOTS - 1)];
+        if (col.x != cx || col.z != cz) {
+            long tc = System.nanoTime();
+            col.c = EarthClimate.params(earth, sampler, wx, wz, y);
+            GenProfiler.add("biome.climate", tc);
+            col.surfaceY = sampler.heightAt(wx, wz);
+            col.river = col.c == null ? 0 : classifyRiver(earth, sampler, wx, wz, col.c);
+            col.deep = null;
+            col.shallow = null;
+            col.x = cx;
+            col.z = cz;
+        }
+        double[] c = col.c;
         if (c == null) {
             return Biome.THE_VOID;
         }
-        // River biome along the real watercourses, at/near the surface only
-        // (c[4]=depth ~0 at surface, c[6]=elev>=0 land, c[7]=tempC).
-        if (c[4] < 0.15 && c[6] >= 0 && earth.hasLayer("river")) {
-            // sample a small neighbourhood so the 4-wide biome cell catches the
-            // thin river the generator carved (rivers are only a few blocks wide)
-            double rmax = 0;
-            for (double[] o : new double[][] {{0, 0}, {2, 0}, {-2, 0}, {0, 2}, {0, -2}}) {
-                Vec3 p = sampler.cubePointAt(wx + o[0], wz + o[1]);
-                if (p != null) {
-                    double[] ll = earth.toLonLat(p);
-                    rmax = Math.max(rmax, earth.sample("river", ll[0], ll[1]));
-                }
+        double depth = EarthClimate.depth(col.surfaceY, y);
+        if (depth < 0.15 && col.river != 0 && c[6] >= 0) {
+            return col.river == 2 ? Biome.FROZEN_RIVER : Biome.RIVER;
+        }
+        if (depth >= 0.9) {
+            if (col.deep == null) {
+                col.deep = vanillaBiome(c, 0.9);
             }
-            if (rmax > 0.2) {
-                return c[7] < -2 ? Biome.FROZEN_RIVER : Biome.RIVER;
+            return col.deep;
+        }
+        if (depth <= -0.1) {
+            if (col.shallow == null) {
+                col.shallow = vanillaBiome(c, -0.1);
+            }
+            return col.shallow;
+        }
+        return vanillaBiome(c, depth);
+    }
+
+    private Biome vanillaBiome(double[] c, double depth) {
+        long tv = System.nanoTime();
+        Biome b = vanilla().biome(c[0], c[1], c[2], c[3], depth, c[5]);
+        GenProfiler.add("biome.vanillaMap", tv);
+        return b;
+    }
+
+    /** River class at a column (0 none, 1 river, 2 frozen), sampled once. */
+    private int classifyRiver(EarthData earth, MapSampler sampler, double wx, double wz, double[] c) {
+        if (c[6] < 0 || !earth.hasLayer("river")) {
+            return 0;
+        }
+        double rmax = 0;
+        for (double[] o : new double[][] {{0, 0}, {2, 0}, {-2, 0}, {0, 2}, {0, -2}}) {
+            Vec3 p = sampler.cubePointAt(wx + o[0], wz + o[1]);
+            if (p != null) {
+                double[] ll = earth.toLonLat(p);
+                rmax = Math.max(rmax, earth.sample("river", ll[0], ll[1]));
             }
         }
-        return vanilla().biome(c[0], c[1], c[2], c[3], c[4], c[5]);
+        if (rmax > 0.2) {
+            return c[7] < -2 ? 2 : 1;
+        }
+        return 0;
     }
 
     @Override

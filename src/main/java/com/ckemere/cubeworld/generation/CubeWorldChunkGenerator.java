@@ -52,8 +52,12 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
     public void generateSurface(@NotNull WorldInfo worldInfo, @NotNull Random random,
                                 int chunkX, int chunkZ, @NotNull ChunkData chunkData) {
         if (vanillaTerrain()) {
+            long tm = System.nanoTime();
             maskVanillaColumns(chunkX, chunkZ, chunkData);
+            GenProfiler.add("maskColumns", tm);
+            long tw = System.nanoTime();
             carveWater(worldInfo, chunkX, chunkZ, chunkData);
+            GenProfiler.add("carveWater", tw);
             return;
         }
         MapService.CubeWorldMap map = maps.mapFor(worldInfo.getSeed());
@@ -193,7 +197,7 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
 
     /** Neighbourhood used to level a river's water line against raster bumps. */
     private static final double[][] RIVER_KERNEL =
-            {{10, 0}, {-10, 0}, {0, 10}, {0, -10}, {14, 14}, {-14, -14}, {14, -14}, {-14, 14}};
+            {{12, 0}, {-12, 0}, {0, 12}, {0, -12}};
 
     /**
      * Place water that vanilla can't, because our terrain follows real elevation
@@ -234,7 +238,11 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                     continue; // void / off-net (already handled by masking)
                 }
                 double[] ll = earth.toLonLat(p);
-                double elev = earth.sample("height", ll[0], ll[1]);
+                // Skip the elevation lookup when solid stands well above sea
+                // level — it's plainly land, so only the river check remains.
+                // The sea fix only matters near the waterline.
+                boolean nearSea = !chunkData.getType(lx, SEA_LEVEL + 8, lz).isSolid();
+                double elev = nearSea ? earth.sample("height", ll[0], ll[1]) : 1.0;
 
                 if (elev < 0) {
                     // Sea with solid poking to sea level: drop it and fill water.

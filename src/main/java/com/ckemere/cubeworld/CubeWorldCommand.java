@@ -241,6 +241,16 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
             case "biomecensus" -> {
                 return handleBiomeCensus(sender, args);
             }
+            case "genprof" -> {
+                if (args.length > 1 && args[1].equalsIgnoreCase("reset")) {
+                    com.ckemere.cubeworld.generation.GenProfiler.reset();
+                    sender.sendMessage(Component.text("genprof reset.", NamedTextColor.GREEN));
+                } else {
+                    sender.sendMessage(Component.text(
+                            com.ckemere.cubeworld.generation.GenProfiler.dump(), NamedTextColor.AQUA));
+                }
+                return true;
+            }
             case "marginbreak" -> {
                 return handleMarginEdit(sender, args, null);
             }

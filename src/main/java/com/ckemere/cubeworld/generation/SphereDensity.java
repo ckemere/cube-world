@@ -102,12 +102,17 @@ public final class SphereDensity {
         return new Vec3(p.x() / n, p.y() / n, p.z() / n);
     }
 
-    // Per-thread cache of the last column's unit direction: [wx, wz, dx, dy, dz,
-    // present]. Every noise node folds through sphereFrom with the same context,
-    // and columns repeat across Y, so this collapses ~20 cube-point resolves per
-    // density sample (and per Y) down to one.
-    private final ThreadLocal<double[]> unitCache =
-            ThreadLocal.withInitial(() -> new double[] {Double.NaN, Double.NaN, 0, 0, 0, 0});
+    // Per-thread direct-mapped cache of column unit directions, 6 doubles per
+    // slot: [bx, bz, dx, dy, dz, present]. Every folded noise node resolves the
+    // same column, and vanilla samples a cell's ~16 corner columns interleaved
+    // across Y, so a small set of slots keyed by (bx, bz) turns almost all of
+    // the millions of per-sample resolves into hits.
+    private static final int UC_SLOTS = 1024;
+    private final ThreadLocal<double[]> unitCache = ThreadLocal.withInitial(() -> {
+        double[] a = new double[UC_SLOTS * 6];
+        java.util.Arrays.fill(a, Double.NaN);
+        return a;
+    });
 
     private SphereContext sphereFrom(DensityFunction.FunctionContext c) {
         if (c instanceof SphereContext s) {
@@ -116,32 +121,33 @@ public final class SphereDensity {
         if (c instanceof DualContext d) {
             return new SphereContext(d.sx, d.sy, d.sz);
         }
-        // Any other context (vanilla NoiseChunk cells, nested probes): fold it
-        // from the real coordinates it carries, reusing the cached direction.
-        double qx = c.blockX() + 0.5;
-        double qz = c.blockZ() + 0.5;
+        int bx = c.blockX();
+        int bz = c.blockZ();
         double[] u = unitCache.get();
-        if (u[0] != qx || u[1] != qz) {
-            Vec3 dir = unit(qx, qz);
-            u[0] = qx;
-            u[1] = qz;
+        int slot = ((bx * 31 + bz) & (UC_SLOTS - 1)) * 6;
+        if (u[slot] != bx || u[slot + 1] != bz) {
+            long t = System.nanoTime();
+            Vec3 dir = unit(bx + 0.5, bz + 0.5);
+            GenProfiler.add("cubePointAt(density)", t);
+            u[slot] = bx;
+            u[slot + 1] = bz;
             if (dir != null) {
-                u[2] = dir.x();
-                u[3] = dir.y();
-                u[4] = dir.z();
-                u[5] = 1;
+                u[slot + 2] = dir.x();
+                u[slot + 3] = dir.y();
+                u[slot + 4] = dir.z();
+                u[slot + 5] = 1;
             } else {
-                u[5] = 0;
+                u[slot + 5] = 0;
             }
         }
-        if (u[5] == 0) {
-            return new SphereContext(c.blockX(), c.blockY(), c.blockZ());
+        if (u[slot + 5] == 0) {
+            return new SphereContext(bx, c.blockY(), bz);
         }
         double r = radius + c.blockY();
         return new SphereContext(
-                (int) Math.round(u[2] * r),
-                (int) Math.round(u[3] * r),
-                (int) Math.round(u[4] * r));
+                (int) Math.round(u[slot + 2] * r),
+                (int) Math.round(u[slot + 3] * r),
+                (int) Math.round(u[slot + 4] * r));
     }
 
     /** Carries both real coords (for depth gradients) and pre-folded coords. */
@@ -285,7 +291,9 @@ public final class SphereDensity {
             if (cc[0] == c.blockX() && cc[1] == c.blockZ()) {
                 h = cc[2];
             } else {
+                long t = System.nanoTime();
                 h = surfaceHeight(c.blockX() + 0.5, c.blockZ() + 0.5);
+                GenProfiler.add("earthDepth.surface", t);
                 cc[0] = c.blockX();
                 cc[1] = c.blockZ();
                 cc[2] = h;

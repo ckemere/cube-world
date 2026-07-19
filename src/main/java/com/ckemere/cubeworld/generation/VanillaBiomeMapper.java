@@ -35,12 +35,17 @@ public final class VanillaBiomeMapper {
     }
 
     /** All six climate params in vanilla units (roughly [-1, 1]). */
+    // Holder -> Bukkit conversion is a registry round-trip; there are only ~55
+    // biomes, so memoize it (the Climate RTree search itself can't be cached).
+    private final java.util.Map<Holder<net.minecraft.world.level.biome.Biome>, Biome> convCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     public Biome biome(double temperature, double humidity, double continentalness,
                        double erosion, double depth, double weirdness) {
         Holder<net.minecraft.world.level.biome.Biome> h = source.getNoiseBiome(
                 Climate.target((float) temperature, (float) humidity, (float) continentalness,
                         (float) erosion, (float) depth, (float) weirdness));
-        return CraftBiome.minecraftHolderToBukkit(h);
+        return convCache.computeIfAbsent(h, CraftBiome::minecraftHolderToBukkit);
     }
 
     /** Every biome this mapper can return — for BiomeProvider.getBiomes(). */
