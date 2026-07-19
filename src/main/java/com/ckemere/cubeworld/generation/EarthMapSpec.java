@@ -31,9 +31,14 @@ public final class EarthMapSpec implements MapSpec {
     private static final double LAND_EXAGGERATION = 0.0285;  // blocks per metre up (<=HIGH_BREAK)
     private static final double HIGH_BREAK = 4000.0;         // metres: exaggeration knee
     private static final double HIGH_EXAGGERATION = 0.0146;  // blocks per metre above HIGH_BREAK
-    private static final double OCEAN_SCALE = 0.01145;       // blocks per metre down
+    // Oceans read deeper than the old gentle scale, but capped near vanilla's
+    // deepest (~45 blocks): 100+-block abyssal water tanks generation (vanilla
+    // lighting + fluid ticks through the whole water column).
+    private static final double OCEAN_SHELF = 0.020;         // blocks per metre down (<=OCEAN_BREAK)
+    private static final double OCEAN_BREAK = 1500.0;        // metres: ocean exaggeration knee
+    private static final double OCEAN_DEEP = 0.002;          // blocks per metre below OCEAN_BREAK
+    private static final double OCEAN_FLOOR = 45.0;          // max blocks below sea (min y 18)
     private static final double LAND_CAP = 253.0;
-    private static final double OCEAN_CAP = -125.0;
     private static final double TERRAIN_CEIL = 250.0;        // just under vanilla's top slide
 
     private final CubeGeometry geometry;
@@ -71,7 +76,17 @@ public final class EarthMapSpec implements MapSpec {
             }
             y = SEA_LEVEL + Math.min(blocks, LAND_CAP);
         } else {
-            y = SEA_LEVEL + Math.max(meters * OCEAN_SCALE, OCEAN_CAP);
+            // Mirror the mountain treatment downward: steep for shelves and
+            // moderate seas so they read deep, gentler for the abyssal tail so
+            // the deepest trench (-10935 m) still clears bedrock.
+            double depth = -meters;
+            double blocks;
+            if (depth <= OCEAN_BREAK) {
+                blocks = depth * OCEAN_SHELF;
+            } else {
+                blocks = OCEAN_BREAK * OCEAN_SHELF + (depth - OCEAN_BREAK) * OCEAN_DEEP;
+            }
+            y = SEA_LEVEL - Math.min(blocks, OCEAN_FLOOR);
         }
         return Math.max(-60.0, Math.min(TERRAIN_CEIL, y));
     }
