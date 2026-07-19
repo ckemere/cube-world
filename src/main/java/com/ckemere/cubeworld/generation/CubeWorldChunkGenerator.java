@@ -53,6 +53,7 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                                 int chunkX, int chunkZ, @NotNull ChunkData chunkData) {
         if (vanillaTerrain()) {
             maskVanillaColumns(chunkX, chunkZ, chunkData);
+            carveRivers(worldInfo, chunkX, chunkZ, chunkData);
             return;
         }
         MapService.CubeWorldMap map = maps.mapFor(worldInfo.getSeed());
@@ -188,6 +189,68 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                 }
             }
         }
+    }
+
+    /**
+     * Real-Earth rivers flow at their local elevation, but vanilla's fluid fill
+     * only reaches global sea level (y63), so above-sea rivers come out dry.
+     * Along the Earth river/lake mask, incise a shallow channel into vanilla's
+     * finished terrain and fill it with water at the local surface — the same
+     * "valley of water" vanilla makes for its own rivers, placed by hand here
+     * because this water table is well above y63. Runs after vanilla's noise
+     * and surface stages, so the column already holds finished blocks.
+     */
+    private void carveRivers(WorldInfo worldInfo, int chunkX, int chunkZ, ChunkData chunkData) {
+        EarthData earth = maps.earthData();
+        if (earth == null || !earth.hasLayer("river")) {
+            return;
+        }
+        MapSampler sampler = maps.mapFor(worldInfo.getSeed()).sampler();
+        for (int lx = 0; lx < 16; lx++) {
+            for (int lz = 0; lz < 16; lz++) {
+                double wx = (chunkX << 4) + lx + 0.5;
+                double wz = (chunkZ << 4) + lz + 0.5;
+                com.ckemere.cubeworld.geometry.Vec3 p = sampler.cubePointAt(wx, wz);
+                if (p == null) {
+                    continue; // void / off-net (already handled by masking)
+                }
+                double[] ll = earth.toLonLat(p);
+                if (earth.sample("river", ll[0], ll[1]) <= 0.2) {
+                    continue;
+                }
+                int predicted = (int) Math.round(sampler.heightAt(wx, wz));
+                if (predicted <= SEA_LEVEL + 2) {
+                    continue; // at/below sea level: vanilla's ocean fill already gives water
+                }
+                // Water level from the SMOOTH elevation, not vanilla's noisy
+                // surface, so it stays level across the channel and only steps
+                // gently downhill along the flow (incised one block).
+                int waterTop = predicted - 1;
+                int surf = surfaceOf(chunkData, lx, lz, predicted);
+                int clearTop = Math.max(surf, waterTop) + 3;
+                for (int y = clearTop; y > waterTop; y--) {
+                    chunkData.setBlock(lx, y, lz, Material.AIR); // open channel, clear plants
+                }
+                chunkData.setRegion(lx, waterTop - 2, lz, lx + 1, waterTop + 1, lz + 1,
+                        Material.WATER);
+                // gravel bed + fill so the channel is grounded even where vanilla
+                // noise dipped the terrain below the water line
+                chunkData.setRegion(lx, waterTop - 6, lz, lx + 1, waterTop - 2, lz + 1,
+                        Material.GRAVEL);
+            }
+        }
+    }
+
+    /** Topmost solid block near the predicted height (vanilla's finished surface). */
+    private int surfaceOf(ChunkData chunkData, int lx, int lz, int predicted) {
+        int top = Math.min(chunkData.getMaxHeight() - 1, predicted + 30);
+        int bottom = Math.max(chunkData.getMinHeight(), predicted - 30);
+        for (int y = top; y >= bottom; y--) {
+            if (chunkData.getType(lx, y, lz).isSolid()) {
+                return y;
+            }
+        }
+        return Integer.MIN_VALUE;
     }
 
     private boolean chunkNearPillar(int chunkX, int chunkZ) {
