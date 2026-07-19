@@ -53,7 +53,7 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                                 int chunkX, int chunkZ, @NotNull ChunkData chunkData) {
         if (vanillaTerrain()) {
             maskVanillaColumns(chunkX, chunkZ, chunkData);
-            carveRivers(worldInfo, chunkX, chunkZ, chunkData);
+            carveWater(worldInfo, chunkX, chunkZ, chunkData);
             return;
         }
         MapService.CubeWorldMap map = maps.mapFor(worldInfo.getSeed());
@@ -191,21 +191,33 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
         }
     }
 
+    /** Neighbourhood used to level a river's water line against raster bumps. */
+    private static final double[][] RIVER_KERNEL =
+            {{10, 0}, {-10, 0}, {0, 10}, {0, -10}, {14, 14}, {-14, -14}, {14, -14}, {-14, 14}};
+
     /**
-     * Real-Earth rivers flow at their local elevation, but vanilla's fluid fill
-     * only reaches global sea level (y63), so above-sea rivers come out dry.
-     * Along the Earth river/lake mask, incise a shallow channel into vanilla's
-     * finished terrain and fill it with water at the local surface — the same
-     * "valley of water" vanilla makes for its own rivers, placed by hand here
-     * because this water table is well above y63. Runs after vanilla's noise
-     * and surface stages, so the column already holds finished blocks.
+     * Place water that vanilla can't, because our terrain follows real elevation
+     * instead of dipping to sea level. Two cases, both after vanilla's noise and
+     * surface stages (the column already holds finished blocks):
+     *
+     * <ul>
+     *   <li><b>Seas</b> (Earth elevation &lt; 0): where cheese noise poked the
+     *   shallow seabed above sea level, drop it back and fill water to y63 — so
+     *   the Mediterranean and other shelves stop showing dry "ocean" patches.
+     *   <li><b>Rivers</b> (river/lake mask on land): incise a channel and fill
+     *   it with water. The water line is the MINIMUM elevation over a small
+     *   neighbourhood, so a raster bump becomes a carved canyon instead of the
+     *   river appearing to climb it.
+     * </ul>
      */
-    private void carveRivers(WorldInfo worldInfo, int chunkX, int chunkZ, ChunkData chunkData) {
+    private void carveWater(WorldInfo worldInfo, int chunkX, int chunkZ, ChunkData chunkData) {
         EarthData earth = maps.earthData();
-        if (earth == null || !earth.hasLayer("river")) {
+        if (earth == null || !earth.hasLayer("height")) {
             return;
         }
+        boolean hasRivers = earth.hasLayer("river");
         MapSampler sampler = maps.mapFor(worldInfo.getSeed()).sampler();
+        int minY = chunkData.getMinHeight();
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
                 double wx = (chunkX << 4) + lx + 0.5;
@@ -215,17 +227,46 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                     continue; // void / off-net (already handled by masking)
                 }
                 double[] ll = earth.toLonLat(p);
-                if (earth.sample("river", ll[0], ll[1]) <= 0.2) {
+                double elev = earth.sample("height", ll[0], ll[1]);
+
+                if (elev < 0) {
+                    // Sea: only touch columns where solid stuck up to sea level.
+                    if (chunkData.getType(lx, SEA_LEVEL, lz).isSolid()) {
+                        int seabed = Math.min((int) Math.round(sampler.heightAt(wx, wz)),
+                                SEA_LEVEL - 2);
+                        int bumpTop = SEA_LEVEL;
+                        for (int y = SEA_LEVEL + 32; y > SEA_LEVEL; y--) {
+                            if (chunkData.getType(lx, y, lz).isSolid()) {
+                                bumpTop = y;
+                                break;
+                            }
+                        }
+                        for (int y = bumpTop; y > seabed; y--) {
+                            chunkData.setBlock(lx, y, lz, Material.AIR);
+                        }
+                        chunkData.setRegion(lx, seabed + 1, lz, lx + 1, SEA_LEVEL, lz + 1,
+                                Material.WATER);
+                    }
+                    continue;
+                }
+
+                if (!hasRivers || earth.sample("river", ll[0], ll[1]) <= 0.2) {
                     continue;
                 }
                 int predicted = (int) Math.round(sampler.heightAt(wx, wz));
                 if (predicted <= SEA_LEVEL + 2) {
-                    continue; // at/below sea level: vanilla's ocean fill already gives water
+                    continue; // meets the sea; vanilla's ocean fill handles it
                 }
-                // Water level from the SMOOTH elevation, not vanilla's noisy
-                // surface, so it stays level across the channel and only steps
-                // gently downhill along the flow (incised one block).
-                int waterTop = predicted - 1;
+                // Level the water line to the neighbourhood minimum so a raster
+                // bump is carved through rather than climbed; cap the canyon.
+                double hmin = sampler.heightAt(wx, wz);
+                for (double[] o : RIVER_KERNEL) {
+                    hmin = Math.min(hmin, sampler.heightAt(wx + o[0], wz + o[1]));
+                }
+                int waterTop = Math.max((int) Math.round(hmin) - 1, predicted - 14);
+                if (waterTop <= SEA_LEVEL) {
+                    continue;
+                }
                 int surf = surfaceOf(chunkData, lx, lz, predicted);
                 int clearTop = Math.max(surf, waterTop) + 3;
                 for (int y = clearTop; y > waterTop; y--) {
@@ -233,10 +274,8 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                 }
                 chunkData.setRegion(lx, waterTop - 2, lz, lx + 1, waterTop + 1, lz + 1,
                         Material.WATER);
-                // gravel bed + fill so the channel is grounded even where vanilla
-                // noise dipped the terrain below the water line
-                chunkData.setRegion(lx, waterTop - 6, lz, lx + 1, waterTop - 2, lz + 1,
-                        Material.GRAVEL);
+                chunkData.setRegion(lx, Math.max(minY, waterTop - 6), lz, lx + 1, waterTop - 2,
+                        lz + 1, Material.GRAVEL); // bed + fill so noise dips don't drain it
             }
         }
     }
