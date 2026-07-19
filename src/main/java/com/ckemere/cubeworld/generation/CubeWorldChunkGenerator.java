@@ -224,10 +224,28 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
         int minY = chunkData.getMinHeight();
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
-                // Cheap gate first: open water/air at sea level means nothing to
-                // do (deep ocean is already filled, and land/rivers always have
-                // solid here). This skips the costly cube-point lookup for the
-                // ~70% of the world that is open ocean.
+                // Sea, from the block column alone (cheap, no cube-point lookup):
+                // if surface water sits at sea level, ground it. Vanilla's aquifer
+                // leaves air-gap "barriers" between the water and the real-elevation
+                // seabed, so the water floats and drains when the chunk ticks —
+                // fill the gap down to the first solid so the sea is watertight.
+                if (chunkData.getType(lx, SEA_LEVEL - 1, lz) == Material.WATER) {
+                    int y = SEA_LEVEL - 1;
+                    while (y >= minY && chunkData.getType(lx, y, lz) == Material.WATER) {
+                        y--;
+                    }
+                    if (y >= minY && !chunkData.getType(lx, y, lz).isSolid()) {
+                        int seabed = y;
+                        while (seabed >= minY && !chunkData.getType(lx, seabed, lz).isSolid()) {
+                            seabed--;
+                        }
+                        chunkData.setRegion(lx, seabed + 1, lz, lx + 1, SEA_LEVEL, lz + 1,
+                                Material.WATER);
+                    }
+                    continue;
+                }
+                // Not open sea: land, a shoal, or a river. Anything without solid
+                // at sea level here has no surface to work with.
                 if (!chunkData.getType(lx, SEA_LEVEL, lz).isSolid()) {
                     continue;
                 }
@@ -240,24 +258,22 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                 double[] ll = earth.toLonLat(p);
                 // Skip the elevation lookup when solid stands well above sea
                 // level — it's plainly land, so only the river check remains.
-                // The sea fix only matters near the waterline.
                 boolean nearSea = !chunkData.getType(lx, SEA_LEVEL + 8, lz).isSolid();
                 double elev = nearSea ? earth.sample("height", ll[0], ll[1]) : 1.0;
 
                 if (elev < 0) {
-                    // Sea with solid poking to sea level: drop it and fill water.
+                    // Shoal: solid poked above the sea in an ocean cell. Clear it to
+                    // the raster seabed, lay a gravel floor, and fill water — a clean
+                    // watertight column, not a bump.
                     int seabed = Math.min((int) Math.round(sampler.heightAt(wx, wz)),
                             SEA_LEVEL - 2);
-                    int bumpTop = SEA_LEVEL;
-                    for (int y = SEA_LEVEL + 32; y > SEA_LEVEL; y--) {
+                    for (int y = SEA_LEVEL + 40; y > seabed; y--) {
                         if (chunkData.getType(lx, y, lz).isSolid()) {
-                            bumpTop = y;
-                            break;
+                            chunkData.setBlock(lx, y, lz, Material.AIR);
                         }
                     }
-                    for (int y = bumpTop; y > seabed; y--) {
-                        chunkData.setBlock(lx, y, lz, Material.AIR);
-                    }
+                    chunkData.setRegion(lx, Math.max(minY, seabed - 2), lz, lx + 1, seabed + 1,
+                            lz + 1, Material.GRAVEL);
                     chunkData.setRegion(lx, seabed + 1, lz, lx + 1, SEA_LEVEL, lz + 1,
                             Material.WATER);
                     continue;
