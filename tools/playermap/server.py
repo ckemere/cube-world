@@ -16,6 +16,10 @@ import os
 import socket
 import socketserver
 import struct
+import threading
+import time
+
+import realmap
 
 RCON_HOST = os.environ.get("RCON_HOST", "127.0.0.1")
 RCON_PORT = int(os.environ.get("RCON_PORT", "25575"))
@@ -23,6 +27,13 @@ RCON_PW = os.environ.get("RCON_PW", "cubeworld-dev")
 
 FACE = int(os.environ.get("FACE_SIZE", "10240"))
 H = FACE / 2
+
+# Overworld region files hold the real generated blocks. Default to the dev
+# server's world relative to this tool; override with WORLD_REGION_DIR.
+REGION_DIR = os.environ.get("WORLD_REGION_DIR", os.path.join(
+    os.path.dirname(__file__), "..", "..", "run", "world",
+    "dimensions", "minecraft", "overworld", "region"))
+SAVE_EVERY = float(os.environ.get("SAVE_EVERY", "20"))   # min seconds between save-all
 GRID = {"NORTH_POLE": (0, 0), "EQ_PRIME": (0, 1), "EQ_EAST": (1, 0),
         "EQ_BACK": (0, -1), "EQ_WEST": (-1, 0), "SOUTH_POLE": (0, 2)}
 
@@ -184,10 +195,87 @@ MARKER_OVERLAY = r"""
 """
 
 
+FACES_REFRESH = r"""
+<script>
+// Live-refresh the six face textures with real generated blocks. The globe's
+// gl context and texture list live in the shared top-level lexical scope, so
+// we can re-upload straight into them as more of the world is explored.
+(function(){
+  function upload(k,uri){var img=new Image();img.onload=function(){
+    gl.bindTexture(gl.TEXTURE_2D,texs[k]);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,img);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);};
+    img.src=uri;}
+  async function poll(){
+    try{var r=await fetch('/faces',{cache:'no-store'});var u=await r.json();
+      if(u&&u.length===6)for(var k=0;k<6;k++)upload(k,u[k]);}catch(e){}
+    setTimeout(poll,8000);
+  }
+  setTimeout(poll,8000);
+})();
+</script>
+"""
+
+# --- real generated blocks composited onto the model globe (mtime-cached) ---
+_faces_lock = threading.Lock()
+_cache = {"sig": None, "uris": None, "painted": 0}
+_base_uris = [None]      # lazily-parsed base face URIs from globe.html
+_last_save = [0.0]
+
+
+def _globe_path():
+    return os.path.join(os.path.dirname(__file__), "..", "cubemap", "out", "globe.html")
+
+
+def _base_face_uris():
+    if _base_uris[0] is None:
+        with open(_globe_path(), encoding="utf-8") as f:
+            _base_uris[0] = realmap.face_uris_from_html(f.read()) or []
+    return _base_uris[0]
+
+
+def _maybe_save():
+    """Throttled `save-all flush` so freshly explored chunks reach the region
+    files (in-memory chunks aren't otherwise visible to us)."""
+    now = time.time()
+    if now - _last_save[0] < SAVE_EVERY:
+        return
+    _last_save[0] = now
+    try:
+        rcon(["save-all flush"])
+    except Exception:
+        pass
+
+
+def composited_uris():
+    """Six face data-URIs with real blocks painted on, cached by region mtime."""
+    _maybe_save()
+    sig = realmap.region_signature(REGION_DIR)
+    with _faces_lock:
+        if _cache["sig"] == sig and _cache["uris"] is not None:
+            return _cache["uris"]
+    base = _base_face_uris()
+    if not base:
+        return None
+    try:
+        uris, painted = realmap.composite_uris(base, REGION_DIR)
+    except Exception:
+        return base
+    with _faces_lock:
+        _cache.update(sig=sig, uris=uris, painted=painted)
+    return uris
+
+
 def load_page():
-    globe = os.path.join(os.path.dirname(__file__), "..", "cubemap", "out", "globe.html")
-    with open(globe, encoding="utf-8") as f:
-        return f.read() + MARKER_OVERLAY
+    with open(_globe_path(), encoding="utf-8") as f:
+        html = f.read()
+    uris = composited_uris()
+    if uris:
+        html = realmap.replace_uris(html, uris)
+    return html + MARKER_OVERLAY + FACES_REFRESH
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -205,6 +293,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/players"):
             self._send(json.dumps(get_players()).encode(), "application/json")
+        elif self.path.startswith("/faces"):
+            self._send(json.dumps(composited_uris() or []).encode(), "application/json")
         else:
             self._send(load_page().encode("utf-8"), "text/html; charset=utf-8")
 
