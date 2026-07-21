@@ -95,15 +95,23 @@ public final class TeleportService {
     }
 
     public void registerRecipe() {
-        if (plugin.getServer().getRecipe(recipeKey) != null) {
-            return;
+        if (plugin.getServer().getRecipe(recipeKey) == null) {
+            ShapedRecipe r = new ShapedRecipe(recipeKey, createCore(1));
+            r.shape("EAE", "ALA", "EAE");        // ender pearls + amethyst around a lodestone
+            r.setIngredient('E', Material.ENDER_PEARL);
+            r.setIngredient('A', Material.AMETHYST_SHARD);
+            r.setIngredient('L', Material.LODESTONE);
+            plugin.getServer().addRecipe(r);
         }
-        ShapedRecipe r = new ShapedRecipe(recipeKey, createCore(1));
-        r.shape("EAE", "ALA", "EAE");            // ender pearls + amethyst around a lodestone
-        r.setIngredient('E', Material.ENDER_PEARL);
-        r.setIngredient('A', Material.AMETHYST_SHARD);
-        r.setIngredient('L', Material.LODESTONE);
-        plugin.getServer().addRecipe(r);
+    }
+
+    /** Sanity-check the item logic everything else keys off — logged at startup. */
+    public void selfTest() {
+        boolean roundtrip = isCore(createCore(1));
+        boolean recipe = plugin.getServer().getRecipe(recipeKey) != null;
+        plugin.getLogger().info("Teleport self-test: core PDC roundtrip "
+                + (roundtrip ? "OK" : "FAILED") + ", recipe "
+                + (recipe ? "registered" : "MISSING") + ".");
     }
 
     // ------------------------------------------------------------- the registry

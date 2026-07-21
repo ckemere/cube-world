@@ -85,6 +85,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
         teleport = new com.ckemere.cubeworld.teleport.TeleportService(this);
         teleport.load();
         teleport.registerRecipe();
+        teleport.selfTest();
         teleport.seedCities();
         getServer().getPluginManager().registerEvents(
                 new com.ckemere.cubeworld.teleport.TeleporterListener(this, teleport), this);
