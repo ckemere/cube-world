@@ -114,6 +114,25 @@ public final class TeleportService {
                 + (recipe ? "registered" : "MISSING") + ".");
     }
 
+    // --------------------------------------------------------- raise a station
+    /** Register a station if the core block sits on a full 3x3 amethyst pad. */
+    public boolean tryRaise(Location core, String name) {
+        World w = core.getWorld();
+        if (w == null) {
+            return false;
+        }
+        for (int dx = -BASE_RADIUS; dx <= BASE_RADIUS; dx++) {
+            for (int dz = -BASE_RADIUS; dz <= BASE_RADIUS; dz++) {
+                if (w.getBlockAt(core.getBlockX() + dx, core.getBlockY() - 1, core.getBlockZ() + dz)
+                        .getType() != Material.AMETHYST_BLOCK) {
+                    return false;
+                }
+            }
+        }
+        register(core, name, false);
+        return true;
+    }
+
     // ------------------------------------------------------------- the registry
     public Station stationAt(Location loc) {
         return stations.get(loc.getWorld().getName() + ":" + loc.getBlockX() + ":"
@@ -134,6 +153,18 @@ public final class TeleportService {
             stations.remove(s.key());
             save();
         }
+    }
+
+    /** Remove a station by name (admin). Returns the removed station, or null. */
+    public Station removeByName(String name) {
+        for (Station s : stations.values()) {
+            if (s.name().equalsIgnoreCase(name)) {
+                stations.remove(s.key());
+                save();
+                return s;
+            }
+        }
+        return null;
     }
 
     public List<Station> all() {

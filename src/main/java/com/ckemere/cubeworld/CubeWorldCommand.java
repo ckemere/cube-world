@@ -80,6 +80,46 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                 teleport.travel(p, p.getLocation(), dest);
                 return true;
             }
+            case "tpremove" -> {
+                if (args.length < 2) {
+                    sender.sendMessage(Component.text("Usage: /cubeworld tpremove <station name>",
+                            NamedTextColor.RED));
+                    return true;
+                }
+                String name = String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length));
+                var removed = teleport.removeByName(name);
+                sender.sendMessage(removed == null
+                        ? Component.text("No station named '" + name + "'.", NamedTextColor.RED)
+                        : Component.text("Removed station " + removed.name() + ".", NamedTextColor.YELLOW));
+                return true;
+            }
+            case "tpsim" -> {
+                // build a test pad + core at x,y,z and run the raise logic (console-testable)
+                if (args.length != 4) {
+                    sender.sendMessage(Component.text("Usage: /cubeworld tpsim <x> <y> <z>",
+                            NamedTextColor.RED));
+                    return true;
+                }
+                try {
+                    int x = Integer.parseInt(args[1]);
+                    int y = Integer.parseInt(args[2]);
+                    int z = Integer.parseInt(args[3]);
+                    org.bukkit.World w = org.bukkit.Bukkit.getWorlds().get(0);
+                    w.getChunkAt(x >> 4, z >> 4).load(true);
+                    for (int dx = -1; dx <= 1; dx++) {
+                        for (int dz = -1; dz <= 1; dz++) {
+                            w.getBlockAt(x + dx, y - 1, z + dz).setType(org.bukkit.Material.AMETHYST_BLOCK);
+                        }
+                    }
+                    w.getBlockAt(x, y, z).setType(org.bukkit.Material.LODESTONE);
+                    boolean ok = teleport.tryRaise(new org.bukkit.Location(w, x, y, z), "SimTest");
+                    sender.sendMessage(Component.text("tpsim raise=" + ok + " at " + x + "," + y + ","
+                            + z, ok ? NamedTextColor.GREEN : NamedTextColor.RED));
+                } catch (NumberFormatException ex) {
+                    sender.sendMessage(Component.text("Coordinates must be integers.", NamedTextColor.RED));
+                }
+                return true;
+            }
             case "tpstations" -> {
                 var list = teleport.all();
                 sender.sendMessage(Component.text(list.size() + " teleport stations registered ("

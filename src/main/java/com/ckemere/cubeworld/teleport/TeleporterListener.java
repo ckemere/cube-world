@@ -47,8 +47,7 @@ public final class TeleporterListener implements Listener {
             return;
         }
         Block b = e.getBlockPlaced();
-        if (hasAmethystPad(b)) {
-            svc.register(b.getLocation(), autoName(b), false);
+        if (svc.tryRaise(b.getLocation(), autoName(b))) {
             svc.spark(b.getLocation());
             e.getPlayer().sendMessage(Component.text("Teleport station raised.", NamedTextColor.AQUA));
         } else {
@@ -73,20 +72,6 @@ public final class TeleporterListener implements Listener {
         e.setDropItems(false);
         e.getBlock().getWorld().dropItemNaturally(e.getBlock().getLocation(), svc.createCore(1));
         e.getPlayer().sendMessage(Component.text("Teleport station removed.", NamedTextColor.YELLOW));
-    }
-
-    private boolean hasAmethystPad(Block core) {
-        World w = core.getWorld();
-        int r = TeleportService.BASE_RADIUS;
-        for (int dx = -r; dx <= r; dx++) {
-            for (int dz = -r; dz <= r; dz++) {
-                if (w.getBlockAt(core.getX() + dx, core.getY() - 1, core.getZ() + dz)
-                        .getType() != Material.AMETHYST_BLOCK) {
-                    return false;
-                }
-            }
-        }
-        return true;
     }
 
     // ------------------------------------------------------------------ open it
