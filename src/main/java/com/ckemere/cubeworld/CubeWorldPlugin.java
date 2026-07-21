@@ -45,6 +45,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
     private final SeamService seams = new SeamService(topology);
     private final MirrorService mirrors = new MirrorService(topology, MARGIN_BLOCKS);
     private final Map<UUID, WorldServices> perWorld = new LinkedHashMap<>();
+    private com.ckemere.cubeworld.teleport.TeleportService teleport;
 
     /** Per-world seam machinery. Both cube worlds share geometry and topology. */
     public record WorldServices(World world, LiquidSeamService liquids,
@@ -79,6 +80,15 @@ public final class CubeWorldPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new EntitySeamListener(this, mirrors), this);
         getServer().getPluginManager().registerEvents(new PillarGuardListener(this, topology, MARGIN_BLOCKS), this);
         getServer().getPluginManager().registerEvents(new PortalLinkListener(this, geometry, maps), this);
+        // Teleport network: reskinned-lodestone stations on amethyst pads, with
+        // the 30 cities pre-seeded (built as their chunks load).
+        teleport = new com.ckemere.cubeworld.teleport.TeleportService(this);
+        teleport.load();
+        teleport.registerRecipe();
+        teleport.seedCities();
+        getServer().getPluginManager().registerEvents(
+                new com.ckemere.cubeworld.teleport.TeleporterListener(this, teleport), this);
+        getServer().getScheduler().runTaskTimer(this, teleport::ambientTick, 40L, 40L);
         loadEarthData();
         // Fold vanilla's terrain router onto the sphere BEFORE spawn chunks
         // generate. WorldInitEvent fires during world load (this STARTUP plugin
@@ -128,7 +138,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
         });
         getServer().getScheduler().runTaskTimer(this, exploration::tick, 100L, 20L);
 
-        CubeWorldCommand executor = new CubeWorldCommand(geometry, seams, mirrors, maps);
+        CubeWorldCommand executor = new CubeWorldCommand(geometry, seams, mirrors, maps, teleport);
         PluginCommand command = getCommand("cubeworld");
         if (command != null) {
             command.setExecutor(executor);
@@ -236,6 +246,9 @@ public final class CubeWorldPlugin extends JavaPlugin {
             services.tickets().releaseAll(services.world());
         }
         perWorld.clear();
+        if (teleport != null) {
+            teleport.save();
+        }
     }
 
     public CubeGeometry geometry() {

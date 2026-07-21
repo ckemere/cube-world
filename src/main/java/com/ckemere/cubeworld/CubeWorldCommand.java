@@ -25,13 +25,15 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
     private final SeamService seams;
     private final MirrorService mirrors;
     private final MapService maps;
+    private final com.ckemere.cubeworld.teleport.TeleportService teleport;
 
     public CubeWorldCommand(CubeGeometry geometry, SeamService seams, MirrorService mirrors,
-                            MapService maps) {
+                            MapService maps, com.ckemere.cubeworld.teleport.TeleportService teleport) {
         this.geometry = geometry;
         this.seams = seams;
         this.mirrors = mirrors;
         this.maps = maps;
+        this.teleport = teleport;
     }
 
     /** The sampler for the main world's seed. */
@@ -48,6 +50,29 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
         switch (args[0].toLowerCase(Locale.ROOT)) {
             case "ping" -> {
                 sender.sendMessage(Component.text("CubeWorld: pong!", NamedTextColor.GREEN));
+                return true;
+            }
+            case "tpcore" -> {
+                if (!(sender instanceof Player p)) {
+                    sender.sendMessage(Component.text("Players only.", NamedTextColor.RED));
+                    return true;
+                }
+                p.getInventory().addItem(teleport.createCore(1));
+                p.sendMessage(Component.text("Gave a Teleporter Core.", NamedTextColor.AQUA));
+                return true;
+            }
+            case "tpstations" -> {
+                var list = teleport.all();
+                sender.sendMessage(Component.text(list.size() + " teleport stations registered ("
+                        + teleport.pendingCount() + " cities pending build).", NamedTextColor.AQUA));
+                int shown = 0;
+                for (var s : list) {
+                    if (shown++ >= 20) {
+                        break;
+                    }
+                    sender.sendMessage(Component.text("  " + s.name() + (s.city() ? " [city]" : "")
+                            + " @ " + s.x() + "," + s.y() + "," + s.z(), NamedTextColor.GRAY));
+                }
                 return true;
             }
             case "face" -> {
@@ -500,7 +525,8 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                                       @NotNull String alias, String @NotNull [] args) {
         List<String> out = new ArrayList<>();
         if (args.length == 1) {
-            for (String sub : new String[] {"ping", "face", "tp", "simulate"}) {
+            for (String sub : new String[] {"ping", "face", "tp", "simulate", "biomeat",
+                    "tpcore", "tpstations"}) {
                 if (sub.startsWith(args[0].toLowerCase(Locale.ROOT))) {
                     out.add(sub);
                 }
