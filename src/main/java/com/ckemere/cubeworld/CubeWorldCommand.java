@@ -93,6 +93,51 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                         : Component.text("Removed station " + removed.name() + ".", NamedTextColor.YELLOW));
                 return true;
             }
+            case "tpoffers" -> {
+                if (args.length < 2) {
+                    sender.sendMessage(Component.text("Usage: /cubeworld tpoffers <station name>",
+                            NamedTextColor.RED));
+                    return true;
+                }
+                String name = String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length));
+                var s = teleport.byName(name);
+                if (s == null) {
+                    sender.sendMessage(Component.text("No station named '" + name + "'.", NamedTextColor.RED));
+                    return true;
+                }
+                var offers = teleport.offers(s, null);
+                sender.sendMessage(Component.text(s.name() + " offers " + offers.size()
+                        + " ring destination(s):", NamedTextColor.AQUA));
+                for (var o : offers) {
+                    sender.sendMessage(Component.text("  " + o.kind() + " -> " + o.dest().name()
+                            + " [" + o.dest().code() + "]", NamedTextColor.GRAY));
+                }
+                return true;
+            }
+            case "tpticket" -> {
+                if (args.length < 2) {
+                    sender.sendMessage(Component.text("Usage: /cubeworld tpticket <station name>",
+                            NamedTextColor.RED));
+                    return true;
+                }
+                String name = String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length));
+                var s = teleport.byName(name);
+                if (s == null) {
+                    sender.sendMessage(Component.text("No station named '" + name + "'.", NamedTextColor.RED));
+                    return true;
+                }
+                org.bukkit.inventory.ItemStack book = teleport.ticketBook(s);
+                var back = teleport.ticketTarget(book);          // create -> parse -> resolve
+                boolean ok = back != null && back.key().equals(s.key());
+                sender.sendMessage(Component.text("Ticket roundtrip " + s.name() + ": "
+                        + (ok ? "OK" : "FAILED") + "  [" + s.code() + "]",
+                        ok ? NamedTextColor.GREEN : NamedTextColor.RED));
+                if (sender instanceof Player p) {
+                    p.getInventory().addItem(book);
+                    p.sendMessage(Component.text("Gave you the ticket book.", NamedTextColor.AQUA));
+                }
+                return true;
+            }
             case "tpsim" -> {
                 // build a test pad + core at x,y,z and run the raise logic (console-testable)
                 if (args.length != 4) {
@@ -130,7 +175,7 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                         break;
                     }
                     sender.sendMessage(Component.text("  " + s.name() + (s.city() ? " [city]" : "")
-                            + " @ " + s.x() + "," + s.y() + "," + s.z(), NamedTextColor.GRAY));
+                            + " @ " + s.x() + "," + s.z() + "  [" + s.code() + "]", NamedTextColor.GRAY));
                 }
                 return true;
             }

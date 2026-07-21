@@ -1,7 +1,11 @@
 package com.ckemere.cubeworld.teleport;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -12,28 +16,39 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.TradeSelectEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
-import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.world.ChunkLoadEvent;
+import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.MapMeta;
-import org.bukkit.map.MapView;
+import org.bukkit.inventory.Merchant;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.inventory.MerchantRecipe;
+import org.bukkit.inventory.meta.ItemMeta;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 
 /**
- * Wires the teleport network into the world: raise a station by placing a
- * Teleporter Core on a 3x3 amethyst pad, open the network by right-clicking a
- * station, travel by paying lapis, and build the 30 preloaded city stations as
- * their chunks load.
+ * The teleport network in-world: raise a station by placing a Teleporter Core on
+ * a 3x3 amethyst pad; right-click a station to open its trade menu; select a
+ * trade to travel. The menu always offers the two ring neighbours, plus the
+ * target of a held ticket book and a "buy return ticket" trade when holding
+ * paper. City stations build as their chunks load.
  */
 public final class TeleporterListener implements Listener {
 
-    private static final double NEARBY_RADIUS = 20000.0;   // "nearby" destinations without a map
+    private static final int RETURN_LAPIS = 4;      // flat cost of a return ticket
 
     private final Plugin plugin;
     private final TeleportService svc;
+    private final Map<UUID, Menu> open = new HashMap<>();
+
+    /** A player's currently-open teleport menu: source + trade index mapping. */
+    private record Menu(TeleportService.Station source, List<TeleportService.Offer> offers,
+                        int returnIndex) {
+    }
 
     public TeleporterListener(Plugin plugin, TeleportService svc) {
         this.plugin = plugin;
@@ -49,7 +64,9 @@ public final class TeleporterListener implements Listener {
         Block b = e.getBlockPlaced();
         if (svc.tryRaise(b.getLocation(), coreName(e.getItemInHand(), b))) {
             svc.spark(b.getLocation());
-            e.getPlayer().sendMessage(Component.text("Teleport station raised.", NamedTextColor.AQUA));
+            TeleportService.Station s = svc.stationAt(b.getLocation());
+            e.getPlayer().sendMessage(Component.text("Teleport station raised — code: "
+                    + (s == null ? "?" : s.code()), NamedTextColor.AQUA));
         } else {
             e.getPlayer().sendMessage(Component.text(
                     "A teleporter needs a 3x3 amethyst-block pad beneath it.", NamedTextColor.RED));
@@ -62,7 +79,7 @@ public final class TeleporterListener implements Listener {
         if (s == null) {
             return;
         }
-        if (s.city()) {                      // protect the preloaded city network
+        if (s.city()) {
             e.setCancelled(true);
             e.getPlayer().sendMessage(Component.text(
                     s.name() + " is a protected city station.", NamedTextColor.RED));
@@ -78,78 +95,113 @@ public final class TeleporterListener implements Listener {
     @EventHandler
     public void onInteract(PlayerInteractEvent e) {
         if (e.getAction() != Action.RIGHT_CLICK_BLOCK || e.getClickedBlock() == null
-                || e.getHand() != org.bukkit.inventory.EquipmentSlot.HAND) {
+                || e.getHand() != EquipmentSlot.HAND) {
             return;
         }
         TeleportService.Station s = svc.stationAt(e.getClickedBlock().getLocation());
         if (s == null) {
             return;
         }
-        e.setCancelled(true);                // suppress lodestone compass behaviour
+        e.setCancelled(true);
         Player p = e.getPlayer();
-        Location src = e.getClickedBlock().getLocation();
 
-        List<TeleportService.Station> dests = new ArrayList<>(svc.near(src, NEARBY_RADIUS));
-        TeleportService.Station mapTarget = mapTarget(p);   // a drawn map unlocks a far jump
-        if (mapTarget != null && dests.stream().noneMatch(d -> d.key().equals(mapTarget.key()))
-                && !mapTarget.key().equals(s.key())) {
-            dests.add(0, mapTarget);
+        ItemStack main = p.getInventory().getItemInMainHand();
+        ItemStack off = p.getInventory().getItemInOffHand();
+        TeleportService.Station ticketTarget = svc.ticketTarget(main);
+        if (ticketTarget == null) {
+            ticketTarget = svc.ticketTarget(off);
         }
-        if (dests.isEmpty()) {
+        boolean hasPaper = main.getType() == Material.PAPER || off.getType() == Material.PAPER;
+
+        List<TeleportService.Offer> offers = svc.offers(s, ticketTarget);
+        List<MerchantRecipe> recipes = new ArrayList<>();
+        for (TeleportService.Offer o : offers) {
+            int cost = svc.lapisCost(e.getClickedBlock().getLocation(), o.dest());
+            MerchantRecipe r = new MerchantRecipe(destIcon(o, cost), Integer.MAX_VALUE);
+            r.addIngredient(new ItemStack(Material.LAPIS_LAZULI, Math.max(1, Math.min(64, cost))));
+            recipes.add(r);
+        }
+        int returnIndex = -1;
+        if (hasPaper) {
+            returnIndex = recipes.size();
+            MerchantRecipe ret = new MerchantRecipe(svc.ticketBook(s), Integer.MAX_VALUE);
+            ret.addIngredient(new ItemStack(Material.PAPER, 1));
+            ret.addIngredient(new ItemStack(Material.LAPIS_LAZULI, RETURN_LAPIS));
+            recipes.add(ret);
+        }
+        if (recipes.isEmpty()) {
             p.sendMessage(Component.text(
-                    "No stations in range. Bring a drawn map of a distant station.",
+                    "The network is still forming — no destinations from here yet.",
                     NamedTextColor.GRAY));
             return;
         }
-        p.openInventory(new TeleportMenu(svc, p, src, s.name(), dests, svc.countLapis(p))
-                .getInventory());
+        Merchant m = Bukkit.createMerchant(Component.text("Teleporter · " + s.name(),
+                NamedTextColor.DARK_AQUA));
+        m.setRecipes(recipes);
+        p.openMerchant(m, true);
+        open.put(p.getUniqueId(), new Menu(s, offers, returnIndex));
     }
 
-    /** The station nearest a held filled-map's centre, if the map is in hand. */
-    private TeleportService.Station mapTarget(Player p) {
-        for (ItemStack it : new ItemStack[] {p.getInventory().getItemInMainHand(),
-                p.getInventory().getItemInOffHand()}) {
-            if (it != null && it.getType() == Material.FILLED_MAP
-                    && it.getItemMeta() instanceof MapMeta mm && mm.hasMapView()) {
-                MapView v = mm.getMapView();
-                if (v == null) {
-                    continue;
-                }
-                Location c = new Location(v.getWorld(), v.getCenterX(), 0, v.getCenterZ());
-                TeleportService.Station best = null;
-                double bd = Double.MAX_VALUE;
-                for (TeleportService.Station st : svc.all()) {
-                    if (!st.world().equals(v.getWorld().getName())) {
-                        continue;
-                    }
-                    double d = svc.dist(c, st);
-                    if (d < bd) {
-                        bd = d;
-                        best = st;
-                    }
-                }
-                if (best != null && bd < 400) {     // map must actually cover a station
-                    return best;
-                }
-            }
-        }
-        return null;
-    }
-
-    // -------------------------------------------------------------------- travel
+    /** Select a trade → act (we never complete a real trade). */
     @EventHandler
-    public void onClick(InventoryClickEvent e) {
-        if (!(e.getInventory().getHolder() instanceof TeleportMenu menu)) {
-            return;
-        }
-        e.setCancelled(true);
+    public void onTradeSelect(TradeSelectEvent e) {
         if (!(e.getWhoClicked() instanceof Player p)) {
             return;
         }
-        TeleportService.Station dest = menu.destinationAt(e.getRawSlot());
-        if (dest != null) {
-            svc.travel(p, menu.source(), dest);
+        Menu menu = open.get(p.getUniqueId());
+        if (menu == null) {
+            return;
         }
+        e.setCancelled(true);
+        int i = e.getIndex();
+        if (i == menu.returnIndex) {
+            buyReturnTicket(p, menu.source);
+        } else if (i >= 0 && i < menu.offers.size()) {
+            svc.travel(p, menu.source.location(plugin), menu.offers.get(i).dest());
+        }
+    }
+
+    @EventHandler
+    public void onClose(InventoryCloseEvent e) {
+        open.remove(e.getPlayer().getUniqueId());
+    }
+
+    private void buyReturnTicket(Player p, TeleportService.Station here) {
+        if (!p.getInventory().contains(Material.PAPER, 1) || svc.countLapis(p) < RETURN_LAPIS) {
+            p.sendMessage(Component.text("A return ticket costs 1 paper + " + RETURN_LAPIS + " lapis.",
+                    NamedTextColor.RED));
+            return;
+        }
+        p.getInventory().removeItem(new ItemStack(Material.PAPER, 1));
+        svc.removeLapis(p, RETURN_LAPIS);
+        p.closeInventory();
+        p.getInventory().addItem(svc.ticketBook(here));
+        p.sendMessage(Component.text("Return ticket to " + here.name() + " printed (code: "
+                + here.code() + ").", NamedTextColor.AQUA));
+    }
+
+    private ItemStack destIcon(TeleportService.Offer o, int cost) {
+        TeleportService.Station d = o.dest();
+        ItemStack it = new ItemStack(o.kind() == TeleportService.OfferKind.TICKET
+                ? Material.PAPER : Material.FILLED_MAP);
+        ItemMeta m = it.getItemMeta();
+        m.displayName(Component.text(d.name(), d.city() ? NamedTextColor.GOLD : NamedTextColor.AQUA)
+                .decoration(TextDecoration.ITALIC, false));
+        m.lore(List.of(
+                lore(switch (o.kind()) {
+                    case RING_A -> "Ring route Ⅰ";
+                    case RING_B -> "Ring route Ⅱ";
+                    case TICKET -> "Your ticket";
+                }, NamedTextColor.GRAY),
+                lore("Cost: " + cost + " lapis", NamedTextColor.BLUE),
+                lore("Code: " + d.code(), NamedTextColor.DARK_GRAY),
+                lore("Select to travel", NamedTextColor.GREEN)));
+        it.setItemMeta(m);
+        return it;
+    }
+
+    private static Component lore(String s, NamedTextColor c) {
+        return Component.text(s, c).decoration(TextDecoration.ITALIC, false);
     }
 
     // ------------------------------------------------ build preloaded city sites
@@ -165,7 +217,6 @@ public final class TeleporterListener implements Listener {
             return;
         }
         World w = e.getWorld();
-        // build next tick so the chunk (and its neighbours for surface height) settle
         plugin.getServer().getScheduler().runTask(plugin, () -> {
             for (TeleportService.CityBuild c : builds) {
                 buildCityStation(w, c.x(), c.z(), c.name());
@@ -179,7 +230,7 @@ public final class TeleporterListener implements Listener {
         for (int dx = -r; dx <= r; dx++) {
             for (int dz = -r; dz <= r; dz++) {
                 w.getBlockAt(x + dx, y, z + dz).setType(Material.AMETHYST_BLOCK, false);
-                for (int dy = 1; dy <= 3; dy++) {           // headroom for arriving players
+                for (int dy = 1; dy <= 3; dy++) {
                     w.getBlockAt(x + dx, y + dy, z + dz).setType(Material.AIR, false);
                 }
             }

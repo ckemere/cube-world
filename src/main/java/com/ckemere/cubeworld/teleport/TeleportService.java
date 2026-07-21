@@ -41,8 +41,9 @@ public final class TeleportService {
     private static final double BLOCKS_PER_LAPIS = 1500.0;
     private static final int MAX_LAPIS = 64;
 
-    /** A registered station: a workstation block location + display name. */
-    public record Station(String world, int x, int y, int z, String name, boolean city) {
+    /** A registered station: a workstation block location, name, and ticket code. */
+    public record Station(String world, int x, int y, int z, String name, boolean city,
+                          String code) {
         public String key() {
             return world + ":" + x + ":" + y + ":" + z;
         }
@@ -53,10 +54,19 @@ public final class TeleportService {
         }
     }
 
+    /** A destination the menu can offer, tagged by how it was reached. */
+    public enum OfferKind { RING_A, RING_B, TICKET }
+
+    public record Offer(Station dest, OfferKind kind) {
+    }
+
     private final Plugin plugin;
     private final NamespacedKey coreKey;                 // PDC marker on the item
     private final NamespacedKey recipeKey;
     private final Map<String, Station> stations = new LinkedHashMap<>();
+    private final Map<String, Station> byCode = new java.util.HashMap<>();
+    private final RingNetwork rings = new RingNetwork();
+    private final java.util.Random ringRandom = new java.util.Random();
     // pending city stations to build physically on chunk load: chunkKey -> list
     private final Map<Long, List<PendingCity>> pendingByChunk = new LinkedHashMap<>();
 
@@ -140,9 +150,12 @@ public final class TeleportService {
     }
 
     public Station register(Location loc, String name, boolean city) {
+        String code = freshCode(loc.getBlockX(), loc.getBlockZ());
         Station s = new Station(loc.getWorld().getName(), loc.getBlockX(), loc.getBlockY(),
-                loc.getBlockZ(), name, city);
+                loc.getBlockZ(), name, city, code);
         stations.put(s.key(), s);
+        byCode.put(code, s);
+        rings.insertRandom(s.key(), ringRandom);
         save();
         return s;
     }
@@ -150,16 +163,34 @@ public final class TeleportService {
     public void unregister(Location loc) {
         Station s = stationAt(loc);
         if (s != null) {
-            stations.remove(s.key());
+            drop(s);
             save();
         }
+    }
+
+    private void drop(Station s) {
+        stations.remove(s.key());
+        byCode.remove(s.code());
+        rings.remove(s.key());
+    }
+
+    /** A deterministic, currently-unique ticket code for a site. */
+    private String freshCode(int x, int z) {
+        long seed = (((long) x) << 32) ^ (z & 0xffffffffL);
+        for (long salt = 0; salt < 64; salt++) {
+            String code = Ticketing.codeFor(seed + salt * 0x9e3779b97f4a7c15L);
+            if (!byCode.containsKey(code)) {
+                return code;
+            }
+        }
+        return Ticketing.codeFor(seed ^ System.identityHashCode(this));  // vanishingly unlikely
     }
 
     /** Remove a station by name (admin). Returns the removed station, or null. */
     public Station removeByName(String name) {
         for (Station s : stations.values()) {
             if (s.name().equalsIgnoreCase(name)) {
-                stations.remove(s.key());
+                drop(s);
                 save();
                 return s;
             }
@@ -169,6 +200,71 @@ public final class TeleportService {
 
     public List<Station> all() {
         return new ArrayList<>(stations.values());
+    }
+
+    public Station byKey(String key) {
+        return stations.get(key);
+    }
+
+    public Station stationByCode(String code) {
+        return code == null ? null : byCode.get(code);
+    }
+
+    // --------------------------------------------------------- offers / tickets
+    /** The two (distinct) ring destinations for a station, plus a ticket target. */
+    public List<Offer> offers(Station source, Station ticketTarget) {
+        List<Offer> out = new ArrayList<>();
+        List<String> dests = rings.twoDestinations(source.key());
+        if (dests.size() > 0) {
+            addOffer(out, stations.get(dests.get(0)), OfferKind.RING_A, source);
+        }
+        if (dests.size() > 1) {
+            addOffer(out, stations.get(dests.get(1)), OfferKind.RING_B, source);
+        }
+        if (ticketTarget != null) {
+            addOffer(out, ticketTarget, OfferKind.TICKET, source);
+        }
+        return out;
+    }
+
+    private void addOffer(List<Offer> out, Station dest, OfferKind kind, Station source) {
+        if (dest == null || dest.key().equals(source.key())) {
+            return;
+        }
+        for (Offer o : out) {
+            if (o.dest().key().equals(dest.key())) {
+                return;                            // no duplicate destinations
+            }
+        }
+        out.add(new Offer(dest, kind));
+    }
+
+    /** A written-book ticket for a station: its name + four-word code. */
+    public ItemStack ticketBook(Station s) {
+        ItemStack it = new ItemStack(Material.WRITTEN_BOOK);
+        org.bukkit.inventory.meta.BookMeta m = (org.bukkit.inventory.meta.BookMeta) it.getItemMeta();
+        m.title(Component.text("Ticket: " + s.name()));
+        m.author(Component.text("CubeWorld Transit"));
+        m.addPages(Component.text("Teleport ticket\n\nTo: " + s.name() + "\n\nCode:\n" + s.code()
+                + "\n\nWrite these four words in\nany book to make a ticket."));
+        it.setItemMeta(m);
+        return it;
+    }
+
+    /** The station a held book-ticket points to (parsed from its text), or null. */
+    public Station ticketTarget(ItemStack it) {
+        if (it == null || !(it.getItemMeta() instanceof org.bukkit.inventory.meta.BookMeta bm)) {
+            return null;
+        }
+        if (it.getType() != Material.WRITTEN_BOOK && it.getType() != Material.WRITABLE_BOOK) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Component page : bm.pages()) {
+            sb.append(net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                    .plainText().serialize(page)).append(' ');
+        }
+        return stationByCode(Ticketing.parse(sb.toString()));
     }
 
     /** Stations within {@code radius} blocks of {@code from} (excluding itself), nearest first. */
@@ -361,41 +457,81 @@ public final class TeleportService {
         return plugin.getDataFolder().toPath().resolve("stations.csv");
     }
 
+    private Path ringsFile() {
+        return plugin.getDataFolder().toPath().resolve("rings.csv");
+    }
+
     public void load() {
         Path f = file();
-        if (!Files.exists(f)) {
-            return;
-        }
-        try {
-            for (String line : Files.readAllLines(f, StandardCharsets.UTF_8)) {
-                line = line.trim();
-                if (line.isEmpty() || line.startsWith("#")) {
-                    continue;
+        if (Files.exists(f)) {
+            try {
+                for (String line : Files.readAllLines(f, StandardCharsets.UTF_8)) {
+                    line = line.trim();
+                    if (line.isEmpty() || line.startsWith("#")) {
+                        continue;
+                    }
+                    // world,x,y,z,city,code,name  (code/name have no commas)
+                    String[] p = line.split(",", 7);
+                    if (p.length < 6) {
+                        continue;
+                    }
+                    int x = Integer.parseInt(p[1]);
+                    int y = Integer.parseInt(p[2]);
+                    int z = Integer.parseInt(p[3]);
+                    boolean city = Boolean.parseBoolean(p[4]);
+                    String code = p.length >= 7 ? p[5] : freshCode(x, z);   // migrate old rows
+                    String name = p.length >= 7 ? p[6] : p[5];
+                    Station s = new Station(p[0], x, y, z, name, city, code);
+                    stations.put(s.key(), s);
+                    byCode.put(code, s);
                 }
-                // world,x,y,z,city,name   (name may contain no commas — sanitized upstream)
-                String[] p = line.split(",", 6);
-                if (p.length < 6) {
-                    continue;
-                }
-                Station s = new Station(p[0], Integer.parseInt(p[1]), Integer.parseInt(p[2]),
-                        Integer.parseInt(p[3]), p[5], Boolean.parseBoolean(p[4]));
-                stations.put(s.key(), s);
+            } catch (IOException | NumberFormatException e) {
+                plugin.getLogger().warning("Teleport: failed to load stations (" + e + ").");
             }
-        } catch (IOException | NumberFormatException e) {
-            plugin.getLogger().warning("Teleport: failed to load stations (" + e + ").");
         }
+        Path rf = ringsFile();
+        if (Files.exists(rf)) {
+            try {
+                List<String> lines = Files.readAllLines(rf, StandardCharsets.UTF_8);
+                rings.load(lines.size() > 0 ? splitKeys(lines.get(0)) : List.of(),
+                        lines.size() > 1 ? splitKeys(lines.get(1)) : List.of());
+            } catch (IOException e) {
+                plugin.getLogger().warning("Teleport: failed to load rings (" + e + ").");
+            }
+        }
+        // reconcile: drop ring entries for gone stations; add stations missing from the rings
+        rings.ringA().removeIf(k -> !stations.containsKey(k));
+        rings.ringB().removeIf(k -> !stations.containsKey(k));
+        for (Station s : stations.values()) {
+            if (!rings.contains(s.key())) {
+                rings.insertRandom(s.key(), ringRandom);
+            }
+        }
+    }
+
+    private static List<String> splitKeys(String line) {
+        List<String> out = new ArrayList<>();
+        for (String k : line.split(",")) {
+            if (!k.isBlank()) {
+                out.add(k.trim());
+            }
+        }
+        return out;
     }
 
     public void save() {
         try {
             Files.createDirectories(plugin.getDataFolder().toPath());
-            StringBuilder sb = new StringBuilder("# world,x,y,z,city,name\n");
+            StringBuilder sb = new StringBuilder("# world,x,y,z,city,code,name\n");
             for (Station s : stations.values()) {
                 sb.append(s.world()).append(',').append(s.x()).append(',').append(s.y())
                         .append(',').append(s.z()).append(',').append(s.city()).append(',')
-                        .append(s.name().replace(',', ' ')).append('\n');
+                        .append(s.code()).append(',').append(s.name().replace(',', ' ')).append('\n');
             }
             Files.writeString(file(), sb.toString(), StandardCharsets.UTF_8);
+            Files.writeString(ringsFile(),
+                    String.join(",", rings.ringA()) + "\n" + String.join(",", rings.ringB()) + "\n",
+                    StandardCharsets.UTF_8);
         } catch (IOException e) {
             plugin.getLogger().warning("Teleport: failed to save stations (" + e + ").");
         }
