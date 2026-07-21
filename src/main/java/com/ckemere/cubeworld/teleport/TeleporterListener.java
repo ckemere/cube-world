@@ -47,7 +47,7 @@ public final class TeleporterListener implements Listener {
             return;
         }
         Block b = e.getBlockPlaced();
-        if (svc.tryRaise(b.getLocation(), autoName(b))) {
+        if (svc.tryRaise(b.getLocation(), coreName(e.getItemInHand(), b))) {
             svc.spark(b.getLocation());
             e.getPlayer().sendMessage(Component.text("Teleport station raised.", NamedTextColor.AQUA));
         } else {
@@ -187,7 +187,15 @@ public final class TeleporterListener implements Listener {
         svc.register(new Location(w, x, y + 1, z), name, true);
     }
 
-    private String autoName(Block core) {
-        return "Station " + core.getX() + "," + core.getZ();
+    /** Station name from a renamed core (anvil), else auto from coordinates. */
+    private String coreName(ItemStack core, Block b) {
+        if (core != null && core.hasItemMeta() && core.getItemMeta().hasDisplayName()) {
+            String n = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                    .plainText().serialize(core.getItemMeta().displayName());
+            if (!n.isBlank() && !n.equals("Teleporter Core")) {
+                return n;
+            }
+        }
+        return "Station " + b.getX() + "," + b.getZ();
     }
 }
