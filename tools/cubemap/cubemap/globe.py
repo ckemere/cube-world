@@ -185,7 +185,7 @@ _HTML_TEMPLATE = r"""<title>__TITLE__</title>
 <div id="hud" class="panel">
   <div class="k">CubeWorld · planet</div>
   <div class="t">orientation roll <b>__ROLL__°</b></div>
-  <div id="hint">drag · spin — scroll · zoom</div>
+  <div id="hint">drag · spin — shift/right-drag · pan — scroll · zoom — dbl-click · recenter</div>
 </div>
 <div class="btn panel" style="background:none;border:none;backdrop-filter:none">
   <button id="morph">cube ⇄ sphere</button>
@@ -270,7 +270,9 @@ FACE_URIS.forEach((uri,k)=>{const t=gl.createTexture();texs.push(t);
   const img=new Image();img.onload=()=>{gl.bindTexture(gl.TEXTURE_2D,t);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
     gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,img);
-    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+    // mipmaps: crisp level-0 up close, no shimmer when zoomed out (POT faces)
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);};
   img.src=uri;});
@@ -285,32 +287,52 @@ function rotY(a){const c=Math.cos(a),s=Math.sin(a);return new Float32Array(
 function rotX(a){const c=Math.cos(a),s=Math.sin(a);return new Float32Array(
   [1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]);}
 function trans(z){const m=new Float32Array(16);m[0]=m[5]=m[10]=m[15]=1;m[14]=z;return m;}
+// view translation with a lateral pan (screen-space x,y offset of the target)
+function trans3(x,y,z){const m=new Float32Array(16);m[0]=m[5]=m[10]=m[15]=1;m[12]=x;m[13]=y;m[14]=z;return m;}
 
-let yaw=0.6,pitch=-0.35,dist=4.2,morph=0,targetMorph=0;
+let yaw=0.6,pitch=-0.35,dist=4.2,morph=0,targetMorph=0,panX=0,panY=0;
 let spinning=!matchMedia("(prefers-reduced-motion: reduce)").matches;
-let drag=false,lx=0,ly=0;
-cv.addEventListener("mousedown",e=>{drag=true;lx=e.clientX;ly=e.clientY;spinning=false;});
+let drag=false,panMode=false,lx=0,ly=0;
+// left-drag orbits; shift-drag or right-drag PANS (slides the surface so an
+// off-centre point — e.g. spawn — can be brought to centre and viewed head-on).
+cv.addEventListener("mousedown",e=>{drag=true;panMode=(e.button===2||e.shiftKey);
+  lx=e.clientX;ly=e.clientY;spinning=false;});
 addEventListener("mouseup",()=>drag=false);
-addEventListener("mousemove",e=>{if(!drag)return;yaw+=(e.clientX-lx)*0.01;
-  pitch+=(e.clientY-ly)*0.01;pitch=Math.max(-1.5,Math.min(1.5,pitch));lx=e.clientX;ly=e.clientY;});
-cv.addEventListener("wheel",e=>{dist=Math.max(2.2,Math.min(8,dist+e.deltaY*0.003));e.preventDefault();},{passive:false});
+cv.addEventListener("contextmenu",e=>e.preventDefault());
+cv.addEventListener("dblclick",e=>{panX=0;panY=0;});   // recenter
+// orbit speed scales with zoom so close-up rotation stays controllable.
+function dragK(){return 0.01*Math.max(0.12,(dist-1.0)/3.2);}
+// pan is screen-accurate: a pixel drag moves the surface ~1:1 at the focal depth.
+function panK(){return 2*Math.tan(0.55)*dist/innerHeight;}
+addEventListener("mousemove",e=>{if(!drag)return;
+  if(panMode){var pk=panK();panX+=(e.clientX-lx)*pk;panY-=(e.clientY-ly)*pk;}
+  else{var k=dragK();yaw+=(e.clientX-lx)*k;pitch+=(e.clientY-ly)*k;
+    pitch=Math.max(-1.5,Math.min(1.5,pitch));}
+  lx=e.clientX;ly=e.clientY;});
+// multiplicative zoom: constant feel at every scale; min dist lets you get
+// right down near the surface (near-plane lowered to match) to read blocks.
+cv.addEventListener("wheel",e=>{dist=Math.max(1.08,Math.min(14,dist*Math.exp(e.deltaY*0.0012)));e.preventDefault();},{passive:false});
 cv.addEventListener("touchstart",e=>{drag=true;lx=e.touches[0].clientX;ly=e.touches[0].clientY;spinning=false;},{passive:true});
-cv.addEventListener("touchmove",e=>{if(!drag)return;yaw+=(e.touches[0].clientX-lx)*0.01;
-  pitch+=(e.touches[0].clientY-ly)*0.01;lx=e.touches[0].clientX;ly=e.touches[0].clientY;},{passive:true});
+cv.addEventListener("touchmove",e=>{if(!drag)return;var k=dragK();yaw+=(e.touches[0].clientX-lx)*k;
+  pitch+=(e.touches[0].clientY-ly)*k;pitch=Math.max(-1.5,Math.min(1.5,pitch));
+  lx=e.touches[0].clientX;ly=e.touches[0].clientY;},{passive:true});
 addEventListener("touchend",()=>drag=false);
 document.getElementById("morph").onclick=()=>targetMorph=targetMorph<0.5?1:0;
 const spinBtn=document.getElementById("spin");
 spinBtn.textContent=spinning?"pause":"resume";
 spinBtn.onclick=()=>{spinning=!spinning;spinBtn.textContent=spinning?"pause":"resume";};
 
-gl.enable(gl.DEPTH_TEST);gl.clearColor(0,0,0,0);
+// Back-face culling: the six faces wind CCW-outward, so only the near
+// hemisphere draws. Zooming past a surface then clips it away (background)
+// instead of revealing the inside/far side of the cube.
+gl.enable(gl.DEPTH_TEST);gl.enable(gl.CULL_FACE);gl.clearColor(0,0,0,0);
 function frame(){
   if(spinning)yaw+=0.0025;
   morph+=(targetMorph-morph)*0.08;
   gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
   const asp=cv.width/cv.height;
   const model=mul(rotX(pitch),rotY(yaw));
-  const m=mul(persp(1.1,asp,0.1,100),mul(trans(-dist),model));
+  const m=mul(persp(1.1,asp,0.02,100),mul(trans3(panX,panY,-dist),model));
   gl.uniformMatrix4fv(uMVP,false,m);gl.uniformMatrix4fv(uModel,false,model);
   gl.uniform1f(uMorph,morph);
   gl.bindBuffer(gl.ARRAY_BUFFER,pB);gl.enableVertexAttribArray(aP);gl.vertexAttribPointer(aP,3,gl.FLOAT,false,0,0);

@@ -11,6 +11,7 @@ changes on disk.
 from __future__ import annotations
 import base64
 import io
+import math
 import os
 import re
 import numpy as np
@@ -148,8 +149,10 @@ def _region_files(world_region_dir):
 def _accumulate(world_region_dir, size):
     """Paint every full chunk into per-face colour accumulators. Returns
     {face: (acc HxWx3, cnt HxW)} at texture resolution `size`."""
-    acc = {f: np.zeros((size, size, 3), dtype=np.float64) for f in GRID}
-    cnt = {f: np.zeros((size, size), dtype=np.float64) for f in GRID}
+    # float32 keeps the higher-resolution accumulators light (sums of 0-255 over
+    # <=256 columns stay well within float32 range).
+    acc = {f: np.zeros((size, size, 3), dtype=np.float32) for f in GRID}
+    cnt = {f: np.zeros((size, size), dtype=np.float32) for f in GRID}
     lz, lx = np.meshgrid(np.arange(16), np.arange(16), indexing="ij")  # (z,x)
     for path in _region_files(world_region_dir):
         for cx, cz, names in read_region(path):
@@ -207,10 +210,52 @@ def _decode_face(uri, size):
     return np.asarray(im).astype(np.uint8)
 
 
-def _encode_face(arr):
+def _encode_pil(img):
     buf = io.BytesIO()
-    Image.fromarray(arr, "RGB").save(buf, format="JPEG", quality=88, subsampling=0)
+    img.save(buf, format="JPEG", quality=88, subsampling=0)
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def _encode_face(arr):
+    return _encode_pil(Image.fromarray(arr, "RGB"))
+
+
+CITY_MAXPOP = 1_500_000
+CITY_FILL = (255, 178, 44)
+CITY_EDGE = (60, 36, 0)
+
+
+def _paint_cities(img, city_list, size):
+    """Draw amber, population-sized dots for the cities on this face, at the
+    same (u,v)->pixel mapping the face texture uses (so they sit on terrain)."""
+    from PIL import ImageDraw
+    d = ImageDraw.Draw(img)
+    scale = size / 1024.0
+    for u, v, pop in city_list:
+        px = (u + 1) * 0.5 * (size - 1)
+        py = (v + 1) * 0.5 * (size - 1)
+        r = (1.6 + 8.5 * math.sqrt(max(pop, 0) / CITY_MAXPOP)) * scale
+        d.ellipse([px - r, py - r, px + r, py + r], fill=CITY_FILL,
+                  outline=CITY_EDGE, width=max(1, int(1.2 * scale)))
+
+
+SH_RING = (170, 120, 255)      # violet hollow ring — distinct from amber city dots
+SH_EDGE = (24, 10, 44)
+
+
+def _paint_strongholds(img, sh_list, size):
+    """Draw small hollow violet rings for strongholds (fixed size — a location
+    marker, not a magnitude)."""
+    from PIL import ImageDraw
+    d = ImageDraw.Draw(img)
+    scale = size / 1024.0
+    r = 3.4 * scale
+    w = max(1, int(1.6 * scale))
+    for u, v in sh_list:
+        px = (u + 1) * 0.5 * (size - 1)
+        py = (v + 1) * 0.5 * (size - 1)
+        d.ellipse([px - r - w, py - r - w, px + r + w, py + r + w], outline=SH_EDGE, width=w)
+        d.ellipse([px - r, py - r, px + r, py + r], outline=SH_RING, width=w)
 
 
 def face_uris_from_html(html):
@@ -223,8 +268,10 @@ def face_uris_from_html(html):
     return uris if len(uris) == 6 else None
 
 
-def composite_uris(base_uris, world_region_dir):
-    """Overpaint the six base face textures with real generated blocks.
+def composite_uris(base_uris, world_region_dir, cities=None, strongholds=None):
+    """Overpaint the six base face textures with real generated blocks, and
+    (optionally) paint historical-city dots and stronghold rings on top.
+    `cities` is {face: [(u,v,pop)]}, `strongholds` is {face: [(u,v)]}.
     Returns (new_uris, painted_texels). On empty/error, returns the base."""
     if not base_uris or len(base_uris) != 6:
         return base_uris, 0
@@ -243,7 +290,12 @@ def composite_uris(base_uris, world_region_dir):
             base = base.copy()
             base[mask] = real[mask]
             painted += int(mask.sum())
-        out.append(_encode_face(base))
+        img = Image.fromarray(base, "RGB")
+        if strongholds and strongholds.get(face):
+            _paint_strongholds(img, strongholds[face], size)
+        if cities and cities.get(face):
+            _paint_cities(img, cities[face], size)
+        out.append(_encode_pil(img))
     return out, painted
 
 

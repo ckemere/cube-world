@@ -34,6 +34,57 @@ REGION_DIR = os.environ.get("WORLD_REGION_DIR", os.path.join(
     os.path.dirname(__file__), "..", "..", "run", "world",
     "dimensions", "minecraft", "overworld", "region"))
 SAVE_EVERY = float(os.environ.get("SAVE_EVERY", "20"))   # min seconds between save-all
+
+# Temporary historical-city overlay: precomputed cube points from cities_globe.json
+# (delete the file to remove the overlay). See precompute in the commit message.
+CITIES_JSON = os.environ.get("CITIES_JSON",
+                             os.path.join(os.path.dirname(__file__), "cities_globe.json"))
+
+
+def load_cities():
+    try:
+        with open(CITIES_JSON, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def cities_by_face():
+    """Group cities into {face: [(u, v, pop)]} for painting onto face textures."""
+    d = {}
+    for c in load_cities():
+        d.setdefault(c["face"], []).append((c["u"], c["v"], c["pop"]))
+    return d
+
+
+def _cities_sig():
+    try:
+        return os.path.getmtime(CITIES_JSON)
+    except OSError:
+        return None
+
+
+STRONGHOLDS_JSON = os.environ.get("STRONGHOLDS_JSON",
+                                  os.path.join(os.path.dirname(__file__), "strongholds_globe.json"))
+
+
+def strongholds_by_face():
+    """Group strongholds into {face: [(u, v)]} for painting rings onto faces."""
+    d = {}
+    try:
+        with open(STRONGHOLDS_JSON, encoding="utf-8") as f:
+            for s in json.load(f):
+                d.setdefault(s["face"], []).append((s["u"], s["v"]))
+    except Exception:
+        return {}
+    return d
+
+
+def _strongholds_sig():
+    try:
+        return os.path.getmtime(STRONGHOLDS_JSON)
+    except OSError:
+        return None
 GRID = {"NORTH_POLE": (0, 0), "EQ_PRIME": (0, 1), "EQ_EAST": (1, 0),
         "EQ_BACK": (0, -1), "EQ_WEST": (-1, 0), "SOUTH_POLE": (0, 2)}
 
@@ -157,7 +208,7 @@ MARKER_OVERLAY = r"""
     // reuse the globe's own matrices + view state (shared script scope)
     var model=mul(rotX(pitch),rotY(yaw));
     var asp=cv.width/cv.height;
-    var mvp=mul(persp(1.1,asp,0.1,100),mul(trans(-dist),model));
+    var mvp=mul(persp(1.1,asp,0.1,100),mul(trans3(panX,panY,-dist),model));
     var seen={};
     for(var k=0;k<players.length;k++){
       var pl=players[k], p=pl.p, n=Math.hypot(p[0],p[1],p[2]);
@@ -205,7 +256,8 @@ FACES_REFRESH = r"""
     gl.bindTexture(gl.TEXTURE_2D,texs[k]);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
     gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,img);
-    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);};
     img.src=uri;}
@@ -253,7 +305,7 @@ def _maybe_save():
 def composited_uris():
     """Six face data-URIs with real blocks painted on, cached by region mtime."""
     _maybe_save()
-    sig = realmap.region_signature(REGION_DIR)
+    sig = (realmap.region_signature(REGION_DIR), _cities_sig(), _strongholds_sig())
     with _faces_lock:
         if _cache["sig"] == sig and _cache["uris"] is not None:
             return _cache["uris"]
@@ -261,12 +313,14 @@ def composited_uris():
     if not base:
         return None
     try:
-        uris, painted = realmap.composite_uris(base, REGION_DIR)
+        uris, painted = realmap.composite_uris(base, REGION_DIR, cities_by_face(),
+                                               strongholds_by_face())
     except Exception:
         return base
     with _faces_lock:
         _cache.update(sig=sig, uris=uris, painted=painted)
     return uris
+
 
 
 def load_page():
@@ -275,6 +329,8 @@ def load_page():
     uris = composited_uris()
     if uris:
         html = realmap.replace_uris(html, uris)
+    # City dots are painted onto the face textures themselves (composited_uris),
+    # so they sit on each face and occlude correctly — no screen-space overlay.
     return html + MARKER_OVERLAY + FACES_REFRESH
 
 
