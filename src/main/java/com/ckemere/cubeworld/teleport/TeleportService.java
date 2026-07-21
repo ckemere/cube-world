@@ -244,6 +244,74 @@ public final class TeleportService {
         return out;
     }
 
+    // ----------------------------------------------------------------- travel
+    /** Charge lapis and teleport the player onto a destination station's core.
+     * Shared by the GUI and the /cubeworld tpto command. Returns success. */
+    public boolean travel(org.bukkit.entity.Player p, Location source, Station dest) {
+        int cost = lapisCost(source, dest);
+        if (countLapis(p) < cost) {
+            p.sendMessage(net.kyori.adventure.text.Component.text("Not enough lapis (need " + cost
+                    + ").", net.kyori.adventure.text.format.NamedTextColor.RED));
+            return false;
+        }
+        World w = plugin.getServer().getWorld(dest.world());
+        if (w == null) {
+            p.sendMessage(net.kyori.adventure.text.Component.text("Destination unavailable.",
+                    net.kyori.adventure.text.format.NamedTextColor.RED));
+            return false;
+        }
+        removeLapis(p, cost);
+        p.closeInventory();
+        spark(source);
+        Location stand = new Location(w, dest.x() + 0.5, dest.y() + 1, dest.z() + 0.5,
+                p.getLocation().getYaw(), p.getLocation().getPitch());
+        p.teleport(stand);
+        spark(stand);
+        p.playSound(stand, org.bukkit.Sound.BLOCK_AMETHYST_BLOCK_RESONATE, 1f, 1.2f);
+        p.sendMessage(net.kyori.adventure.text.Component.text("Teleported to " + dest.name() + " ("
+                + cost + " lapis).", net.kyori.adventure.text.format.NamedTextColor.AQUA));
+        return true;
+    }
+
+    public Station byName(String name) {
+        for (Station s : stations.values()) {
+            if (s.name().equalsIgnoreCase(name)) {
+                return s;
+            }
+        }
+        return null;
+    }
+
+    public int countLapis(org.bukkit.entity.Player p) {
+        int n = 0;
+        for (ItemStack it : p.getInventory().getContents()) {
+            if (it != null && it.getType() == Material.LAPIS_LAZULI) {
+                n += it.getAmount();
+            }
+        }
+        return n;
+    }
+
+    public void removeLapis(org.bukkit.entity.Player p, int amount) {
+        for (ItemStack it : p.getInventory().getContents()) {
+            if (amount <= 0) {
+                break;
+            }
+            if (it != null && it.getType() == Material.LAPIS_LAZULI) {
+                int take = Math.min(amount, it.getAmount());
+                it.setAmount(it.getAmount() - take);
+                amount -= take;
+            }
+        }
+    }
+
+    public void spark(Location l) {
+        if (l.getWorld() != null) {
+            l.getWorld().spawnParticle(org.bukkit.Particle.REVERSE_PORTAL,
+                    l.clone().add(0.5, 1.0, 0.5), 40, 0.3, 0.5, 0.3, 0.05);
+        }
+    }
+
     // ---------------------------------------------------------------- ambience
     /** Gentle particles above every loaded station (scheduled ~every 2s). */
     public void ambientTick() {

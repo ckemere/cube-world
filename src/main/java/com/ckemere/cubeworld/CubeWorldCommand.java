@@ -61,6 +61,25 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                 p.sendMessage(Component.text("Gave a Teleporter Core.", NamedTextColor.AQUA));
                 return true;
             }
+            case "tpto" -> {
+                if (!(sender instanceof Player p)) {
+                    sender.sendMessage(Component.text("Players only.", NamedTextColor.RED));
+                    return true;
+                }
+                if (args.length < 2) {
+                    sender.sendMessage(Component.text("Usage: /cubeworld tpto <station name>",
+                            NamedTextColor.RED));
+                    return true;
+                }
+                String name = String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length));
+                var dest = teleport.byName(name);
+                if (dest == null) {
+                    p.sendMessage(Component.text("No station named '" + name + "'.", NamedTextColor.RED));
+                    return true;
+                }
+                teleport.travel(p, p.getLocation(), dest);
+                return true;
+            }
             case "tpstations" -> {
                 var list = teleport.all();
                 sender.sendMessage(Component.text(list.size() + " teleport stations registered ("

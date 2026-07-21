@@ -4,8 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 import org.bukkit.Location;
 import org.bukkit.Material;
-import org.bukkit.Particle;
-import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
@@ -51,7 +49,7 @@ public final class TeleporterListener implements Listener {
         Block b = e.getBlockPlaced();
         if (hasAmethystPad(b)) {
             svc.register(b.getLocation(), autoName(b), false);
-            spark(b.getLocation());
+            svc.spark(b.getLocation());
             e.getPlayer().sendMessage(Component.text("Teleport station raised.", NamedTextColor.AQUA));
         } else {
             e.getPlayer().sendMessage(Component.text(
@@ -118,7 +116,7 @@ public final class TeleporterListener implements Listener {
                     NamedTextColor.GRAY));
             return;
         }
-        p.openInventory(new TeleportMenu(svc, p, src, dests, countLapis(p)).getInventory());
+        p.openInventory(new TeleportMenu(svc, p, src, dests, svc.countLapis(p)).getInventory());
     }
 
     /** The station nearest a held filled-map's centre, if the map is in hand. */
@@ -163,29 +161,9 @@ public final class TeleporterListener implements Listener {
             return;
         }
         TeleportService.Station dest = menu.destinationAt(e.getRawSlot());
-        if (dest == null) {
-            return;
+        if (dest != null) {
+            svc.travel(p, menu.source(), dest);
         }
-        int cost = svc.lapisCost(menu.source(), dest);
-        if (countLapis(p) < cost) {
-            p.sendMessage(Component.text("Not enough lapis (need " + cost + ").", NamedTextColor.RED));
-            return;
-        }
-        Location to = dest.location(plugin);
-        if (to == null) {
-            p.sendMessage(Component.text("Destination unavailable.", NamedTextColor.RED));
-            return;
-        }
-        removeLapis(p, cost);
-        p.closeInventory();
-        Location stand = new Location(to.getWorld(), dest.x() + 0.5, dest.y() + 1, dest.z() + 0.5,
-                p.getLocation().getYaw(), p.getLocation().getPitch());
-        spark(menu.source());
-        p.teleport(stand);
-        spark(stand);
-        p.playSound(stand, Sound.BLOCK_AMETHYST_BLOCK_RESONATE, 1f, 1.2f);
-        p.sendMessage(Component.text("Teleported to " + dest.name() + " (" + cost + " lapis).",
-                NamedTextColor.AQUA));
     }
 
     // ------------------------------------------------ build preloaded city sites
@@ -224,36 +202,7 @@ public final class TeleporterListener implements Listener {
         svc.register(new Location(w, x, y + 1, z), name, true);
     }
 
-    // ----------------------------------------------------------------- lapis fee
-    private int countLapis(Player p) {
-        int n = 0;
-        for (ItemStack it : p.getInventory().getContents()) {
-            if (it != null && it.getType() == Material.LAPIS_LAZULI) {
-                n += it.getAmount();
-            }
-        }
-        return n;
-    }
-
-    private void removeLapis(Player p, int amount) {
-        for (ItemStack it : p.getInventory().getContents()) {
-            if (amount <= 0) {
-                break;
-            }
-            if (it != null && it.getType() == Material.LAPIS_LAZULI) {
-                int take = Math.min(amount, it.getAmount());
-                it.setAmount(it.getAmount() - take);
-                amount -= take;
-            }
-        }
-    }
-
     private String autoName(Block core) {
         return "Station " + core.getX() + "," + core.getZ();
-    }
-
-    private void spark(Location l) {
-        l.getWorld().spawnParticle(Particle.REVERSE_PORTAL, l.clone().add(0.5, 1.0, 0.5),
-                40, 0.3, 0.5, 0.3, 0.05);
     }
 }
