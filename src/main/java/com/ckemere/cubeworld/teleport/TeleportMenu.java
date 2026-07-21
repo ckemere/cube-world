@@ -27,12 +27,12 @@ public final class TeleportMenu implements InventoryHolder {
     private final Location source;
     private final Map<Integer, TeleportService.Station> slotDest = new HashMap<>();
 
-    public TeleportMenu(TeleportService svc, Player player, Location source,
+    public TeleportMenu(TeleportService svc, Player player, Location source, String sourceName,
                         List<TeleportService.Station> destinations, int playerLapis) {
         this.source = source;
         int rows = Math.max(2, Math.min(6, 1 + (destinations.size() + 8) / 9));
         this.inv = Bukkit.createInventory(this, rows * 9,
-                Component.text("Teleport Network", NamedTextColor.DARK_AQUA));
+                Component.text("Teleport — from " + sourceName, NamedTextColor.DARK_AQUA));
 
         inv.setItem(4, info(playerLapis, destinations.size()));
 

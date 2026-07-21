@@ -101,7 +101,8 @@ public final class TeleporterListener implements Listener {
                     NamedTextColor.GRAY));
             return;
         }
-        p.openInventory(new TeleportMenu(svc, p, src, dests, svc.countLapis(p)).getInventory());
+        p.openInventory(new TeleportMenu(svc, p, src, s.name(), dests, svc.countLapis(p))
+                .getInventory());
     }
 
     /** The station nearest a held filled-map's centre, if the map is in hand. */
