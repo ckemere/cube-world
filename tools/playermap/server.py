@@ -85,6 +85,43 @@ def _strongholds_sig():
         return os.path.getmtime(STRONGHOLDS_JSON)
     except OSError:
         return None
+
+
+# Live teleport-station registry the plugin writes (world,x,y,z,city,name).
+STATIONS_CSV = os.environ.get("STATIONS_CSV", os.path.join(
+    os.path.dirname(__file__), "..", "..", "run", "plugins", "CubeWorld", "stations.csv"))
+
+
+def stations_by_face():
+    """Group teleport stations into {face: [(u, v)]} from the plugin's csv."""
+    d = {}
+    try:
+        with open(STATIONS_CSV, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                p = line.split(",", 5)
+                if len(p) < 6:
+                    continue
+                x, z = int(p[1]), int(p[3])
+                face = face_at(x, z)
+                if face is None:
+                    continue
+                gc, gr = GRID[face]
+                d.setdefault(face, []).append(((x - gc * FACE) / H, (z - gr * FACE) / H))
+    except Exception:
+        return {}
+    return d
+
+
+def _stations_sig():
+    try:
+        return os.path.getmtime(STATIONS_CSV)
+    except OSError:
+        return None
+
+
 GRID = {"NORTH_POLE": (0, 0), "EQ_PRIME": (0, 1), "EQ_EAST": (1, 0),
         "EQ_BACK": (0, -1), "EQ_WEST": (-1, 0), "SOUTH_POLE": (0, 2)}
 
@@ -305,7 +342,8 @@ def _maybe_save():
 def composited_uris():
     """Six face data-URIs with real blocks painted on, cached by region mtime."""
     _maybe_save()
-    sig = (realmap.region_signature(REGION_DIR), _cities_sig(), _strongholds_sig())
+    sig = (realmap.region_signature(REGION_DIR), _cities_sig(), _strongholds_sig(),
+           _stations_sig())
     with _faces_lock:
         if _cache["sig"] == sig and _cache["uris"] is not None:
             return _cache["uris"]
@@ -314,7 +352,7 @@ def composited_uris():
         return None
     try:
         uris, painted = realmap.composite_uris(base, REGION_DIR, cities_by_face(),
-                                               strongholds_by_face())
+                                               strongholds_by_face(), stations_by_face())
     except Exception:
         return base
     with _faces_lock:

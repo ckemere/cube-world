@@ -258,6 +258,23 @@ def _paint_strongholds(img, sh_list, size):
         d.ellipse([px - r, py - r, px + r, py + r], outline=SH_RING, width=w)
 
 
+TP_FILL = (54, 214, 205)       # teal diamond — teleport station
+TP_EDGE = (10, 46, 44)
+
+
+def _paint_stations(img, st_list, size):
+    """Draw teal diamonds for teleport stations (the travel network)."""
+    from PIL import ImageDraw
+    d = ImageDraw.Draw(img)
+    scale = size / 1024.0
+    r = 3.2 * scale
+    for u, v in st_list:
+        px = (u + 1) * 0.5 * (size - 1)
+        py = (v + 1) * 0.5 * (size - 1)
+        d.polygon([(px, py - r), (px + r, py), (px, py + r), (px - r, py)],
+                  fill=TP_FILL, outline=TP_EDGE)
+
+
 def face_uris_from_html(html):
     """Pull the six base face data-URIs out of a built globe.html (in
     FACE_ORDER), or None if the page doesn't have the expected array."""
@@ -268,11 +285,11 @@ def face_uris_from_html(html):
     return uris if len(uris) == 6 else None
 
 
-def composite_uris(base_uris, world_region_dir, cities=None, strongholds=None):
+def composite_uris(base_uris, world_region_dir, cities=None, strongholds=None, stations=None):
     """Overpaint the six base face textures with real generated blocks, and
-    (optionally) paint historical-city dots and stronghold rings on top.
-    `cities` is {face: [(u,v,pop)]}, `strongholds` is {face: [(u,v)]}.
-    Returns (new_uris, painted_texels). On empty/error, returns the base."""
+    (optionally) paint historical-city dots, stronghold rings, and teleport
+    stations on top. `cities` {face:[(u,v,pop)]}, `strongholds`/`stations`
+    {face:[(u,v)]}. Returns (new_uris, painted_texels)."""
     if not base_uris or len(base_uris) != 6:
         return base_uris, 0
     size = Image.open(io.BytesIO(base64.b64decode(base_uris[0].split(",", 1)[1]))).size[0]
@@ -295,6 +312,8 @@ def composite_uris(base_uris, world_region_dir, cities=None, strongholds=None):
             _paint_strongholds(img, strongholds[face], size)
         if cities and cities.get(face):
             _paint_cities(img, cities[face], size)
+        if stations and stations.get(face):
+            _paint_stations(img, stations[face], size)
         out.append(_encode_pil(img))
     return out, painted
 
