@@ -1,0 +1,16 @@
+{
+  "placement": {
+    "type": "minecraft:concentric_rings",
+    "count": 1,
+    "distance": 32,
+    "spread": 3,
+    "salt": 2104,
+    "preferred_biomes": "#cubeworld:anchor"
+  },
+  "structures": [
+    {
+      "structure": "cubeworld:desert_huge",
+      "weight": 1
+    }
+  ]
+}

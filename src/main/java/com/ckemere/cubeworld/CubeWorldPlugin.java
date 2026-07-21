@@ -64,6 +64,14 @@ public final class CubeWorldPlugin extends JavaPlugin {
     }
 
     @Override
+    public void onLoad() {
+        // Worldgen datapacks must be on disk BEFORE datapack registries load
+        // (which happens before onEnable and cannot be reloaded at runtime).
+        // onLoad runs early enough — write the anchored-city structures now.
+        writeCitiesDatapack();
+    }
+
+    @Override
     public void onEnable() {
         getServer().getPluginManager().registerEvents(new SeamTeleportListener(this, seams), this);
         getServer().getPluginManager().registerEvents(new MirrorSyncListener(this, mirrors), this);
@@ -150,6 +158,48 @@ public final class CubeWorldPlugin extends JavaPlugin {
         getLogger().info("No earth.dat found; using demo terrain.");
     }
 
+    /**
+     * Copy the bundled anchored-city worldgen datapack into the overworld folder
+     * so it is present when the world loads (worldgen registries freeze then and
+     * cannot be reloaded at runtime, unlike the advancement datapack).
+     */
+    private void writeCitiesDatapack() {
+        try {
+            java.nio.file.Path root = new java.io.File(getServer().getWorldContainer(), "world")
+                    .toPath().resolve("datapacks").resolve("cubeworld_cities");
+            java.util.List<String> files = new java.util.ArrayList<>();
+            files.add("pack.mcmeta");
+            files.add("data/cubeworld/tags/worldgen/biome/anchor.json");
+            for (String pool : new String[] {"plains", "desert", "savanna"}) {
+                for (String size : new String[] {"large", "huge"}) {
+                    files.add("data/cubeworld/worldgen/structure/" + pool + "_" + size + ".json");
+                    files.add("data/cubeworld/worldgen/structure_set/" + pool + "_" + size + ".json");
+                }
+            }
+            int wrote = 0;
+            for (String rel : files) {
+                try (java.io.InputStream in = getResource("anchor_datapack/" + rel)) {
+                    if (in == null) {
+                        getLogger().warning("Cities datapack: missing bundled resource " + rel);
+                        continue;
+                    }
+                    byte[] data = in.readAllBytes();
+                    java.nio.file.Path dst = root.resolve(rel);
+                    java.nio.file.Files.createDirectories(dst.getParent());
+                    if (java.nio.file.Files.exists(dst)
+                            && java.util.Arrays.equals(data, java.nio.file.Files.readAllBytes(dst))) {
+                        continue;
+                    }
+                    java.nio.file.Files.write(dst, data);
+                    wrote++;
+                }
+            }
+            getLogger().info("Cities datapack: " + wrote + " file(s) updated at " + root);
+        } catch (Exception e) {
+            getLogger().warning("Cities datapack write failed (" + e + "); anchored cities absent.");
+        }
+    }
+
     private void setupWorld(World world) {
         if (world.getEnvironment() == World.Environment.NORMAL && maps.hasEarthData()) {
             int sy = (int) Math.round(
@@ -160,6 +210,8 @@ public final class CubeWorldPlugin extends JavaPlugin {
         if (world.getEnvironment() == World.Environment.NORMAL) {
             com.ckemere.cubeworld.seam.nms.StrongholdSphereHook.install(
                     world, geometry, topology, MARGIN_BLOCKS, this, getLogger());
+            // must run AFTER the stronghold hook (which sets hasGeneratedPositions)
+            com.ckemere.cubeworld.seam.nms.VillageAnchorHook.install(world, this, getLogger());
         }
         LiquidSeamService liquids = new LiquidSeamService(topology, mirrors, world);
         EntityMirrorService entityMirrors = new EntityMirrorService(this, topology, MARGIN_BLOCKS);
