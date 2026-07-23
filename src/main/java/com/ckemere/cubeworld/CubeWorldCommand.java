@@ -491,13 +491,26 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
         java.util.function.BiFunction<Integer, Integer, org.bukkit.block.Biome> sample;
         if (nether) {
             if (world == null || !(world.getGenerator() instanceof
-                    com.ckemere.cubeworld.generation.CubeNetherChunkGenerator gen)) {
+                    com.ckemere.cubeworld.generation.CubeNetherChunkGenerator)) {
                 sender.sendMessage(Component.text("Nether is not a cube world.", NamedTextColor.RED));
                 return true;
             }
-            org.bukkit.World nw = world;
-            var bp = gen.biomeProvider();
-            sample = (x, z) -> bp.getBiome(nw, x, 64, z);
+            // Sample the REAL vanilla nether biome (folded MultiNoise source), not
+            // NetherDemoSpec's zone approximation. installNether rebinds
+            // RandomState.sampler, so getNoiseBiome at raw coords is the actual
+            // seam-consistent biome the game generates — no chunk gen needed.
+            net.minecraft.server.level.ServerLevel level =
+                    ((org.bukkit.craftbukkit.CraftWorld) world).getHandle();
+            net.minecraft.world.level.biome.Climate.Sampler climate =
+                    level.getChunkSource().randomState().sampler();
+            net.minecraft.world.level.chunk.ChunkGenerator ncg =
+                    level.getChunkSource().getGenerator();
+            if (ncg instanceof org.bukkit.craftbukkit.generator.CustomChunkGenerator ccg) {
+                ncg = ccg.getDelegate();
+            }
+            net.minecraft.world.level.biome.BiomeSource src = ncg.getBiomeSource();
+            sample = (x, z) -> org.bukkit.craftbukkit.block.CraftBiome.minecraftHolderToBukkit(
+                    src.getNoiseBiome(x >> 2, 64 >> 2, z >> 2, climate));
         } else {
             if (world == null || !(world.getGenerator() instanceof
                     com.ckemere.cubeworld.generation.CubeWorldChunkGenerator gen)) {

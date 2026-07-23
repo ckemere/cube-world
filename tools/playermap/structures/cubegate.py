@@ -8,6 +8,7 @@ and at least EDGE_BUFFER chunks from every face edge (StructuresAllowedIn)."""
 import math
 
 FACE = 10240
+NETHER_FACE = FACE // 8          # 1280 — the nether cube is 1:8
 H = FACE / 2                     # 5120
 FACE_CHUNKS = FACE // 16         # 640
 EDGE_BUFFER = 8                  # STRUCTURE_EDGE_BUFFER_CHUNKS
@@ -16,9 +17,10 @@ GRID = {"NORTH_POLE": (0, -1), "EQ_PRIME": (0, 0), "EQ_EAST": (1, 0),
         "EQ_BACK": (2, 0), "EQ_WEST": (-1, 0), "SOUTH_POLE": (0, 1)}
 
 
-def face_at(x, z):
-    col = math.floor((x + H) / FACE)
-    row = math.floor((z + H) / FACE)
+def face_at(x, z, face=FACE):
+    h = face / 2
+    col = math.floor((x + h) / face)
+    row = math.floor((z + h) / face)
     for f, (c, r) in GRID.items():
         if c == col and r == row:
             return f
@@ -44,29 +46,33 @@ def chunk_center(cx, cz):
     return cx * 16 + 8, cz * 16 + 8
 
 
-def valid_chunk(cx, cz):
+def valid_chunk(cx, cz, face=FACE):
     """The generator's structure gate: centre on a real face, and >= EDGE_BUFFER
-    chunks from every face edge. Returns the face name if valid, else None."""
+    chunks from every face edge. Returns the face name if valid, else None.
+    Pass face=NETHER_FACE for the 1:8 nether cube."""
+    h = face / 2
+    face_chunks = face // 16
     bx, bz = chunk_center(cx, cz)
-    f = face_at(bx, bz)
+    f = face_at(bx, bz, face)
     if f is None:
         return None
     gc, gr = GRID[f]
-    lx = cx - ((gc * FACE - H) // 16 + 0)        # face-local chunk index (x)
-    lz = cz - ((gr * FACE - H) // 16 + 0)
-    edge = min(lx, FACE_CHUNKS - 1 - lx, lz, FACE_CHUNKS - 1 - lz)
+    lx = cx - ((gc * face - h) // 16 + 0)        # face-local chunk index (x)
+    lz = cz - ((gr * face - h) // 16 + 0)
+    edge = min(lx, face_chunks - 1 - lx, lz, face_chunks - 1 - lz)
     return f if edge >= EDGE_BUFFER else None
 
 
-def marker(cx, cz):
+def marker(cx, cz, face=FACE):
     """A render marker for a valid candidate chunk: {face,u,v,p:[x,y,z]}, or
-    None if the chunk fails the cube gate."""
-    f = valid_chunk(cx, cz)
+    None if the chunk fails the cube gate. Pass face=NETHER_FACE for the nether."""
+    f = valid_chunk(cx, cz, face)
     if f is None:
         return None
+    h = face / 2
     bx, bz = chunk_center(cx, cz)
     gc, gr = GRID[f]
-    u = (bx - gc * FACE) / H
-    v = (bz - gr * FACE) / H
+    u = (bx - gc * face) / h
+    v = (bz - gr * face) / h
     x, y, z = cube_point(f, u, v)
     return {"face": f, "u": u, "v": v, "p": [x, y, z], "cx": cx, "cz": cz}

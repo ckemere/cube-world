@@ -11,6 +11,7 @@ import os
 from . import cubegate
 from .biomeraster import load as load_raster
 from .placement import RandomSpread
+from .javarandom import JavaRandom
 from . import frequency
 
 _DIR = os.path.dirname(__file__)
@@ -26,7 +27,9 @@ _cache = {}       # (seed, dimension) -> {set: [markers]}
 
 def types_for(dimension):
     if dimension == "nether":
-        return sorted(NETHER_SETS & set(PLACEMENT_DATA))
+        # split nether_complexes -> fortresses/bastions; ruined_portals in the
+        # nether is always ruined_portal_nether
+        return ["bastions", "fortresses", "nether_fossils", "ruined_portals"]
     return sorted(n for n in PLACEMENT_DATA if n not in NETHER_SETS and n not in SKIP_SETS)
 
 
@@ -44,13 +47,59 @@ def raster(dimension="overworld"):
     return _rasters[dimension]
 
 
-def _net_chunk_box():
+def _net_chunk_box(face=cubegate.FACE):
     cols = [c for c, _ in cubegate.GRID.values()]
     rows = [r for _, r in cubegate.GRID.values()]
-    return (math.floor((min(cols) * cubegate.FACE - cubegate.H) / 16),
-            math.floor((min(rows) * cubegate.FACE - cubegate.H) / 16),
-            math.ceil((max(cols) * cubegate.FACE + cubegate.H) / 16),
-            math.ceil((max(rows) * cubegate.FACE + cubegate.H) / 16))
+    h = face / 2
+    return (math.floor((min(cols) * face - h) / 16),
+            math.floor((min(rows) * face - h) / 16),
+            math.ceil((max(cols) * face + h) / 16),
+            math.ceil((max(rows) * face + h) / 16))
+
+
+def _nether_overlays(seed, r):
+    """Nether structure markers on the 1:8 nether cube (face = 1280): fortresses
+    vs bastions split from the vanilla nether_complexes set by its per-chunk
+    weighted pick, ruined portals (always the nether variant here), and nether
+    fossils (soul-sand-valley only)."""
+    face = cubegate.NETHER_FACE
+    cx0, cz0, cx1, cz1 = _net_chunk_box(face)
+    out = {"bastions": [], "fortresses": [], "nether_fossils": [], "ruined_portals": []}
+
+    # fortress (weight 2) + bastion (weight 3) share the nether_complexes set;
+    # both match nether biomes, so vanilla's first weighted pick is kept:
+    # WorldgenRandom.setLargeFeatureSeed(seed, cx, cz); nextInt(5) < 2 -> fortress.
+    d = PLACEMENT_DATA["nether_complexes"]
+    fb = RandomSpread(d["spacing"], d["separation"], d["salt"], d["spread"])
+    for (cx, cz) in fb.candidates_in_chunk_box(seed, cx0, cz0, cx1, cz1):
+        m = cubegate.marker(cx, cz, face)
+        if m is None:
+            continue
+        rnd = JavaRandom(0)
+        rnd.set_large_feature_seed(seed, cx, cz)
+        out["fortresses" if rnd.next_int(5) < 2 else "bastions"].append(m)
+
+    # ruined portals: the set runs in the nether too, and only ruined_portal_nether
+    # matches nether biomes, so every candidate is a nether ruined portal.
+    d = PLACEMENT_DATA["ruined_portals"]
+    rp = RandomSpread(d["spacing"], d["separation"], d["salt"], d["spread"])
+    for (cx, cz) in rp.candidates_in_chunk_box(seed, cx0, cz0, cx1, cz1):
+        m = cubegate.marker(cx, cz, face)
+        if m is not None:
+            out["ruined_portals"].append(m)
+
+    # nether fossils: soul-sand-valley only, tight spacing -> enumerate biome chunks
+    d = PLACEMENT_DATA["nether_fossils"]
+    nf = RandomSpread(d["spacing"], d["separation"], d["salt"], d["spread"])
+    allowed = set(STRUCTURE_BIOMES.get("nether_fossils", ["minecraft:soul_sand_valley"]))
+    sp = nf.spacing
+    for (cx, cz) in r.chunks_with_biomes(allowed):
+        if nf.target_chunk(seed, cx // sp, cz // sp) != (cx, cz):
+            continue
+        m = cubegate.marker(cx, cz, face)
+        if m is not None:
+            out["nether_fossils"].append(m)
+    return out
 
 
 def compute_overlays(seed, dimension="overworld", types=None):
@@ -61,6 +110,13 @@ def compute_overlays(seed, dimension="overworld", types=None):
         r = raster(dimension)
     except FileNotFoundError:
         return {}
+    if dimension == "nether":
+        out = _nether_overlays(seed, r)
+        if types is None:
+            _cache[key] = out
+            while len(_cache) > 6:
+                _cache.pop(next(iter(_cache)))
+        return out
     cx0, cz0, cx1, cz1 = _net_chunk_box()
     want = set(types) if types else set(types_for(dimension))
     out = {}

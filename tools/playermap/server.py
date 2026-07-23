@@ -433,8 +433,8 @@ STRUCTURE_OVERLAY = r"""
     igloos:'#a8e6ff',ocean_monuments:'#00b4d8',ocean_ruins:'#5fa8d3',shipwrecks:'#c9ada7',
     ruined_portals:'#f15bb5',pillager_outposts:'#ef476f',trail_ruins:'#c58c4f',
     trial_chambers:'#9b5de5',woodland_mansions:'#7161a8',buried_treasures:'#ffea00',
-    swamp_huts:'#588157',ancient_cities:'#4361ee',nether_complexes:'#e01e37',
-    nether_fossils:'#e9ecef'};
+    swamp_huts:'#588157',ancient_cities:'#4361ee',
+    fortresses:'#8d0801',bastions:'#5a189a',nether_fossils:'#e9ecef'};
   // dense sets start hidden so the map isn't a wall of dots
   var OFF={ocean_ruins:1,shipwrecks:1,buried_treasures:1,ruined_portals:1,
            trial_chambers:1,nether_fossils:1};
