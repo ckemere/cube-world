@@ -141,7 +141,10 @@ public final class EarthData {
                     break;
                 }
             }
-            return best;
+            // Apply scale/offset like the bilinear path — else a coastal sea that
+            // straddles a NODATA (ocean) corner and a valid land corner returns the
+            // RAW short (e.g. temp 217 = 21.7C*10), pinning the biome to max-hot.
+            return best * l.scale + l.offset;
         }
         return (v00 * (1 - tx) * (1 - ty) + v10 * tx * (1 - ty)
                 + v01 * (1 - tx) * ty + v11 * tx * ty) * l.scale + l.offset;

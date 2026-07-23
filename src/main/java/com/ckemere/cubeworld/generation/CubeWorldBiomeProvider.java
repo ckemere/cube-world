@@ -112,6 +112,7 @@ public final class CubeWorldBiomeProvider extends BiomeProvider {
         int river; // 0 none, 1 river, 2 frozen
         Biome deep;    // biome at depth 0.9 (clamped underground)
         Biome shallow; // biome at depth -0.1 (clamped above surface)
+        Biome ocean;   // ocean biome when below sea level (elev < 0)
     }
 
     // A chunk has only 16 biome columns but they are queried interleaved across
@@ -138,6 +139,7 @@ public final class CubeWorldBiomeProvider extends BiomeProvider {
             col.river = col.c == null ? 0 : classifyRiver(earth, sampler, wx, wz, col.c);
             col.deep = null;
             col.shallow = null;
+            col.ocean = null;
             col.x = cx;
             col.z = cz;
         }
@@ -148,6 +150,18 @@ public final class CubeWorldBiomeProvider extends BiomeProvider {
         double depth = EarthClimate.depth(col.surfaceY, y);
         if (depth < 0.15 && col.river != 0 && c[6] >= 0) {
             return col.river == 2 ? Biome.FROZEN_RIVER : Biome.RIVER;
+        }
+        // Below sea level, near the surface = an OCEAN biome (matches the water
+        // the generator carves). Shallow seas (Red Sea, Persian Gulf, Med
+        // shelves) sit at only ~-50 m -> continentalness ~-0.15, which vanilla
+        // reads as near-inland land and would map to desert/plains. Assign the
+        // ocean biome directly by temperature + depth instead. Deeper down
+        // (depth >= 0.15) the vanilla cave/deep logic below still applies.
+        if (c[6] < 0 && depth < 0.15) {
+            if (col.ocean == null) {
+                col.ocean = oceanBiome(c);
+            }
+            return col.ocean;
         }
         if (depth >= 0.9) {
             if (col.deep == null) {
@@ -162,6 +176,26 @@ public final class CubeWorldBiomeProvider extends BiomeProvider {
             return col.shallow;
         }
         return vanillaBiome(c, depth);
+    }
+
+    /** Ocean biome for a below-sea-level column, by temperature param and depth
+     * (deep variants below ~1 km; warm has no deep variant in vanilla). */
+    private static Biome oceanBiome(double[] c) {
+        double t = c[0];              // temperature param
+        boolean deep = c[6] < -1000;  // >1 km deep
+        if (t < -0.45) {
+            return deep ? Biome.DEEP_FROZEN_OCEAN : Biome.FROZEN_OCEAN;
+        }
+        if (t < -0.15) {
+            return deep ? Biome.DEEP_COLD_OCEAN : Biome.COLD_OCEAN;
+        }
+        if (t < 0.2) {
+            return deep ? Biome.DEEP_OCEAN : Biome.OCEAN;
+        }
+        if (t < 0.45) {
+            return deep ? Biome.DEEP_LUKEWARM_OCEAN : Biome.LUKEWARM_OCEAN;
+        }
+        return Biome.WARM_OCEAN;
     }
 
     private Biome vanillaBiome(double[] c, double depth) {
