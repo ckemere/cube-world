@@ -1,7 +1,7 @@
 # worldX,worldZ,pool,size,name  (anchored villages + preloaded teleport stations)
 12563,-3699,desert,huge,Baghdad
 9564,-4633,savanna,huge,Rome
-11135,-3148,savanna,huge,Alexandria
+11240,-3096,savanna,huge,Alexandria
 20385,-3499,plains,huge,Xian
 11049,-4507,plains,huge,Istanbul
 9368,-3894,savanna,huge,Carthage
@@ -14,7 +14,7 @@
 19948,-3052,plains,large,Chengdu
 19930,-1228,plains,large,Angkor
 17569,-864,plains,large,Anuradhapura
-12941,-3410,desert,large,Basra
+12920,-3384,desert,large,Basra
 20775,-4316,plains,large,Datong
 10900,-4025,plains,large,Ephesus
 20771,-2189,plains,large,Guangzhou
