@@ -5,7 +5,9 @@ City teleport stations build lazily when their chunk first loads, and the ring
 network only offers destinations once stations are registered — so a brand-new
 world shows "The network is still forming" until the cities are visited. This
 script force-loads every city's chunk over RCON so all 30 stations build and the
-two rings fill (30/30), then saves and clears the force-loads.
+two rings fill (30/30), then saves and clears the force-loads. It also regenerates the map biome
+rasters (overworld/nether) + biome params, which the web map's structure and
+biome overlays read and which must be rebuilt for a fresh world.
 
 Prereqs: the server is running (./run-server.sh) AND the cities are ANCHORED —
 on a fresh world that means the SECOND boot (the first boot writes the cities
@@ -101,9 +103,15 @@ def main():
             break
         time.sleep(6)
 
-    rcon(["save-all", "forceload remove all"], timeout=60)
+    # Refresh the map's biome data too — the structure overlay + biome/nether
+    # faces read these, and they must be regenerated for a fresh world (else the
+    # web map's structure overlay comes up empty). Cheap; safe to always run.
+    print("refreshing map biome rasters (overworld/nether) + biome params ...")
+    rcon(["cubeworld biomeraster overworld", "cubeworld biomeraster nether",
+          "cubeworld dumpbiomeparams", "save-all", "forceload remove all"], timeout=90)
     n = built_count()
-    print(f"done: {n}/{len(cities)} stations built, saved, force-loads cleared.")
+    print(f"done: {n}/{len(cities)} stations built + map rasters refreshed, saved, "
+          f"force-loads cleared. (Restart the playermap if it was already running.)")
     sys.exit(0 if n >= len(cities) else 1)
 
 
