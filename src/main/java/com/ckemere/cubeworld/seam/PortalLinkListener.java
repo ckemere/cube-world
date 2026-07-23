@@ -33,6 +33,16 @@ public final class PortalLinkListener implements Listener {
     /** Keep vanilla-created return portals this far inside the face edge. */
     private static final int EDGE_CLEARANCE = 24;
 
+    /** Portal-reuse search radius per destination. The (u,v) mapping is an exact
+     * inverse, so a round trip only misses because vanilla creates the far-side
+     * portal a few blocks off the exact destination. The 1:8 nether compression
+     * AMPLIFIES that offset by 8x on the nether->overworld leg, so the overworld
+     * search must be ~8x larger or vanilla can't find the original portal and
+     * builds a duplicate. Small radius in the compressed nether avoids linking to
+     * a different nearby portal. */
+    private static final int NETHER_SEARCH = 16;
+    private static final int OVERWORLD_SEARCH = 160;   // >= 8 * NETHER_SEARCH, margin
+
     private final CubeWorldPlugin plugin;
     private final CubeGeometry geometry;          // overworld cube
     private final CubeGeometry netherGeometry;    // 1:8 nether cube
@@ -54,7 +64,7 @@ public final class PortalLinkListener implements Listener {
         Location linked = linkedDestination(event.getFrom(), event.getTo());
         if (linked != null) {
             event.setTo(linked);
-            event.setSearchRadius(16);
+            event.setSearchRadius(searchRadiusFor(linked));
         }
     }
 
@@ -63,8 +73,13 @@ public final class PortalLinkListener implements Listener {
         Location linked = linkedDestination(event.getFrom(), event.getTo());
         if (linked != null) {
             event.setTo(linked);
-            event.setSearchRadius(16);
+            event.setSearchRadius(searchRadiusFor(linked));
         }
+    }
+
+    private static int searchRadiusFor(Location dest) {
+        return dest.getWorld().getEnvironment() == World.Environment.NETHER
+                ? NETHER_SEARCH : OVERWORLD_SEARCH;
     }
 
     private Location linkedDestination(Location from, Location vanillaTo) {
