@@ -39,17 +39,52 @@ public final class SphereDensity {
     private final boolean earthHeight;
     private final EarthData earth;
     private final PeakField peaks;
+    /**
+     * When true, the main 3D terrain node ({@code BlendedNoise}) is also folded
+     * onto the sphere. The overworld leaves it unfolded (its macro shape comes
+     * from folded {@code ShiftedNoise} continents/erosion/depth, so the tiny
+     * unfolded 3D detail at a seam is negligible), but the nether has NO macro
+     * shape — its entire terrain IS the BlendedNoise ({@code nether/base_3d_noise}
+     * inside {@code slide}) — so it must be folded or seams cliff. The fold
+     * preserves scale: raising real y by 128 moves the sphere sample radially by
+     * 128 blocks, and 2*pi*R ~= face perimeter keeps horizontal features vanilla-sized.
+     */
+    private final boolean foldBlendedNoise;
 
     private SphereDensity(MapSampler sampler, int faceSize, boolean earthHeight, EarthData earth) {
+        this(sampler, faceSize, earthHeight, earth, false);
+    }
+
+    private SphereDensity(MapSampler sampler, int faceSize, boolean earthHeight, EarthData earth,
+                          boolean foldBlendedNoise) {
         this.sampler = sampler;
         this.radius = RADIUS_FACTOR * faceSize;
         this.earthHeight = earthHeight;
         this.earth = earth;
         this.peaks = (earthHeight && earth != null) ? PeakField.get() : null;
+        this.foldBlendedNoise = foldBlendedNoise;
     }
 
     public static SphereDensity forSampler(MapSampler sampler, int faceSize) {
         return new SphereDensity(sampler, faceSize, false, null);
+    }
+
+    /**
+     * The sphere radius (in blocks) used for the fold at a given face size, so
+     * other folded samplers (the nether surface rule) embed on the SAME sphere.
+     */
+    public static double radiusFor(int faceSize) {
+        return RADIUS_FACTOR * faceSize;
+    }
+
+    /**
+     * Fold for the NETHER: pure vanilla nether density, no Earth height pin, and
+     * the main {@code BlendedNoise} terrain node folded too (the nether has no
+     * separate macro-shape field to carry seam continuity, so the 3D noise itself
+     * must be folded).
+     */
+    public static SphereDensity forNether(MapSampler sampler, int faceSize) {
+        return new SphereDensity(sampler, faceSize, false, null, true);
     }
 
     /**
@@ -224,6 +259,11 @@ public final class SphereDensity {
             switch (node.getClass().getSimpleName()) {
                 case "Noise", "Shift", "ShiftA", "ShiftB", "ShiftedNoise" -> {
                     return new Remap(node);
+                }
+                case "BlendedNoise" -> {
+                    if (foldBlendedNoise) {
+                        return new Remap(node);
+                    }
                 }
                 default -> {
                 }

@@ -115,6 +115,14 @@ public final class CubeWorldPlugin extends JavaPlugin {
                     com.ckemere.cubeworld.seam.nms.SphereRouterHook.install(
                             w, maps.mapFor(w.getSeed()).sampler(), FACE_SIZE,
                             maps.hasEarthData(), maps.earthData(), getLogger());
+                } else if (isCubeWorld(w) && w.getEnvironment() == World.Environment.NETHER) {
+                    // Cube nether: fold vanilla nether density (BlendedNoise + biome
+                    // sampler) onto the 1:8 nether cube so real netherrack terrain,
+                    // the lava sea, the bedrock roof/floor, caves and MultiNoise
+                    // nether biomes all appear AND stay seamless across every seam.
+                    com.ckemere.cubeworld.seam.nms.SphereRouterHook.installNether(
+                            w, maps.mapFor(w.getSeed()).netherSampler(), NETHER_FACE_SIZE,
+                            getLogger());
                 }
             }
         }, this);

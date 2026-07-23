@@ -94,11 +94,38 @@ public final class PortalLinkListener implements Listener {
         fv = Math.clamp(fv, clr, 1.0 - clr);
         double dx = dst.faceMinX(face) + fu * dst.faceSize();
         double dz = dst.faceMinZ(face) + fv * dst.faceSize();
-        MapService.CubeWorldMap map = maps.mapFor(target.getSeed());
-        MapSampler sampler = toNether ? map.netherSampler() : map.sampler();
-        int floorLevel = toNether ? CubeNetherChunkGenerator.LAVA_LEVEL
-                : CubeWorldChunkGenerator.SEA_LEVEL;
-        double y = Math.max(sampler.heightAt(dx, dz), floorLevel) + 1;
+        double y;
+        if (toNether) {
+            // The nether is now real vanilla terrain (not the demo height field),
+            // so probe the actual generated column for a safe floor above the
+            // lava sea and below the bedrock roof — vanilla's portal forcer then
+            // builds/searches near a spot the player can actually stand on.
+            y = netherSurfaceY(target, (int) Math.floor(dx), (int) Math.floor(dz));
+        } else {
+            // Overworld destination: the sampler IS the real Earth surface.
+            MapSampler sampler = maps.mapFor(target.getSeed()).sampler();
+            y = Math.max(sampler.heightAt(dx, dz), CubeWorldChunkGenerator.SEA_LEVEL) + 1;
+        }
         return new Location(target, dx, y, dz, from.getYaw(), from.getPitch());
+    }
+
+    /**
+     * A safe standing Y in the real vanilla nether at (x, z): the highest solid
+     * floor with two air blocks above, kept above the lava sea and below the
+     * bedrock roof. Forces the destination chunk to generate first. Falls back to
+     * just above the lava sea if the column is somehow all open.
+     */
+    private int netherSurfaceY(World nether, int x, int z) {
+        nether.getChunkAt(x >> 4, z >> 4); // ensure the column is generated
+        int roofUnderside = 122;   // bedrock roof sits at 125-127
+        int floorMin = CubeNetherChunkGenerator.LAVA_LEVEL + 1;
+        for (int y = roofUnderside; y >= floorMin; y--) {
+            if (nether.getBlockAt(x, y, z).getType().isSolid()
+                    && nether.getBlockAt(x, y + 1, z).isEmpty()
+                    && nether.getBlockAt(x, y + 2, z).isEmpty()) {
+                return y + 1;
+            }
+        }
+        return floorMin + 1;
     }
 }

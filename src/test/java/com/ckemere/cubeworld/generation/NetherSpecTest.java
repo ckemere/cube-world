@@ -94,16 +94,52 @@ class NetherSpecTest {
         return new Vec2(px, pz);
     }
 
+    /**
+     * The vanilla-nether fold ({@link SphereDensity#forNether}) makes seams
+     * seamless by sampling every density/biome node at {@code cubePointAt}. That
+     * only works if a margin point and its on-face seam partner resolve to the
+     * SAME cube-surface point — then both fold to the same 3D noise input and the
+     * terrain, lava level, roof and biome agree across the teleport boundary.
+     * This locks in that invariant (verified in-world for the equatorial, both
+     * pole folds and the date-line wrap seams).
+     */
+    @Test
+    void netherCubePointIsSeamContinuous() {
+        MapSampler sampler = new MapSampler(topo, new NetherDemoSpec(geo, WorldSeeds.from(20260712L)));
+        for (EdgeLink l : topo.links()) {
+            for (double t = 0.15; t <= 0.85; t += 0.1) {
+                Vec2 outside = outwardOf(l, t);
+                Vec2 source = l.aToB().applyPoint(outside.x(), outside.z());
+                com.ckemere.cubeworld.geometry.Vec3 pMargin =
+                        sampler.cubePointAt(outside.x(), outside.z());
+                com.ckemere.cubeworld.geometry.Vec3 pSource =
+                        sampler.cubePointAt(source.x(), source.z());
+                assertTrue(pMargin != null && pSource != null,
+                        "cube point off the net at seam " + l.faceA() + "/" + l.sideA());
+                double d = Math.sqrt(
+                        Math.pow(pMargin.x() - pSource.x(), 2)
+                        + Math.pow(pMargin.y() - pSource.y(), 2)
+                        + Math.pow(pMargin.z() - pSource.z(), 2));
+                assertTrue(d < 1e-6,
+                        "margin and source fold to different cube points (" + d + ") at seam "
+                        + l.faceA() + "/" + l.sideA());
+            }
+        }
+    }
+
     @Test
     void netherSeedsDiffer() {
+        // The nether surface height is now a flat vanilla-hint constant, so the
+        // seed only reshapes the biome-zone field. Different seeds must still
+        // produce different zones somewhere.
         MapSampler a = new MapSampler(topo, new NetherDemoSpec(geo, WorldSeeds.from(1L)));
         MapSampler b = new MapSampler(topo, new NetherDemoSpec(geo, WorldSeeds.from(2L)));
         boolean differs = false;
-        for (double x = -350; x <= 350 && !differs; x += 90) {
-            for (double z = -350; z <= 350 && !differs; z += 90) {
-                differs = Math.abs(a.heightAt(x, z) - b.heightAt(x, z)) > 1.0;
+        for (double x = -350; x <= 350 && !differs; x += 45) {
+            for (double z = -350; z <= 350 && !differs; z += 45) {
+                differs = a.themeAt(x, z) != b.themeAt(x, z);
             }
         }
-        assertNotEquals(false, differs, "different seeds must reshape the nether");
+        assertNotEquals(false, differs, "different seeds must reshape the nether biome zones");
     }
 }

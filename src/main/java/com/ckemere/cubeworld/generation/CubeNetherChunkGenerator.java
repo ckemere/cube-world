@@ -38,10 +38,18 @@ public final class CubeNetherChunkGenerator extends ChunkGenerator {
         this.biomeProvider = new CubeNetherBiomeProvider(topology, maps, marginBlocks);
     }
 
+    /**
+     * Vanilla places every nether block: the world's noise router is folded onto
+     * the sphere ({@link SphereDensity#forNether}) on {@code WorldInitEvent}, so
+     * netherrack terrain with relief, the lava sea (~y32), the bedrock roof/floor,
+     * the swiss-cheese caverns of the 3D noise, and MultiNoise nether biomes all
+     * come from vanilla's own generator but seam-consistently. This pass then
+     * only masks the off-net cross gaps (void) and the corner pillars (bedrock) —
+     * the two things the fold cannot express.
+     */
     @Override
     public void generateSurface(@NotNull WorldInfo worldInfo, @NotNull Random random,
                                 int chunkX, int chunkZ, @NotNull ChunkData chunkData) {
-        MapSampler sampler = maps.mapFor(worldInfo.getSeed()).netherSampler();
         int minY = chunkData.getMinHeight();
         int maxY = chunkData.getMaxHeight();
         boolean nearPillar = chunkNearPillar(chunkX, chunkZ);
@@ -56,19 +64,7 @@ public final class CubeNetherChunkGenerator extends ChunkGenerator {
                 boolean onFace = geometry.faceAt((int) Math.floor(wx), (int) Math.floor(wz)) != null;
                 boolean inMargin = !onFace && topology.marginSource(wx, wz, marginBlocks) != null;
                 if (!onFace && !inMargin) {
-                    continue; // deep void
-                }
-                int height = (int) Math.round(sampler.heightAt(wx, wz));
-                TerrainTheme theme = sampler.themeAt(wx, wz);
-                chunkData.setRegion(lx, minY, lz, lx + 1, minY + 1, lz + 1, Material.BEDROCK);
-                chunkData.setRegion(lx, minY + 1, lz, lx + 1, height - 3, lz + 1, Material.NETHERRACK);
-                chunkData.setRegion(lx, height - 3, lz, lx + 1, height, lz + 1,
-                        ThemeBlocks.fillerBlock(theme));
-                chunkData.setRegion(lx, height, lz, lx + 1, height + 1, lz + 1,
-                        ThemeBlocks.topBlock(theme));
-                if (height < LAVA_LEVEL) {
-                    chunkData.setRegion(lx, height + 1, lz, lx + 1, LAVA_LEVEL + 1, lz + 1,
-                            Material.LAVA);
+                    chunkData.setRegion(lx, minY, lz, lx + 1, maxY, lz + 1, Material.AIR); // deep void
                 }
             }
         }
@@ -89,26 +85,38 @@ public final class CubeNetherChunkGenerator extends ChunkGenerator {
 
     @Override
     public @Nullable BiomeProvider getDefaultBiomeProvider(@NotNull WorldInfo worldInfo) {
-        return biomeProvider;
+        // null -> Paper uses the dimension's own MultiNoise nether biome source.
+        // Its Climate.Sampler is folded onto the sphere by the router hook, so the
+        // five vanilla nether biomes are selected on the folded point and stay
+        // continuous across every seam. (The old CubeNetherBiomeProvider drove
+        // biomes from a sine theme field — the rejected demo approach.)
+        return null;
     }
 
-    /** The nether biome provider, for offline biome-raster export. */
+    /** The nether biome provider, kept for the offline biome-raster export tool. */
     public CubeNetherBiomeProvider biomeProvider() {
         return biomeProvider;
     }
 
     @Override
     public boolean shouldGenerateNoise() {
-        return false;
+        // Vanilla fills netherrack terrain, the lava sea, the bedrock roof/floor
+        // and the 3D-noise caverns from the sphere-folded nether router.
+        return true;
     }
 
     @Override
     public boolean shouldGenerateSurface() {
-        return false;
+        // Vanilla nether surface rules (netherrack top, soul soil, basalt, the
+        // bedrock roof + floor slabs).
+        return true;
     }
 
     @Override
     public boolean shouldGenerateCaves() {
+        // Chunk-seeded vanilla carvers cannot match across seams; the folded 3D
+        // BlendedNoise already gives the nether its characteristic open caverns
+        // and overhangs seam-consistently, so no extra carvers.
         return false;
     }
 

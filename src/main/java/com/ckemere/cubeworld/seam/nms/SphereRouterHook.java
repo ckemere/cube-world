@@ -55,6 +55,120 @@ public final class SphereRouterHook {
     }
 
     /**
+     * Fold vanilla's NETHER terrain onto the cube. Unlike the overworld, the
+     * nether's whole terrain shape is the {@code BlendedNoise} 3D node (there is
+     * no macro continents/erosion/depth field), so {@link SphereDensity#forNether}
+     * folds that node too. We also rebind {@code RandomState.sampler} — the biome
+     * {@link net.minecraft.world.level.biome.Climate.Sampler} is a separate final
+     * field built from the UNFOLDED router at construction, so the MultiNoise
+     * nether biome source would otherwise pick biomes on raw plane coords and
+     * cliff at seams. Rebuilt from the folded router it is seam-consistent.
+     * No aquifer disable: the nether uses the global lava fluid picker (its
+     * settings already have aquifers off), which gives the lava sea for free.
+     */
+    public static boolean installNether(World world, MapSampler sampler, int faceSize, Logger log) {
+        try {
+            ServerLevel level = ((CraftWorld) world).getHandle();
+            RandomState rs = level.getChunkSource().randomState();
+            if (rs == null) {
+                log.warning("Nether router hook: no RandomState yet for '" + world.getName() + "'.");
+                return false;
+            }
+            NoiseRouter folded = SphereDensity.forNether(sampler, faceSize).fold(rs.router());
+            putFinalObject(rs, RandomState.class.getDeclaredField("router"), folded);
+            // Rebind the biome climate sampler from the folded router so vanilla's
+            // MultiNoise nether biome source samples the sphere-folded point too.
+            try {
+                java.util.List<net.minecraft.world.level.biome.Climate.ParameterPoint> spawnTarget =
+                        netherSpawnTarget(level);
+                net.minecraft.world.level.biome.Climate.Sampler foldedSampler =
+                        new net.minecraft.world.level.biome.Climate.Sampler(
+                                folded.temperature(), folded.vegetation(), folded.continents(),
+                                folded.erosion(), folded.depth(), folded.ridges(), spawnTarget);
+                putFinalObject(rs, RandomState.class.getDeclaredField("sampler"), foldedSampler);
+                log.info("Nether biome sampler folded (seam-consistent MultiNoise biomes).");
+            } catch (Throwable t) {
+                log.warning("Nether biome sampler fold failed (" + t
+                        + "); terrain is folded but biomes may cliff at seams.");
+            }
+            // Fold the surface rule's patch noises too, so the top-block skin
+            // (soul_sand/soul_soil, basalt/blackstone, nylium/netherrack, gravel)
+            // is seam-consistent as well — otherwise it pops a block at a seam.
+            try {
+                foldNetherSurfaceRule(level, sampler, faceSize, log);
+            } catch (Throwable t) {
+                log.warning("Nether surface-rule fold failed (" + t
+                        + "); terrain/biomes folded but the surface skin may pop at seams.");
+            }
+            log.info("Nether router hook: vanilla nether terrain folded onto the cube for '"
+                    + world.getName() + "'.");
+            return true;
+        } catch (Throwable t) {
+            log.warning("Nether router hook failed (" + t + "); demo nether terrain remains.");
+            return false;
+        }
+    }
+
+    /** The nether NoiseGeneratorSettings' spawn target list (empty for the nether). */
+    private static java.util.List<net.minecraft.world.level.biome.Climate.ParameterPoint>
+            netherSpawnTarget(ServerLevel level) {
+        net.minecraft.world.level.chunk.ChunkGenerator gen =
+                level.getChunkSource().getGenerator();
+        if (gen instanceof org.bukkit.craftbukkit.generator.CustomChunkGenerator ccg) {
+            gen = ccg.getDelegate();
+        }
+        if (gen instanceof net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator nbcg) {
+            return nbcg.generatorSettings().value().spawnTarget();
+        }
+        return java.util.List.of();
+    }
+
+    /**
+     * Rebind the nether generator's settings to a copy whose surface rule is the
+     * sphere-folded nether rule ({@link com.ckemere.cubeworld.generation.NetherSurfaceFold}),
+     * so the surface system's patch noises sample the folded cube point and the
+     * top-block skin is seam-consistent. Same fresh-generator + delegate-rebind
+     * trick as {@link #disableAquifers}. Aquifers stay as-is (nether keeps its
+     * native lava picker).
+     */
+    private static void foldNetherSurfaceRule(ServerLevel level, MapSampler sampler,
+                                              int faceSize, Logger log) throws Exception {
+        net.minecraft.world.level.chunk.ChunkGenerator gen =
+                level.getChunkSource().getGenerator();
+        org.bukkit.craftbukkit.generator.CustomChunkGenerator ccg = null;
+        if (gen instanceof org.bukkit.craftbukkit.generator.CustomChunkGenerator c) {
+            ccg = c;
+            gen = c.getDelegate();
+        }
+        if (!(gen instanceof net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator nbcg)) {
+            log.warning("Nether surface fold: not a noise generator.");
+            return;
+        }
+        net.minecraft.world.level.levelgen.NoiseGeneratorSettings old =
+                nbcg.generatorSettings().value();
+        net.minecraft.core.HolderGetter<net.minecraft.world.level.biome.Biome> biomes =
+                level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.BIOME);
+        double radius = com.ckemere.cubeworld.generation.SphereDensity.radiusFor(faceSize);
+        net.minecraft.world.level.levelgen.SurfaceRules.RuleSource folded =
+                com.ckemere.cubeworld.generation.NetherSurfaceFold.foldedNetherRule(
+                        biomes, sampler, radius);
+        net.minecraft.world.level.levelgen.NoiseGeneratorSettings copy =
+                new net.minecraft.world.level.levelgen.NoiseGeneratorSettings(
+                        old.noiseSettings(), old.defaultBlock(), old.defaultFluid(),
+                        old.noiseRouter(), folded, old.spawnTarget(),
+                        old.seaLevel(), old.disableMobGeneration(),
+                        old.aquifersEnabled(), old.oreVeinsEnabled(), old.useLegacyRandomSource());
+        net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator fresh =
+                new net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator(
+                        nbcg.getBiomeSource(), net.minecraft.core.Holder.direct(copy));
+        if (ccg != null) {
+            putFinalObject(ccg, org.bukkit.craftbukkit.generator.CustomChunkGenerator.class
+                    .getDeclaredField("delegate"), fresh);
+        }
+        log.info("Nether surface rule folded onto the cube (seam-consistent skin).");
+    }
+
+    /**
      * Disable aquifers so vanilla's global fluid picker fills every open space
      * below sea level with water AND never schedules a fluid update for it
      * (Aquifer.createDisabled.shouldScheduleFluidUpdate() == false), so ocean

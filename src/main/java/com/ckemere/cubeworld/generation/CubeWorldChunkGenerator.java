@@ -189,9 +189,22 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
         }
     }
 
-    /** Neighbourhood used to level a river's water line against raster bumps. */
+    /** Neighbourhood used to level a river's water line against raster bumps
+     * (fallback only, when river_y is somehow absent). */
     private static final double[][] RIVER_KERNEL =
             {{12, 0}, {-12, 0}, {0, 12}, {0, -12}};
+
+    // River-channel geometry. The mask is a distance ramp (1 on centreline,
+    // falling to 0 over ~3 px). Columns with strength >= WATER hold water;
+    // columns in [RIM, WATER) form a solid containing wall one ring outward, so
+    // the water body is always bounded by solid at the waterline (no lateral
+    // leak into a vanilla canyon at the bank). Both sit on a thick solid bed so
+    // vanilla caves cannot puncture and drain the watercourse.
+    private static final double RIVER_WATER_THRESHOLD = EarthClimate.RIVER_THRESHOLD; // 0.70
+    private static final double RIVER_RIM_THRESHOLD = 0.50;
+    private static final int RIVER_WATER_DEPTH = 4;   // water blocks (bedTop+1..waterTop)
+    private static final int RIVER_BED_THICK = 8;     // solid bed blocks below the water
+    private static final int RIVER_HEADROOM = 2;      // air cleared above the water surface
 
     /**
      * Place water that vanilla can't, because our terrain follows real elevation
@@ -218,12 +231,54 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
         int minY = chunkData.getMinHeight();
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
-                // Ocean: aquifers are disabled (SphereRouterHook), so the water
-                // that IS placed is stable source (no fluid ticks). But density
-                // caves in the seabed can leave air pockets right under the
-                // surface water. Fill any such gap down to the first solid seabed
-                // with source water — it stays put because nothing ticks it.
-                if (chunkData.getType(lx, SEA_LEVEL - 1, lz) == Material.WATER) {
+                boolean surfWater = chunkData.getType(lx, SEA_LEVEL - 1, lz) == Material.WATER;
+                boolean solidSea = chunkData.getType(lx, SEA_LEVEL, lz).isSolid();
+                // Void / dry above-sea air with no solid: nothing to place here.
+                if (!surfWater && !solidSea) {
+                    continue;
+                }
+                double wx = (chunkX << 4) + lx + 0.5;
+                double wz = (chunkZ << 4) + lz + 0.5;
+                com.ckemere.cubeworld.geometry.Vec3 p = sampler.cubePointAt(wx, wz);
+                if (p == null) {
+                    continue; // void / off-net (already handled by masking)
+                }
+                double[] ll = earth.toLonLat(p);
+
+                // 1. Sea straits / ship canals FIRST: cut a flat sea-level channel
+                // through the land bridge so the seas on each side connect (Bering,
+                // Gibraltar, Bab-el-Mandeb, Bosphorus, Panama/Suez, ...). Takes
+                // precedence over everything so its solid bed always seals.
+                StraitField.Hit strait = StraitField.sample(ll[0], ll[1]);
+                if (strait != null) {
+                    carveStraitColumn(chunkData, lx, lz, minY, strait.depthBlocks(),
+                            earth, ll);
+                    continue;
+                }
+
+                // 2. Rivers on land: carve BEFORE the ocean fill so the solid,
+                // cave-proof bed is always laid — even where vanilla noise made a
+                // near-sea river column look ocean-like (which would otherwise let
+                // the gap-fill below claim it and skip the river). A river column
+                // whose land still stands above sea gets a channel; one that has
+                // reached the coast falls through to the ocean fill (its mouth).
+                if (hasRivers) {
+                    double r = earth.sample("river", ll[0], ll[1]);
+                    if (!Double.isNaN(r) && r > RIVER_RIM_THRESHOLD) {
+                        int predicted = (int) Math.round(sampler.heightAt(wx, wz));
+                        if (predicted > SEA_LEVEL) {
+                            carveRiverColumn(earth, sampler, chunkData, lx, lz, wx, wz,
+                                    minY, predicted, ll, r);
+                            continue;
+                        }
+                    }
+                }
+
+                // 3. Ocean gap-fill: aquifers are disabled (SphereRouterHook), so
+                // placed water is stable source (no fluid ticks), but density caves
+                // in the seabed can leave air pockets right under the surface water.
+                // Fill any such gap down to the first solid seabed with source water.
+                if (surfWater) {
                     int y = SEA_LEVEL - 1;
                     while (y >= minY && chunkData.getType(lx, y, lz) == Material.WATER) {
                         y--;
@@ -238,27 +293,12 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                     }
                     continue;
                 }
-                // Void / dry sub-sea: nothing without solid or surface water here.
-                if (!chunkData.getType(lx, SEA_LEVEL, lz).isSolid()) {
-                    continue;
-                }
-                double wx = (chunkX << 4) + lx + 0.5;
-                double wz = (chunkZ << 4) + lz + 0.5;
-                // Land: a shoal (bump in an ocean cell) or a river.
-                com.ckemere.cubeworld.geometry.Vec3 p = sampler.cubePointAt(wx, wz);
-                if (p == null) {
-                    continue; // void / off-net (already handled by masking)
-                }
-                double[] ll = earth.toLonLat(p);
-                // Skip the elevation lookup when solid stands well above sea
-                // level — it's plainly land, so only the river check remains.
+
+                // 4. Shoal: solid poked above the sea in an ocean cell. Clear it to
+                // the raster seabed, lay a gravel floor, and fill water.
                 boolean nearSea = !chunkData.getType(lx, SEA_LEVEL + 8, lz).isSolid();
                 double elev = nearSea ? earth.sample("height", ll[0], ll[1]) : 1.0;
-
                 if (elev < 0) {
-                    // Shoal: solid poked above the sea in an ocean cell. Clear it to
-                    // the raster seabed, lay a gravel floor, and fill water — a clean
-                    // watertight column, not a bump.
                     int seabed = Math.min((int) Math.round(sampler.heightAt(wx, wz)),
                             SEA_LEVEL - 2);
                     for (int y = SEA_LEVEL + 40; y > seabed; y--) {
@@ -270,50 +310,127 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                             lz + 1, Material.GRAVEL);
                     chunkData.setRegion(lx, seabed + 1, lz, lx + 1, SEA_LEVEL, lz + 1,
                             Material.WATER);
-                    continue;
                 }
-
-                if (!hasRivers
-                        || EarthClimate.riverStrength(earth, sampler, wx, wz)
-                                <= EarthClimate.RIVER_THRESHOLD) {
-                    continue;
-                }
-                int predicted = (int) Math.round(sampler.heightAt(wx, wz));
-                if (predicted <= SEA_LEVEL + 2) {
-                    continue; // meets the sea; vanilla's ocean fill handles it
-                }
-                // Prefer the precomputed DOWNHILL water surface (river_y): it is
-                // monotonically non-increasing from source to mouth, so the river
-                // is guaranteed to never flow uphill. The gravel bed below fills
-                // any noise dip so the water sits exactly at that surface. Fall
-                // back to local neighbourhood-min levelling where river_y is
-                // absent (thin data gaps).
-                int waterTop;
-                double rym = EarthClimate.riverWaterY(earth, sampler, wx, wz);
-                if (!Double.isNaN(rym)) {
-                    waterTop = (int) Math.round(EarthMapSpec.elevationToBlockY(rym));
-                    waterTop = Math.min(waterTop, predicted - 1);   // always a channel
-                } else {
-                    double hmin = sampler.heightAt(wx, wz);
-                    for (double[] o : RIVER_KERNEL) {
-                        hmin = Math.min(hmin, sampler.heightAt(wx + o[0], wz + o[1]));
-                    }
-                    waterTop = Math.max((int) Math.round(hmin) - 1, predicted - 14);
-                }
-                if (waterTop <= SEA_LEVEL) {
-                    continue;
-                }
-                int surf = surfaceOf(chunkData, lx, lz, predicted);
-                int clearTop = Math.max(surf, waterTop) + 3;
-                for (int y = clearTop; y > waterTop; y--) {
-                    chunkData.setBlock(lx, y, lz, Material.AIR); // open channel, clear plants
-                }
-                chunkData.setRegion(lx, waterTop - 2, lz, lx + 1, waterTop + 1, lz + 1,
-                        Material.WATER);
-                chunkData.setRegion(lx, Math.max(minY, waterTop - 6), lz, lx + 1, waterTop - 2,
-                        lz + 1, Material.GRAVEL); // bed + fill so noise dips don't drain it
             }
         }
+    }
+
+    /**
+     * Carve one column of a river channel. The water surface is the precomputed
+     * DOWNHILL {@code river_y} (monotone non-increasing source->mouth, so the
+     * river never flows uphill); it now covers the whole ramp footprint after
+     * the export dilation, with a neighbourhood-min fallback for any residual
+     * gap. Rather than the old thin per-column stamp (which floated pools over
+     * vanilla canyons and let caves drain them), we rebuild a fixed cross
+     * section that ignores vanilla noise inside the footprint:
+     *
+     * <ul>
+     *   <li><b>Water columns</b> (strength &ge; WATER): a solid biome bed
+     *   {@code RIVER_BED_THICK} deep (overwriting any cave void — cave-proof),
+     *   {@code RIVER_WATER_DEPTH} source-water blocks on top, and open air above.
+     *   <li><b>Rim columns</b> (RIM..WATER): a solid wall filled up through the
+     *   waterline so the water body is contained even where vanilla cut a canyon
+     *   right at the bank. Natural terrain above the waterline is left alone.
+     * </ul>
+     *
+     * Everything is a continuous function of the cube point (river_y, strength,
+     * climate) so the channel is seam-consistent by construction.
+     */
+    private void carveRiverColumn(EarthData earth, MapSampler sampler, ChunkData chunkData,
+                                  int lx, int lz, double wx, double wz, int minY,
+                                  int predicted, double[] ll, double rstr) {
+        int waterTop;
+        double rym = EarthClimate.riverWaterY(earth, sampler, wx, wz);
+        if (!Double.isNaN(rym)) {
+            waterTop = (int) Math.round(EarthMapSpec.elevationToBlockY(rym));
+            waterTop = Math.min(waterTop, predicted - 1);   // always a channel
+        } else {
+            double hmin = sampler.heightAt(wx, wz);
+            for (double[] o : RIVER_KERNEL) {
+                hmin = Math.min(hmin, sampler.heightAt(wx + o[0], wz + o[1]));
+            }
+            waterTop = Math.max((int) Math.round(hmin) - 1, predicted - 14);
+        }
+        if (waterTop <= SEA_LEVEL) {
+            // The downhill surface has reached the sea. Wherever the land still
+            // stands even a block above sea (vast low basins like the Amazon and
+            // lower Mississippi that the vertical scale squashes toward sea
+            // level), incise a flush sea-level channel so the river stays a
+            // continuous water ribbon instead of breaking into dry gaps;
+            // otherwise it is truly the coast and vanilla's ocean fill takes over.
+            if (predicted > SEA_LEVEL) {
+                waterTop = SEA_LEVEL;
+            } else {
+                return;
+            }
+        }
+        int bedTop = waterTop - RIVER_WATER_DEPTH;          // topmost solid bed block
+        int bedBottom = Math.max(minY + 1, bedTop - RIVER_BED_THICK + 1);
+
+        if (rstr < RIVER_WATER_THRESHOLD) {
+            // Rim: raise/patch a solid wall through the waterline so the adjacent
+            // water can't leak past it, but keep any natural terrain above.
+            for (int y = bedBottom; y <= waterTop; y++) {
+                if (!chunkData.getType(lx, y, lz).isSolid()) {
+                    chunkData.setBlock(lx, y, lz, Material.STONE);
+                }
+            }
+            return;
+        }
+
+        // Water column. Clear a channel down to the water surface.
+        int surf = surfaceOf(chunkData, lx, lz, predicted);
+        int clearTop = Math.max(surf, waterTop) + RIVER_HEADROOM;
+        for (int y = clearTop; y > waterTop; y--) {
+            chunkData.setBlock(lx, y, lz, Material.AIR);
+        }
+        // Source water.
+        chunkData.setRegion(lx, bedTop + 1, lz, lx + 1, waterTop + 1, lz + 1, Material.WATER);
+        // Solid bed: a thin biome-appropriate cosmetic cap over stone, thick
+        // enough that caves below can't reach the water. Overwrites cave voids.
+        Material cap = riverBedBlock(earth, ll);
+        chunkData.setRegion(lx, bedBottom, lz, lx + 1, bedTop - 1, lz + 1, Material.STONE);
+        chunkData.setRegion(lx, bedTop - 1, lz, lx + 1, bedTop + 1, lz + 1, cap);
+    }
+
+    /**
+     * Carve one column of a sea strait / canal: excavate any land down to a
+     * solid bed {@code depth} blocks below sea and fill the channel with source
+     * water to the sea surface, so the corridor becomes navigable water joining
+     * the seas on either side. Adjacent out-of-corridor land forms the banks;
+     * at the ends the channel merges with the existing ocean.
+     */
+    private void carveStraitColumn(ChunkData chunkData, int lx, int lz, int minY,
+                                   int depth, EarthData earth, double[] ll) {
+        int bed = SEA_LEVEL - depth;
+        int ceil = Math.min(chunkData.getMaxHeight() - 1, SEA_LEVEL + 48);
+        for (int y = ceil; y > bed; y--) {
+            if (chunkData.getType(lx, y, lz).isSolid()) {
+                chunkData.setBlock(lx, y, lz, Material.AIR);
+            }
+        }
+        // Fill to the ocean surface block (y = SEA_LEVEL) so the channel is
+        // flush with the sea it joins (upper bound is exclusive).
+        chunkData.setRegion(lx, bed + 1, lz, lx + 1, SEA_LEVEL + 1, lz + 1, Material.WATER);
+        chunkData.setRegion(lx, Math.max(minY + 1, bed - 2), lz, lx + 1, bed + 1, lz + 1,
+                riverBedBlock(earth, ll));
+    }
+
+    /** Biome-appropriate river/lake bed cosmetic: sand in warm-dry country,
+     * gravel elsewhere. Sits on the solid stone bed so it never gravity-falls. */
+    private Material riverBedBlock(EarthData earth, double[] ll) {
+        double temp = earth.sample("temp", ll[0], ll[1]);
+        double precip = earth.sample("precip", ll[0], ll[1]);
+        if (Double.isNaN(temp)) {
+            temp = 27.0 - Math.abs(ll[1]) * 0.65;
+        }
+        if (Double.isNaN(precip)) {
+            precip = 700.0;
+        }
+        if (temp > 15 && precip < 500) {
+            return Material.SAND;          // desert / savanna washes
+        }
+        return Material.GRAVEL;            // temperate & cold river beds
     }
 
     /** Topmost solid block near the predicted height (vanilla's finished surface). */

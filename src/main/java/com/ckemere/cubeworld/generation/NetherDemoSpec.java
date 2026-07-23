@@ -8,39 +8,51 @@ import java.util.EnumMap;
 import java.util.Map;
 
 /**
- * The cube nether: an open hellscape on the same folded-cube surface as the
- * overworld, with its own height field and a biome field that partitions the
- * surface into the five nether biomes. Both are continuous functions of the
- * cube-surface point, so — exactly like the overworld spec — every stitched
- * edge agrees by construction. Phases 17–20 (height) and 21–23 (theme).
+ * Support field for the cube nether. <b>It no longer generates terrain.</b> The
+ * nether is now real vanilla generation folded onto the cube — netherrack relief,
+ * the lava sea, the bedrock roof/floor, caves and MultiNoise biomes all come from
+ * vanilla's own generator (see {@link SphereDensity#forNether},
+ * {@code SphereRouterHook.installNether} and {@link NetherSurfaceFold}). This spec
+ * survives only to give the nether {@link MapSampler} something to construct
+ * (the fold uses the sampler's {@code cubePointAt}, which is independent of this
+ * spec) plus two peripheral, non-authoritative helpers:
+ *
+ * <ul>
+ *   <li>a flat nominal surface height ({@link #heightAt}) used as a heightmap
+ *       hint by {@code getBaseHeight} — the real surface is vanilla noise;
+ *   <li>a seam-continuous biome-<i>zone</i> field ({@link #themeAt}) that the
+ *       offline biome-raster/census tooling samples as a coarse approximation.
+ *       It is NOT how biomes are actually chosen (that is vanilla's MultiNoise
+ *       nether source).
+ * </ul>
+ *
+ * The old sine <i>terrain height</i> field (hand-rolled "hellscape ridges") was
+ * the rejected demo approach and has been removed.
  */
 public final class NetherDemoSpec implements MapSpec {
 
-    /** Lava-sea surface. Heights below this flood with lava. */
+    /** Lava-sea surface (vanilla nether sea level). */
     public static final int LAVA_LEVEL = 32;
 
-    // Target nether biome patch size in blocks. The biome/terrain fields are
-    // functions of the UNIT-cube point (so they stay seam-continuous), which is
-    // face-size-independent — one face is always 2 cube-units wide whether it is
-    // 10240 blocks (overworld) or 1280 (the 1:8-compressed nether). Without
-    // scaling, a sin(2.5*p.x) patch spans the whole face (~1280 blocks) and the
-    // nether reads as a few giant biomes. We scale the field frequency by face
-    // size so a patch is ~BIOME_BLOCKS regardless of compression.
-    private static final double BIOME_BLOCKS = 300.0;    // target nether biome patch size
-    private static final double TERRAIN_BLOCKS = 300.0;   // hellscape ridge spacing
+    /** Flat nominal surface, a heightmap hint only (real relief is vanilla noise). */
+    private static final double NOMINAL_SURFACE = 64.0;
 
-    // Off-axis unit directions for the fields. The biome/terrain fields are
-    // functions of the cube point (so they're seam-continuous), but AXIS-aligned
-    // sines degenerate to a regular plaid on faces where one cube coordinate is
-    // ~constant (the poles, and half of each equatorial face) — that's why the
-    // nether read as a 4x4 tiled grid. Off-axis directions + a domain warp make
-    // the patches organic and irregular, like vanilla's nether.
+    // Target nether biome-zone patch size in blocks. The zone field is a function
+    // of the UNIT-cube point (so it stays seam-continuous), which is
+    // face-size-independent — one face is always 2 cube-units wide whether it is
+    // 10240 blocks (overworld) or 1280 (the 1:8-compressed nether). We scale the
+    // field frequency by face size so a patch is ~BIOME_BLOCKS regardless of
+    // compression.
+    private static final double BIOME_BLOCKS = 300.0;
+
+    // Off-axis unit directions for the field. Axis-aligned sines degenerate to a
+    // regular plaid on faces where one cube coordinate is ~constant (the poles);
+    // off-axis directions + a domain warp keep the zones organic and irregular.
     private static final double[][] DIRS = {
             {0.78, 0.42, 0.46}, {-0.44, 0.80, 0.40}, {0.40, -0.50, 0.77},
     };
 
     private final int cells;
-    private final Map<CubeFace, double[][]> heights = new EnumMap<>(CubeFace.class);
     private final Map<CubeFace, TerrainTheme[][]> themes = new EnumMap<>(CubeFace.class);
 
     public NetherDemoSpec(CubeGeometry geometry, WorldSeeds seeds) {
@@ -50,21 +62,16 @@ public final class NetherDemoSpec implements MapSpec {
         // unit-cube axis (p spans 2 over faceSize blocks), so a patch stays ~L
         // blocks whatever the face compression (overworld 10240 / nether 1280).
         double biomeFreq = Math.PI * geometry.faceSize() / BIOME_BLOCKS;
-        double terrainFreq = Math.PI * geometry.faceSize() / TERRAIN_BLOCKS;
         for (CubeFace face : CubeFace.values()) {
-            double[][] h = new double[cells][cells];
             TerrainTheme[][] t = new TerrainTheme[cells][cells];
             for (int cx = 0; cx < cells; cx++) {
                 for (int cz = 0; cz < cells; cz++) {
                     double wx = geometry.faceMinX(face) + cx * 16 + 8;
                     double wz = geometry.faceMinZ(face) + cz * 16 + 8;
                     Vec3 p = surface.point(face, wx, wz);
-                    double height = 44.0 + 12.0 * organicField(p, terrainFreq, seeds, 23);
-                    h[cx][cz] = height;
-                    t[cx][cz] = themeFor(height, organicField(p, biomeFreq, seeds, 17));
+                    t[cx][cz] = themeFor(organicField(p, biomeFreq, seeds, 17));
                 }
             }
-            heights.put(face, h);
             themes.put(face, t);
         }
     }
@@ -93,20 +100,20 @@ public final class NetherDemoSpec implements MapSpec {
         return d[0] * x + d[1] * y + d[2] * z;
     }
 
-    private static TerrainTheme themeFor(double height, double field) {
-        if (height < LAVA_LEVEL + 3) {
-            return TerrainTheme.BASALT_DELTAS; // lava shores
-        }
+    private static TerrainTheme themeFor(double field) {
         if (field < -1.0) {
             return TerrainTheme.SOUL_SAND_VALLEY;
         }
         if (field < -0.1) {
             return TerrainTheme.NETHER_WASTES;
         }
-        if (field < 0.9) {
+        if (field < 0.7) {
             return TerrainTheme.CRIMSON_FOREST;
         }
-        return TerrainTheme.WARPED_FOREST;
+        if (field < 1.3) {
+            return TerrainTheme.WARPED_FOREST;
+        }
+        return TerrainTheme.BASALT_DELTAS;
     }
 
     @Override
@@ -121,7 +128,7 @@ public final class NetherDemoSpec implements MapSpec {
 
     @Override
     public double heightAt(CubeFace face, int cellX, int cellZ) {
-        return heights.get(face)[cellX][cellZ];
+        return NOMINAL_SURFACE;
     }
 
     @Override

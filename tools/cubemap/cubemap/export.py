@@ -98,7 +98,33 @@ def _river_mask(w, h, data_dir, radius=3):
     return _distance_ramp(np.asarray(mask, dtype=bool), radius)
 
 
-def _river_water_y(w, h, data_dir, height):
+def _dilate_min(a, radius):
+    """Spread valid (non-NaN) values of `a` outward by `radius` 4-neighbour
+    steps, keeping the MINIMUM where fronts collide. Used to widen the river
+    water-surface (river_y) so it covers the whole distance-ramp footprint the
+    river MASK carves, not just the 1px centre-line — otherwise off-centreline
+    carved columns have no downhill surface and fall back to noisy local
+    levelling (measured: only 46% of carved pixels had a river_y before this).
+    MIN keeps the surface downhill-consistent where two branches meet."""
+    out = a.copy()
+    h, w = out.shape
+    for _ in range(radius):
+        cur = out
+        cand = np.full_like(cur, np.nan)
+        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            sh = np.full_like(cur, np.nan)
+            ys = slice(max(0, dy), h + min(0, dy))
+            yd = slice(max(0, -dy), h + min(0, -dy))
+            xs = slice(max(0, dx), w + min(0, dx))
+            xd = slice(max(0, -dx), w + min(0, -dx))
+            sh[yd, xd] = cur[ys, xs]
+            cand = np.fmin(cand, sh)
+        fill = np.isnan(out) & ~np.isnan(cand)
+        out[fill] = cand[fill]
+    return out
+
+
+def _river_water_y(w, h, data_dir, height, dilate=3):
     """A per-cell DOWNHILL water-surface elevation (metres) along the river
     centre-lines + lakes; NaN off-river. For each centre-line we sample the DEM,
     orient it source(high)->mouth(low), and take the RUNNING MINIMUM from the
@@ -165,6 +191,10 @@ def _river_water_y(w, h, data_dir, height):
                 ImageDraw.Draw(m).polygon([to_px(*p) for p in ring], fill=1)
                 mk = np.asarray(m, dtype=bool)
                 wy[mk] = np.where(np.isnan(wy[mk]), lake_y, np.minimum(wy[mk], lake_y))
+    # Widen the water surface to the mask's distance-ramp footprint so every
+    # carved column has a downhill surface (see _dilate_min).
+    if dilate:
+        wy = _dilate_min(wy, dilate)
     return wy
 
 
