@@ -14,21 +14,23 @@ import java.util.Set;
  * listed in corresponding cube-vertex order; the transform is the unique
  * orientation-preserving isometry mapping one segment onto the other, which
  * automatically carries the outward normal of one face onto the inward normal
- * of the other. Derivation (fold the cross, match vertices), h = faceSize/2:
+ * of the other. Derivation (fold the equatorial band, match vertices),
+ * h = faceSize/2:
  *
  * <pre>
- * link  faceA side   segment A            faceB side   segment B            turns
- * 1     EQ_PRIME  E  ( h, h)->( h,3h)     EQ_EAST   S  ( h, h)->( 3h, h)    1
- * 2     EQ_PRIME  W  (-h, h)->(-h,3h)     EQ_WEST   S  (-h, h)->(-3h, h)    3
- * 3     EQ_BACK   E  ( h,-h)->( h,-3h)    EQ_EAST   N  ( h,-h)->( 3h,-h)    3
- * 4     EQ_BACK   W  (-h,-h)->(-h,-3h)    EQ_WEST   N  (-h,-h)->(-3h,-h)    1
- * 5     SOUTH_POLE E ( h,3h)->( h,5h)     EQ_EAST   E  ( 3h, h)->( 3h,-h)   2
- * 6     SOUTH_POLE W (-h,3h)->(-h,5h)     EQ_WEST   W  (-3h, h)->(-3h,-h)   2
- * 7     SOUTH_POLE S ( h,5h)->(-h,5h)     EQ_BACK   N  ( h,-3h)->(-h,-3h)   0
+ * link  faceA side    segment A            faceB side   segment B            turns
+ * 1     NORTH_POLE N  (-h,-3h)->( h,-3h)   EQ_BACK   N  ( 5h,-h)->( 3h,-h)   2
+ * 2     NORTH_POLE E  ( h,-3h)->( h, -h)   EQ_EAST   N  ( 3h,-h)->(  h,-h)   3
+ * 3     NORTH_POLE W  (-h,-3h)->(-h, -h)   EQ_WEST   N  (-3h,-h)->( -h,-h)   1
+ * 4     SOUTH_POLE S  ( h, 3h)->(-h, 3h)   EQ_BACK   S  ( 3h, h)->( 5h, h)   2
+ * 5     SOUTH_POLE E  ( h,  h)->( h, 3h)   EQ_EAST   S  (  h, h)->( 3h, h)   1
+ * 6     SOUTH_POLE W  (-h,  h)->(-h, 3h)   EQ_WEST   S  ( -h, h)->(-3h, h)   3
+ * 7     EQ_BACK    E  ( 5h,-h)->( 5h, h)   EQ_WEST   W  (-3h,-h)->(-3h, h)   0
  * </pre>
  *
- * The remaining five cube edges are contiguous in the net (the four around
- * NORTH_POLE, and EQ_PRIME–SOUTH_POLE).
+ * The remaining five cube edges are contiguous in the net: the equatorial band
+ * itself (EQ_WEST–EQ_PRIME–EQ_EAST–EQ_BACK) and the two poles hung off the
+ * prime meridian (NORTH_POLE–EQ_PRIME, EQ_PRIME–SOUTH_POLE).
  */
 public final class CubeTopology {
 
@@ -40,20 +42,20 @@ public final class CubeTopology {
         this.geometry = geometry;
         double h = geometry.faceSize() / 2.0;
         List<EdgeLink> list = new ArrayList<>();
-        list.add(link(CubeFace.EQ_PRIME, Side.EAST, v(h, h), v(h, 3 * h),
+        list.add(link(CubeFace.NORTH_POLE, Side.NORTH, v(-h, -3 * h), v(h, -3 * h),
+                CubeFace.EQ_BACK, Side.NORTH, v(5 * h, -h), v(3 * h, -h)));
+        list.add(link(CubeFace.NORTH_POLE, Side.EAST, v(h, -3 * h), v(h, -h),
+                CubeFace.EQ_EAST, Side.NORTH, v(3 * h, -h), v(h, -h)));
+        list.add(link(CubeFace.NORTH_POLE, Side.WEST, v(-h, -3 * h), v(-h, -h),
+                CubeFace.EQ_WEST, Side.NORTH, v(-3 * h, -h), v(-h, -h)));
+        list.add(link(CubeFace.SOUTH_POLE, Side.SOUTH, v(h, 3 * h), v(-h, 3 * h),
+                CubeFace.EQ_BACK, Side.SOUTH, v(3 * h, h), v(5 * h, h)));
+        list.add(link(CubeFace.SOUTH_POLE, Side.EAST, v(h, h), v(h, 3 * h),
                 CubeFace.EQ_EAST, Side.SOUTH, v(h, h), v(3 * h, h)));
-        list.add(link(CubeFace.EQ_PRIME, Side.WEST, v(-h, h), v(-h, 3 * h),
+        list.add(link(CubeFace.SOUTH_POLE, Side.WEST, v(-h, h), v(-h, 3 * h),
                 CubeFace.EQ_WEST, Side.SOUTH, v(-h, h), v(-3 * h, h)));
-        list.add(link(CubeFace.EQ_BACK, Side.EAST, v(h, -h), v(h, -3 * h),
-                CubeFace.EQ_EAST, Side.NORTH, v(h, -h), v(3 * h, -h)));
-        list.add(link(CubeFace.EQ_BACK, Side.WEST, v(-h, -h), v(-h, -3 * h),
-                CubeFace.EQ_WEST, Side.NORTH, v(-h, -h), v(-3 * h, -h)));
-        list.add(link(CubeFace.SOUTH_POLE, Side.EAST, v(h, 3 * h), v(h, 5 * h),
-                CubeFace.EQ_EAST, Side.EAST, v(3 * h, h), v(3 * h, -h)));
-        list.add(link(CubeFace.SOUTH_POLE, Side.WEST, v(-h, 3 * h), v(-h, 5 * h),
-                CubeFace.EQ_WEST, Side.WEST, v(-3 * h, h), v(-3 * h, -h)));
-        list.add(link(CubeFace.SOUTH_POLE, Side.SOUTH, v(h, 5 * h), v(-h, 5 * h),
-                CubeFace.EQ_BACK, Side.NORTH, v(h, -3 * h), v(-h, -3 * h)));
+        list.add(link(CubeFace.EQ_BACK, Side.EAST, v(5 * h, -h), v(5 * h, h),
+                CubeFace.EQ_WEST, Side.WEST, v(-3 * h, -h), v(-3 * h, h)));
         this.links = List.copyOf(list);
         Set<Vec2> sites = new LinkedHashSet<>();
         for (EdgeLink l : this.links) {

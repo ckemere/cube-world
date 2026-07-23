@@ -1,26 +1,28 @@
 package com.ckemere.cubeworld.geometry;
 
 /**
- * The six faces of the cube, laid out as an unfolded cross in the world plane.
- * Grid coordinates are in face-size units; the north-pole face is at the
- * center of the cross:
+ * The six faces of the cube, unfolded as an <em>equatorial band</em> in the
+ * world plane: the four equatorial faces form a west-to-east row (each with
+ * north up, east right — a correct compass), with the poles hung above and
+ * below the prime-meridian face:
  *
  * <pre>
- *              [EQ_BACK]
- *   [EQ_WEST] [NORTH_POLE] [EQ_EAST]
- *              [EQ_PRIME]
- *              [SOUTH_POLE]
+ *                          [NORTH_POLE]
+ *   [EQ_WEST] [EQ_PRIME] [EQ_EAST] [EQ_BACK]
+ *                          [SOUTH_POLE]
  * </pre>
  *
- * Grid columns increase eastward (+X), rows increase southward (+Z).
+ * Grid columns increase eastward (+X), rows increase southward (+Z). The band
+ * is EQ_WEST(90°W) → EQ_PRIME(0°) → EQ_EAST(90°E) → EQ_BACK(180°), wrapping at
+ * EQ_BACK's east edge back to EQ_WEST's west edge (the date line).
  */
 public enum CubeFace {
-    NORTH_POLE(0, 0, "North Pole"),
-    EQ_PRIME(0, 1, "Equator 0°"),
+    NORTH_POLE(0, -1, "North Pole"),
+    EQ_PRIME(0, 0, "Equator 0°"),
     EQ_EAST(1, 0, "Equator 90°E"),
-    EQ_BACK(0, -1, "Equator 180°"),
+    EQ_BACK(2, 0, "Equator 180°"),
     EQ_WEST(-1, 0, "Equator 90°W"),
-    SOUTH_POLE(0, 2, "South Pole");
+    SOUTH_POLE(0, 1, "South Pole");
 
     private final int gridCol;
     private final int gridRow;

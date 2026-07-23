@@ -32,18 +32,27 @@ public final class CubeWorldPlugin extends JavaPlugin {
     /** Edge length of one cube face in blocks (640 chunks; ~1 km/block Earth). */
     public static final int FACE_SIZE = 640 * 16;
 
+    /** The nether cube is 1:8, a true 8x-travel nether. Its theme noise lives in
+     * normalised cube space, so an eighth-size face makes nether biomes an eighth
+     * the size in blocks automatically. */
+    public static final int NETHER_FACE_SIZE = FACE_SIZE / 8;
+    public static final int NETHER_SCALE = 8;
+
     /** Overworld spawn: Addis Ababa, Ethiopia, folded to the net at roll -70. */
-    private static final int SPAWN_X = 9381;
-    private static final int SPAWN_Z = -1737;
+    private static final int SPAWN_X = 11973;
+    private static final int SPAWN_Z = -856;
 
     /** Depth of the mirrored seam margins in blocks (6 chunks; match view-distance). */
     public static final int MARGIN_BLOCKS = 6 * 16;
 
     private final CubeGeometry geometry = new CubeGeometry(FACE_SIZE);
     private final CubeTopology topology = new CubeTopology(geometry);
-    private final MapService maps = new MapService(topology);
+    private final CubeGeometry netherGeometry = new CubeGeometry(NETHER_FACE_SIZE);
+    private final CubeTopology netherTopology = new CubeTopology(netherGeometry);
+    private final MapService maps = new MapService(topology, netherTopology);
     private final SeamService seams = new SeamService(topology);
     private final MirrorService mirrors = new MirrorService(topology, MARGIN_BLOCKS);
+    private final MirrorService netherMirrors = new MirrorService(netherTopology, MARGIN_BLOCKS);
     private final Map<UUID, WorldServices> perWorld = new LinkedHashMap<>();
     private com.ckemere.cubeworld.teleport.TeleportService teleport;
 
@@ -79,7 +88,8 @@ public final class CubeWorldPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new MarginInteractionListener(this, mirrors), this);
         getServer().getPluginManager().registerEvents(new EntitySeamListener(this, mirrors), this);
         getServer().getPluginManager().registerEvents(new PillarGuardListener(this, topology, MARGIN_BLOCKS), this);
-        getServer().getPluginManager().registerEvents(new PortalLinkListener(this, geometry, maps), this);
+        getServer().getPluginManager().registerEvents(
+                new PortalLinkListener(this, geometry, netherGeometry, maps), this);
         // Teleport network: reskinned-lodestone stations on amethyst pads, with
         // the 30 cities pre-seeded (built as their chunks load).
         teleport = new com.ckemere.cubeworld.teleport.TeleportService(this);
@@ -139,7 +149,8 @@ public final class CubeWorldPlugin extends JavaPlugin {
         });
         getServer().getScheduler().runTaskTimer(this, exploration::tick, 100L, 20L);
 
-        CubeWorldCommand executor = new CubeWorldCommand(geometry, seams, mirrors, maps, teleport);
+        CubeWorldCommand executor = new CubeWorldCommand(geometry, netherGeometry, seams, mirrors,
+                maps, teleport);
         PluginCommand command = getCommand("cubeworld");
         if (command != null) {
             command.setExecutor(executor);
@@ -224,10 +235,14 @@ public final class CubeWorldPlugin extends JavaPlugin {
             // must run AFTER the stronghold hook (which sets hasGeneratedPositions)
             com.ckemere.cubeworld.seam.nms.VillageAnchorHook.install(world, this, getLogger());
         }
-        LiquidSeamService liquids = new LiquidSeamService(topology, mirrors, world);
-        EntityMirrorService entityMirrors = new EntityMirrorService(this, topology, MARGIN_BLOCKS);
-        PartnerTicketService tickets = new PartnerTicketService(this, topology, MARGIN_BLOCKS);
-        MarginReconciler reconciler = new MarginReconciler(topology, MARGIN_BLOCKS, world);
+        // the nether cube is 1:8, so its seams run on the nether topology/mirrors
+        boolean nether = world.getEnvironment() == World.Environment.NETHER;
+        CubeTopology topo = nether ? netherTopology : topology;
+        MirrorService mir = nether ? netherMirrors : mirrors;
+        LiquidSeamService liquids = new LiquidSeamService(topo, mir, world);
+        EntityMirrorService entityMirrors = new EntityMirrorService(this, topo, MARGIN_BLOCKS);
+        PartnerTicketService tickets = new PartnerTicketService(this, topo, MARGIN_BLOCKS);
+        MarginReconciler reconciler = new MarginReconciler(topo, MARGIN_BLOCKS, world);
         getServer().getPluginManager().registerEvents(liquids, this);
         getServer().getPluginManager().registerEvents(reconciler, this);
         reconciler.bootstrap(world);
@@ -235,7 +250,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, () -> entityMirrors.tick(world), 1L, 1L);
         getServer().getScheduler().runTaskTimer(this, () -> tickets.refresh(world), 40L, 20L);
         getServer().getScheduler().runTaskTimer(this, () -> reconciler.tick(world), 60L, 1L);
-        com.ckemere.cubeworld.seam.nms.NmsSeamHook.install(world, topology, mirrors, this, getLogger());
+        com.ckemere.cubeworld.seam.nms.NmsSeamHook.install(world, topo, mir, this, getLogger());
         perWorld.put(world.getUID(), new WorldServices(world, liquids, entityMirrors, tickets, reconciler));
         getLogger().info("Cube topology active in world '" + world.getName() + "'");
     }
@@ -271,7 +286,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
     @Override
     public @Nullable ChunkGenerator getDefaultWorldGenerator(@NotNull String worldName, @Nullable String id) {
         if (worldName.contains("nether")) {
-            return new CubeNetherChunkGenerator(topology, maps, MARGIN_BLOCKS);
+            return new CubeNetherChunkGenerator(netherTopology, maps, MARGIN_BLOCKS);
         }
         return new CubeWorldChunkGenerator(topology, maps, MARGIN_BLOCKS);
     }

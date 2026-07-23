@@ -60,7 +60,7 @@ public final class CubeWorldBiomeProvider extends BiomeProvider {
 
         EarthData earth = maps.earthData();
         if (earth != null) {
-            return earthBiome(earth, sampler, wx, wz, y);
+            return earthBiome(earth, sampler, wx, wz, y, worldInfo.getSeed());
         }
 
         // demo fallback: theme + noise cave biomes
@@ -125,13 +125,14 @@ public final class CubeWorldBiomeProvider extends BiomeProvider {
         return a;
     });
 
-    private Biome earthBiome(EarthData earth, MapSampler sampler, double wx, double wz, int y) {
+    private Biome earthBiome(EarthData earth, MapSampler sampler, double wx, double wz, int y,
+                             long seed) {
         int cx = (int) Math.floor(wx);
         int cz = (int) Math.floor(wz);
         Col col = colCache.get()[(cx * 31 + cz) & (COL_SLOTS - 1)];
         if (col.x != cx || col.z != cz) {
             long tc = System.nanoTime();
-            col.c = EarthClimate.params(earth, sampler, wx, wz, y);
+            col.c = EarthClimate.params(earth, sampler, wx, wz, y, seed);
             GenProfiler.add("biome.climate", tc);
             col.surfaceY = sampler.heightAt(wx, wz);
             col.river = col.c == null ? 0 : classifyRiver(earth, sampler, wx, wz, col.c);
@@ -170,20 +171,14 @@ public final class CubeWorldBiomeProvider extends BiomeProvider {
         return b;
     }
 
-    /** River class at a column (0 none, 1 river, 2 frozen), sampled once. */
+    /** River class at a column (0 none, 1 river, 2 frozen), sampled once. Uses
+     * the shared {@link EarthClimate#riverStrength} so the biome coincides
+     * exactly with the water the chunk generator carves. */
     private int classifyRiver(EarthData earth, MapSampler sampler, double wx, double wz, double[] c) {
-        if (c[6] < 0 || !earth.hasLayer("river")) {
+        if (c[6] < 0) {
             return 0;
         }
-        double rmax = 0;
-        for (double[] o : new double[][] {{0, 0}, {2, 0}, {-2, 0}, {0, 2}, {0, -2}}) {
-            Vec3 p = sampler.cubePointAt(wx + o[0], wz + o[1]);
-            if (p != null) {
-                double[] ll = earth.toLonLat(p);
-                rmax = Math.max(rmax, earth.sample("river", ll[0], ll[1]));
-            }
-        }
-        if (rmax > 0.2) {
+        if (EarthClimate.riverStrength(earth, sampler, wx, wz) > EarthClimate.RIVER_THRESHOLD) {
             return c[7] < -2 ? 2 : 1;
         }
         return 0;

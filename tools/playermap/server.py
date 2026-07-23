@@ -16,10 +16,22 @@ import os
 import socket
 import socketserver
 import struct
+import sys
 import threading
 import time
 
 import realmap
+
+try:
+    from structures import compute as scompute
+    from structures.netherfaces import nether_face_uris
+except Exception:                       # structures data missing -> overlay disabled
+    scompute = None
+    nether_face_uris = None
+try:
+    from biomegen.biomefaces import biome_face_uris
+except Exception:                       # world-blob missing -> biome view disabled
+    biome_face_uris = None
 
 RCON_HOST = os.environ.get("RCON_HOST", "127.0.0.1")
 RCON_PORT = int(os.environ.get("RCON_PORT", "25575"))
@@ -122,8 +134,8 @@ def _stations_sig():
         return None
 
 
-GRID = {"NORTH_POLE": (0, 0), "EQ_PRIME": (0, 1), "EQ_EAST": (1, 0),
-        "EQ_BACK": (0, -1), "EQ_WEST": (-1, 0), "SOUTH_POLE": (0, 2)}
+GRID = {"NORTH_POLE": (0, -1), "EQ_PRIME": (0, 0), "EQ_EAST": (1, 0),
+        "EQ_BACK": (2, 0), "EQ_WEST": (-1, 0), "SOUTH_POLE": (0, 1)}
 
 
 def face_at(x, z):
@@ -137,8 +149,8 @@ def face_at(x, z):
 
 def cube_point(f, u, v):
     return {"NORTH_POLE": (u, 1.0, v), "EQ_PRIME": (u, -v, 1.0),
-            "SOUTH_POLE": (u, -1.0, -v), "EQ_BACK": (u, v, -1.0),
-            "EQ_EAST": (1.0, -u, v), "EQ_WEST": (-1.0, u, v)}[f]
+            "SOUTH_POLE": (u, -1.0, -v), "EQ_EAST": (1.0, -v, -u),
+            "EQ_BACK": (-u, -v, -1.0), "EQ_WEST": (-1.0, -v, u)}[f]
 
 
 def world_to_cube(x, z):
@@ -298,9 +310,11 @@ FACES_REFRESH = r"""
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);};
     img.src=uri;}
+  window.pmUpload=upload;                 // let the dimension toggle reuse it
   async function poll(){
-    try{var r=await fetch('/faces',{cache:'no-store'});var u=await r.json();
-      if(u&&u.length===6)for(var k=0;k<6;k++)upload(k,u[k]);}catch(e){}
+    try{ if((window.pmDim||'overworld')==='overworld'){
+      var r=await fetch('/faces',{cache:'no-store'});var u=await r.json();
+      if(u&&u.length===6)for(var k=0;k<6;k++)upload(k,u[k]);} }catch(e){}
     setTimeout(poll,8000);
   }
   setTimeout(poll,8000);
@@ -340,25 +354,199 @@ def _maybe_save():
 
 
 def composited_uris():
-    """Six face data-URIs with real blocks painted on, cached by region mtime."""
+    """The current composited faces — served instantly. The heavy recompute runs
+    in a background worker (_faces_worker), so requests never block on it; until
+    the first composite is ready we serve the base globe so the page still loads."""
+    with _faces_lock:
+        if _cache["uris"] is not None:
+            return _cache["uris"]
+    return _base_face_uris()
+
+
+def _recompute_faces():
+    """Recompute the composite if any input changed (region blocks / overlays)."""
     _maybe_save()
     sig = (realmap.region_signature(REGION_DIR), _cities_sig(), _strongholds_sig(),
            _stations_sig())
     with _faces_lock:
         if _cache["sig"] == sig and _cache["uris"] is not None:
-            return _cache["uris"]
+            return
     base = _base_face_uris()
     if not base:
-        return None
+        return
     try:
         uris, painted = realmap.composite_uris(base, REGION_DIR, cities_by_face(),
                                                strongholds_by_face(), stations_by_face())
-    except Exception:
-        return base
+    except Exception as e:
+        print("faces composite error:", e)
+        return
     with _faces_lock:
         _cache.update(sig=sig, uris=uris, painted=painted)
-    return uris
 
+
+def _faces_worker():
+    while True:
+        try:
+            _recompute_faces()
+        except Exception as e:
+            print("faces worker error:", e)
+        time.sleep(8)
+
+
+
+STRUCTURE_OVERLAY = r"""
+<style>
+  #psov{position:fixed;inset:0;pointer-events:none;z-index:9}
+  #psctl{position:fixed;top:16px;left:16px;z-index:11;max-height:84vh;overflow:auto;
+    font:12px/1.35 system-ui,sans-serif;color:#cdd6e4;background:rgba(12,16,24,.72);
+    padding:12px 14px;border-radius:12px;border:1px solid rgba(120,150,190,.2);
+    backdrop-filter:blur(8px);width:214px}
+  #psctl h3{margin:0 0 9px;font-size:13px;color:#eaf1fb;letter-spacing:.02em}
+  #psctl label{display:flex;align-items:center;gap:7px;padding:2px 0;cursor:pointer;white-space:nowrap}
+  #psctl .sw{width:11px;height:11px;border-radius:3px;flex:none;box-shadow:0 0 0 1px rgba(0,0,0,.4)}
+  #psctl .ct{margin-left:auto;color:#8a97ab;font-variant-numeric:tabular-nums}
+  .psrow{display:flex;gap:6px;margin:0 0 8px}
+  #psseed{flex:1;min-width:0;background:rgba(0,0,0,.35);border:1px solid rgba(120,150,190,.3);
+    color:#eaf1fb;border-radius:7px;padding:5px 7px;font:12px system-ui}
+  #psctl button,#psctl select{background:rgba(80,120,200,.32);border:1px solid rgba(120,150,190,.3);
+    color:#eaf1fb;border-radius:7px;padding:5px 8px;cursor:pointer;font:12px system-ui}
+  #psctl button:hover{background:rgba(90,140,230,.5)}
+  #psctl .mut{color:#8a97ab;font-size:11px;margin-top:8px}
+  #pstog{display:flex;gap:6px;margin-bottom:6px}
+  #pstog button{flex:1;padding:3px}
+</style>
+<canvas id="psov"></canvas>
+<div id="psctl">
+  <h3>Structures</h3>
+  <div class="psrow"><select id="psdim"><option value="overworld">Overworld (terrain)</option>
+    <option value="biomes">Overworld (biomes)</option>
+    <option value="nether">Nether</option></select></div>
+  <div class="psrow"><input id="psseed" value="__SEED__" spellcheck="false" title="world seed">
+    <button id="psgo">Go</button></div>
+  <div id="pstog"><button id="psall">all</button><button id="psnone">none</button></div>
+  <div id="pslist"></div>
+  <div class="mut" id="psstatus">loading…</div>
+</div>
+<script>
+(function(){
+  var COL={villages:'#ffd166',desert_pyramids:'#f4a259',jungle_temples:'#43aa8b',
+    igloos:'#a8e6ff',ocean_monuments:'#00b4d8',ocean_ruins:'#5fa8d3',shipwrecks:'#c9ada7',
+    ruined_portals:'#f15bb5',pillager_outposts:'#ef476f',trail_ruins:'#c58c4f',
+    trial_chambers:'#9b5de5',woodland_mansions:'#7161a8',buried_treasures:'#ffea00',
+    swamp_huts:'#588157',ancient_cities:'#4361ee',nether_complexes:'#e01e37',
+    nether_fossils:'#e9ecef'};
+  // dense sets start hidden so the map isn't a wall of dots
+  var OFF={ocean_ruins:1,shipwrecks:1,buried_treasures:1,ruined_portals:1,
+           trial_chambers:1,nether_fossils:1};
+  function col(t){return COL[t]||'#9aa7bd';}
+  var cvs=document.getElementById('psov'), ctx=cvs.getContext('2d');
+  var listEl=document.getElementById('pslist'), statusEl=document.getElementById('psstatus');
+  var data={}, on={}, dpr=Math.max(1,window.devicePixelRatio||1);
+  function mvv(m,v){var o=[0,0,0,0];for(var r=0;r<4;r++){var s=0;
+    for(var c=0;c<4;c++)s+=m[c*4+r]*v[c];o[r]=s;}return o;}
+  var FN={NORTH_POLE:[0,1,0],SOUTH_POLE:[0,-1,0],EQ_PRIME:[0,0,1],
+          EQ_BACK:[0,0,-1],EQ_EAST:[1,0,0],EQ_WEST:[-1,0,0]};
+  function buildList(){
+    listEl.innerHTML='';
+    Object.keys(data).sort().forEach(function(t){
+      var lab=document.createElement('label');
+      lab.innerHTML='<span class="sw" style="background:'+col(t)+'"></span>'+
+        '<input type="checkbox"'+(on[t]?' checked':'')+'>'+t.replace(/_/g,' ')+
+        '<span class="ct">'+data[t].length.toLocaleString()+'</span>';
+      lab.querySelector('input').onchange=function(e){on[t]=e.target.checked;};
+      listEl.appendChild(lab);
+    });
+  }
+  function fetchStructures(){
+    var seed=document.getElementById('psseed').value.trim();
+    var dim=document.getElementById('psdim').value;
+    var sdim=(dim==='biomes')?'overworld':dim;      // biome view shows overworld structures
+    statusEl.textContent='computing…';
+    fetch('/structures?seed='+encodeURIComponent(seed)+'&dim='+sdim,{cache:'no-store'})
+      .then(function(r){return r.json();}).then(function(j){
+        data=j; var n=0;
+        Object.keys(j).forEach(function(t){ n+=j[t].length;
+          if(!(t in on)) on[t]=(j[t].length>0 && !OFF[t]); });
+        buildList();
+        statusEl.textContent=n.toLocaleString()+' placements  ·  seed '+seed;
+      }).catch(function(e){statusEl.textContent='error: '+e;});
+  }
+  function swapFaces(dim){
+    window.pmDim=dim;
+    var seed=encodeURIComponent(document.getElementById('psseed').value.trim());
+    var url=dim==='nether'?'/netherfaces':
+            dim==='biomes'?('/biomefaces?seed='+seed):'/faces';
+    statusEl.textContent=(dim==='biomes')?'rendering biomes…':statusEl.textContent;
+    fetch(url,{cache:'no-store'})
+      .then(function(r){return r.json();}).then(function(u){
+        if(window.pmUpload&&u&&u.length===6)for(var k=0;k<6;k++)window.pmUpload(k,u[k]);})
+      .catch(function(){});
+  }
+  document.getElementById('psgo').onclick=fetchStructures;
+  document.getElementById('psseed').addEventListener('keydown',function(e){
+    if(e.key==='Enter')fetchStructures();});
+  document.getElementById('psdim').onchange=function(){
+    swapFaces(document.getElementById('psdim').value); fetchStructures();};
+  document.getElementById('psall').onclick=function(){
+    Object.keys(data).forEach(function(t){on[t]=true;});buildList();};
+  document.getElementById('psnone').onclick=function(){
+    Object.keys(data).forEach(function(t){on[t]=false;});buildList();};
+  function draw(){
+    var W=cv.clientWidth, Hh=cv.clientHeight;
+    if(cvs.width!==W*dpr||cvs.height!==Hh*dpr){cvs.width=W*dpr;cvs.height=Hh*dpr;
+      cvs.style.width=W+'px';cvs.style.height=Hh+'px';}
+    ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,Hh);
+    var model=mul(rotX(pitch),rotY(yaw));
+    var asp=cv.width/cv.height;
+    var mvp=mul(persp(1.1,asp,0.1,100),mul(trans3(panX,panY,-dist),model));
+    Object.keys(data).forEach(function(t){
+      if(!on[t])return;
+      ctx.fillStyle=col(t);
+      var arr=data[t];
+      for(var i=0;i<arr.length;i++){
+        var m=arr[i], px=m[0],py=m[1],pz=m[2];
+        var nn=Math.hypot(px,py,pz), sx0=px/nn,sy0=py/nn,sz0=pz/nn;
+        var qx=px+(sx0-px)*morph, qy=py+(sy0-py)*morph, qz=pz+(sz0-pz)*morph;
+        var c=mvv(mvp,[qx,qy,qz,1]); if(c[3]<=0)continue;
+        var fn=FN[m[3]]||[sx0,sy0,sz0];
+        var cnx=fn[0]+(sx0-fn[0])*morph, cny=fn[1]+(sy0-fn[1])*morph, cnz=fn[2]+(sz0-fn[2])*morph;
+        // hide markers whose face is turned away (matches the player-pin cull)
+        if(model[2]*cnx+model[6]*cny+model[10]*cnz<=0.15)continue;
+        var X=(c[0]/c[3]*0.5+0.5)*W, Y=(1-(c[1]/c[3]*0.5+0.5))*Hh;
+        ctx.fillRect(X-2.3,Y-2.3,4.6,4.6);
+      }
+    });
+    requestAnimationFrame(draw);
+  }
+  fetchStructures(); draw();
+})();
+</script>
+"""
+
+
+def default_seed():
+    p = os.path.join(os.path.dirname(__file__), "..", "..", "run", "server.properties")
+    try:
+        for line in open(p):
+            if line.startswith("level-seed="):
+                return int(line.split("=", 1)[1].strip())
+    except Exception:
+        pass
+    try:
+        return int(rcon(["seed"])[0].split("[")[1].split("]")[0])
+    except Exception:
+        return 0
+
+
+def structures_json(seed, dim):
+    if scompute is None:
+        return {}
+    ov = scompute.compute_overlays(seed, dim)
+    out = {}
+    for name, ms in ov.items():
+        out[name] = [[round(m["p"][0], 4), round(m["p"][1], 4), round(m["p"][2], 4), m["face"]]
+                     for m in ms]
+    return out
 
 
 def load_page():
@@ -369,7 +557,10 @@ def load_page():
         html = realmap.replace_uris(html, uris)
     # City dots are painted onto the face textures themselves (composited_uris),
     # so they sit on each face and occlude correctly — no screen-space overlay.
-    return html + MARKER_OVERLAY + FACES_REFRESH
+    page = html + MARKER_OVERLAY + FACES_REFRESH
+    if scompute is not None:
+        page += STRUCTURE_OVERLAY.replace("__SEED__", str(default_seed()))
+    return page
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -377,25 +568,76 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
     def _send(self, body, ctype):
-        self.send_response(200)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass          # client went away mid-response — never fatal
 
     def do_GET(self):
-        if self.path.startswith("/players"):
-            self._send(json.dumps(get_players()).encode(), "application/json")
-        elif self.path.startswith("/faces"):
-            self._send(json.dumps(composited_uris() or []).encode(), "application/json")
-        else:
-            self._send(load_page().encode("utf-8"), "text/html; charset=utf-8")
+        try:
+            if self.path.startswith("/players"):
+                self._send(json.dumps(get_players()).encode(), "application/json")
+            elif self.path.startswith("/faces"):
+                self._send(json.dumps(composited_uris() or []).encode(), "application/json")
+            elif self.path.startswith("/structures"):
+                from urllib.parse import urlparse, parse_qs
+                q = parse_qs(urlparse(self.path).query)
+                try:
+                    seed = int(q.get("seed", [str(default_seed())])[0])
+                except ValueError:
+                    seed = default_seed()
+                dim = q.get("dim", ["overworld"])[0]
+                self._send(json.dumps(structures_json(seed, dim)).encode(), "application/json")
+            elif self.path.startswith("/netherfaces"):
+                uris = nether_face_uris() if nether_face_uris else []
+                self._send(json.dumps(uris).encode(), "application/json")
+            elif self.path.startswith("/biomefaces"):
+                from urllib.parse import urlparse, parse_qs
+                q = parse_qs(urlparse(self.path).query)
+                try:
+                    seed = int(q.get("seed", [str(default_seed())])[0])
+                except ValueError:
+                    seed = default_seed()
+                uris = biome_face_uris(seed) if biome_face_uris else []
+                self._send(json.dumps(uris).encode(), "application/json")
+            else:
+                self._send(load_page().encode("utf-8"), "text/html; charset=utf-8")
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
+
+
+class MapServer(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        e = sys.exc_info()[1]
+        if isinstance(e, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+            return    # a disconnecting client must never take the server down
+        import traceback
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8080"))
-    socketserver.ThreadingTCPServer.allow_reuse_address = True
-    with socketserver.ThreadingTCPServer(("0.0.0.0", port), Handler) as srv:
+    threading.Thread(target=_faces_worker, daemon=True).start()   # warm + keep the composite fresh
+    _sseed = default_seed()
+    if scompute is not None:                                       # warm structure overlays
+        threading.Thread(target=lambda: (scompute.precompute(_sseed, "overworld"),
+                                         scompute.precompute(_sseed, "nether")),
+                         daemon=True).start()
+    if biome_face_uris is not None:                               # warm the biome faces
+        def _warm_biomes():
+            try:
+                biome_face_uris(_sseed)
+            except Exception as e:
+                print("biome warm failed:", e)
+        threading.Thread(target=_warm_biomes, daemon=True).start()
+    with MapServer(("0.0.0.0", port), Handler) as srv:
         print(f"player map serving on http://0.0.0.0:{port}  (RCON {RCON_HOST}:{RCON_PORT})")
         srv.serve_forever()

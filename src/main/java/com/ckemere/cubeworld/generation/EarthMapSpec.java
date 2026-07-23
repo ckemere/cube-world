@@ -36,8 +36,12 @@ public final class EarthMapSpec implements MapSpec {
     // lighting + fluid ticks through the whole water column).
     private static final double OCEAN_SHELF = 0.020;         // blocks per metre down (<=OCEAN_BREAK)
     private static final double OCEAN_BREAK = 1500.0;        // metres: ocean exaggeration knee
-    private static final double OCEAN_DEEP = 0.002;          // blocks per metre below OCEAN_BREAK
-    private static final double OCEAN_FLOOR = 45.0;          // max blocks below sea (min y 18)
+    // Steeper abyssal + a deeper cap so real trenches read as trenches: a -3000 m
+    // sea floor sits ~36 blocks down, -6000 m ~48, the deepest (-10935 m) hits the
+    // 60-block cap (y3, still clears bedrock). Safe now aquifers are off and ocean
+    // water is stable source (no fluid ticks); only bounded lighting cost remains.
+    private static final double OCEAN_DEEP = 0.004;          // blocks per metre below OCEAN_BREAK
+    private static final double OCEAN_FLOOR = 60.0;          // max blocks below sea (min y 3)
     private static final double LAND_CAP = 253.0;
     private static final double TERRAIN_CEIL = 250.0;        // just under vanilla's top slide
 

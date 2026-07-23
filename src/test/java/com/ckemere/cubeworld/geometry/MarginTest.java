@@ -19,7 +19,7 @@ class MarginTest {
 
     @Test
     void marginBeyondStitchedEdgeResolvesToPartnerFace() {
-        // 5 blocks beyond EQ_PRIME's east edge, mid-face: mirrors EQ_EAST.
+        // 5 blocks beyond SOUTH_POLE's east edge, mid-face: mirrors EQ_EAST.
         MarginSource source = topo.marginSource(H + 5, 2 * H, MARGIN);
         assertNotNull(source);
         CubeFace face = geo.faceAt((int) Math.floor(source.source().x()),
@@ -50,7 +50,7 @@ class MarginTest {
 
     @Test
     void inPlaneBoundariesHaveNoMargin() {
-        // Just south of NORTH_POLE (on EQ_PRIME): a real face, not a margin.
+        // Just north of SOUTH_POLE (its edge stitches in-plane to EQ_PRIME).
         assertNull(topo.marginSource(0, H + 5, MARGIN));
     }
 
@@ -74,7 +74,7 @@ class MarginTest {
 
     @Test
     void realPointNearSeamHasImage() {
-        // Inside EQ_PRIME near its east edge.
+        // Inside SOUTH_POLE near its (stitched) east edge.
         List<MarginSource> images = topo.marginImages(H - 3, 2 * H, MARGIN);
         assertEquals(1, images.size());
         // The image lies in the void beyond EQ_EAST's south edge.
@@ -85,7 +85,7 @@ class MarginTest {
     @Test
     void realPointNearTwoSeamsHasTwoImages() {
         // Inside SOUTH_POLE near its south-east corner: east + south edges.
-        List<MarginSource> images = topo.marginImages(H - 3, 5 * H - 3, MARGIN);
+        List<MarginSource> images = topo.marginImages(H - 3, 3 * H - 3, MARGIN);
         assertEquals(2, images.size());
     }
 
@@ -98,21 +98,21 @@ class MarginTest {
 
     @Test
     void pillarZonesCoverCubeVertexImages() {
-        // At and near a reflex corner (northern cube vertex).
+        // At and near a band corner (cube vertex bordering EQ_PRIME).
         assertTrue(topo.inPillar(H, H, MARGIN));
         assertTrue(topo.inPillar(H - 90, H, MARGIN));
         assertTrue(topo.inPillar(H + 60, H + 60, MARGIN));
         // Just outside the radius.
         assertTrue(!topo.inPillar(H + MARGIN + 1, H, MARGIN));
-        // Outer corner images (southern cube vertices).
+        // Outer corner images further along the band + pole arms.
         assertTrue(topo.inPillar(3 * H, H, MARGIN));
         assertTrue(topo.inPillar(H, 3 * H, MARGIN));
-        assertTrue(topo.inPillar(-H, 5 * H, MARGIN));
+        assertTrue(topo.inPillar(5 * H, H, MARGIN));
         // Face centers are clear.
         assertTrue(!topo.inPillar(0, 0, MARGIN));
         assertTrue(!topo.inPillar(0, 2 * H, MARGIN));
         // Mid-edge is clear (pillars must not seal the seams shut).
         assertTrue(!topo.inPillar(H, 2 * H, MARGIN));
-        assertTrue(!topo.inPillar(0, 5 * H, MARGIN));
+        assertTrue(!topo.inPillar(2 * S, 0, MARGIN));
     }
 }

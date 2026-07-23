@@ -210,12 +210,12 @@ const N=64; // subdivisions per face edge (relief-ready)
 // face basis: origin corner + edge vectors, matching CubeSurface embedding.
 // order must match FACE_URIS: N_POLE,S_POLE,EQ_PRIME,EQ_BACK,EQ_EAST,EQ_WEST
 const F=[
- {o:[-1, 1,-1],u:[2,0,0],v:[0,0,2]}, // NORTH_POLE  (x, +1, z)
- {o:[-1,-1, 1],u:[2,0,0],v:[0,0,-2]},// SOUTH_POLE  (x, -1, -z)
- {o:[-1, 1, 1],u:[2,0,0],v:[0,-2,0]},// EQ_PRIME    (x, -z-> from +1..-1, +1)
- {o:[-1,-1,-1],u:[2,0,0],v:[0,2,0]}, // EQ_BACK     (x, z, -1)
- {o:[ 1, 1,-1],u:[0,-2,0],v:[0,0,2]},// EQ_EAST     (1, -u, v)
- {o:[-1,-1,-1],u:[0,2,0],v:[0,0,2]}, // EQ_WEST     (-1, u, v)
+ {o:[-1, 1,-1],u:[2,0,0],v:[0,0,2]}, // NORTH_POLE  (u, +1, v)
+ {o:[-1,-1, 1],u:[2,0,0],v:[0,0,-2]},// SOUTH_POLE  (u, -1, -v)
+ {o:[-1, 1, 1],u:[2,0,0],v:[0,-2,0]},// EQ_PRIME    (u, -v, 1)
+ {o:[ 1, 1,-1],u:[-2,0,0],v:[0,-2,0]},// EQ_BACK    (-u, -v, -1)
+ {o:[ 1, 1, 1],u:[0,0,-2],v:[0,-2,0]},// EQ_EAST    (1, -v, -u)
+ {o:[-1, 1,-1],u:[0,0,2],v:[0,-2,0]}, // EQ_WEST    (-1, -v, u)
 ];
 let positions=[],uvs=[],faceIdx=[],indices=[],vcount=0;
 for(let f=0;f<6;f++){

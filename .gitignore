@@ -18,3 +18,4 @@ run/
 .project
 bin/
 run-dev/
+logs/

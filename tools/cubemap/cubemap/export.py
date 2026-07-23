@@ -30,9 +30,34 @@ def _encode(a, scale):
     return r.astype("<i2")
 
 
-def _river_mask(w, h, data_dir):
-    """Rasterize Natural Earth 10m rivers + lakes into a 0/1 equirect mask
-    sized (h, w). Rivers are drawn as lines, lakes filled."""
+def _distance_ramp(mask_bool, radius):
+    """A smooth 1->0 falloff over `radius` pixels from a binary mask, via
+    successive 4-neighbour dilations (an integer distance transform without
+    scipy). The centreline stays 1 and the value decreases outward, so the
+    plugin can threshold to a NARROW yet CONTINUOUS river: a plain 1px line
+    sampled bilinearly is dotty and, once thresholded low enough to be
+    continuous, far too wide. A ramp is high all along the connected line
+    (never dotty) and a high threshold keeps it thin. Lake interiors are 1, so
+    lakes stay their true width."""
+    val = mask_bool.astype(np.float32)          # 1 on the river/lake
+    cur = mask_bool.copy()
+    for k in range(1, radius + 1):
+        grown = cur.copy()
+        grown[1:, :] |= cur[:-1, :]
+        grown[:-1, :] |= cur[1:, :]
+        grown[:, 1:] |= cur[:, :-1]
+        grown[:, :-1] |= cur[:, 1:]
+        newly = grown & ~cur
+        val[newly] = 1.0 - k / (radius + 1.0)
+        cur = grown
+    return val
+
+
+def _river_mask(w, h, data_dir, radius=3):
+    """Rasterize Natural Earth 10m rivers + lakes into an equirect river field
+    sized (h, w): a smooth 1->0 distance ramp (see `_distance_ramp`) around the
+    river centrelines and filled lakes, so the plugin gets thin, continuous
+    watercourses instead of a fuzzy 1px line."""
     import json
     import os
     from PIL import Image, ImageDraw
@@ -70,7 +95,77 @@ def _river_mask(w, h, data_dir):
             polys = g["coordinates"] if g["type"] == "MultiPolygon" else [g["coordinates"]]
             for poly in polys:
                 d.polygon(to_px(poly[0]), fill=1)
-    return np.asarray(mask, dtype=np.float32)
+    return _distance_ramp(np.asarray(mask, dtype=bool), radius)
+
+
+def _river_water_y(w, h, data_dir, height):
+    """A per-cell DOWNHILL water-surface elevation (metres) along the river
+    centre-lines + lakes; NaN off-river. For each centre-line we sample the DEM,
+    orient it source(high)->mouth(low), and take the RUNNING MINIMUM from the
+    source — a surface that is monotonically non-increasing by construction, so
+    the carved river can never flow uphill (it pools flat where terrain rises,
+    descends where it falls). Where lines cross we keep the lower value."""
+    import json
+    import os
+    wy = np.full((h, w), np.nan, dtype=np.float32)
+
+    def to_px(lon, lat):
+        return (lon + 180.0) / 360.0 * w, (90.0 - lat) / 180.0 * h
+
+    def hsample(lon, lat):
+        x = int((lon + 180.0) / 360.0 * w) % w
+        y = min(h - 1, max(0, int((90.0 - lat) / 180.0 * h)))
+        return float(height[y, x])
+
+    def draw_seg(x0, y0, v0, x1, y1, v1):
+        n = int(max(abs(x1 - x0), abs(y1 - y0))) + 1
+        xi = np.round(np.linspace(x0, x1, n)).astype(int) % w
+        yi = np.clip(np.round(np.linspace(y0, y1, n)).astype(int), 0, h - 1)
+        vs = np.linspace(v0, v1, n).astype(np.float32)
+        cur = wy[yi, xi]
+        wy[yi, xi] = np.where(np.isnan(cur), vs, np.minimum(cur, vs))
+
+    rp = os.path.join(data_dir, "ne_10m_rivers_lake_centerlines.geojson")
+    if os.path.exists(rp):
+        for feat in json.load(open(rp))["features"]:
+            g = feat.get("geometry")
+            if not g:
+                continue
+            lines = g["coordinates"] if g["type"] == "MultiLineString" else [g["coordinates"]]
+            for ln in lines:
+                if len(ln) < 2:
+                    continue
+                elevs = [hsample(lo, la) for lo, la in ln]
+                pts = ln
+                if elevs[0] < elevs[-1]:                     # source = the higher end
+                    pts, elevs = ln[::-1], elevs[::-1]
+                wmin, m = [], elevs[0]
+                for e in elevs:
+                    m = min(m, e)
+                    wmin.append(m)
+                for i in range(len(pts) - 1):
+                    x0, y0 = to_px(*pts[i])
+                    x1, y1 = to_px(*pts[i + 1])
+                    if abs(x1 - x0) > w / 2:                 # dateline wrap
+                        continue
+                    draw_seg(x0, y0, wmin[i], x1, y1, wmin[i + 1])
+
+    lp = os.path.join(data_dir, "ne_10m_lakes.geojson")
+    if os.path.exists(lp):
+        from PIL import Image, ImageDraw
+        for feat in json.load(open(lp))["features"]:
+            g = feat.get("geometry")
+            if not g:
+                continue
+            polys = g["coordinates"] if g["type"] == "MultiPolygon" else [g["coordinates"]]
+            for poly in polys:
+                ring = poly[0]
+                lake_y = float(np.min([hsample(lo, la) for lo, la in ring]))   # flat surface
+                m = Image.new("1", (w, h), 0)
+                ImageDraw.Draw(m).polygon([to_px(*p) for p in ring], fill=1)
+                mk = np.asarray(m, dtype=bool)
+                wy[mk] = np.where(np.isnan(wy[mk]), lake_y, np.minimum(wy[mk], lake_y))
+    return wy
 
 
 def export_earth(out_path, etopo, temp_raster, precip_raster, roll,
@@ -84,8 +179,13 @@ def export_earth(out_path, etopo, temp_raster, precip_raster, roll,
         ("precip", _encode(precip_raster.grid, 1.0), 1.0, 0.0),  # mm
     ]
     if data_dir:
-        river = _river_mask(hw, hh, data_dir)
-        layers.append(("river", river.astype("<i2"), 1.0, 0.0))  # 0/1
+        river = _river_mask(hw, hh, data_dir)                   # 0..1 ramp
+        layers.append(("river", np.round(river * 1000.0).astype("<i2"),
+                       0.001, 0.0))  # raw 0..1000, value = raw/1000
+        ry = _river_water_y(hw, hh, data_dir, height)           # downhill water surface (m)
+        ry_enc = np.where(np.isnan(ry), NODATA,
+                          np.clip(np.round(ry), -32767, 32767)).astype("<i2")
+        layers.append(("river_y", ry_enc, 1.0, 0.0))            # metres, NODATA off-river
     with open(out_path, "wb") as f:
         f.write(b"CWE1")
         f.write(struct.pack("<f", float(roll)))

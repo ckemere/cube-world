@@ -22,14 +22,17 @@ import org.jetbrains.annotations.NotNull;
 public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
 
     private final CubeGeometry geometry;
+    private final CubeGeometry netherGeometry;
     private final SeamService seams;
     private final MirrorService mirrors;
     private final MapService maps;
     private final com.ckemere.cubeworld.teleport.TeleportService teleport;
 
-    public CubeWorldCommand(CubeGeometry geometry, SeamService seams, MirrorService mirrors,
-                            MapService maps, com.ckemere.cubeworld.teleport.TeleportService teleport) {
+    public CubeWorldCommand(CubeGeometry geometry, CubeGeometry netherGeometry, SeamService seams,
+                            MirrorService mirrors, MapService maps,
+                            com.ckemere.cubeworld.teleport.TeleportService teleport) {
         this.geometry = geometry;
+        this.netherGeometry = netherGeometry;
         this.seams = seams;
         this.mirrors = mirrors;
         this.maps = maps;
@@ -157,7 +160,9 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                         }
                     }
                     w.getBlockAt(x, y, z).setType(org.bukkit.Material.LODESTONE);
-                    boolean ok = teleport.tryRaise(new org.bukkit.Location(w, x, y, z), "SimTest");
+                    String owner = sender instanceof Player sp ? sp.getUniqueId().toString() : "";
+                    boolean ok = teleport.tryRaise(new org.bukkit.Location(w, x, y, z), "SimTest",
+                            owner);
                     sender.sendMessage(Component.text("tpsim raise=" + ok + " at " + x + "," + y + ","
                             + z, ok ? NamedTextColor.GREEN : NamedTextColor.RED));
                 } catch (NumberFormatException ex) {
@@ -251,7 +256,8 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                 int by = args.length == 4 ? Integer.parseInt(args[3])
                         : (int) Math.round(sampler().heightAt(bx + 0.5, bz + 0.5));
                 double[] c = com.ckemere.cubeworld.generation.EarthClimate.params(
-                        earth, sampler(), bx + 0.5, bz + 0.5, by);
+                        earth, sampler(), bx + 0.5, bz + 0.5, by,
+                        org.bukkit.Bukkit.getWorlds().get(0).getSeed());
                 if (c == null) {
                     sender.sendMessage(Component.text("off net", NamedTextColor.YELLOW));
                     return true;
@@ -370,6 +376,12 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
             case "biomecensus" -> {
                 return handleBiomeCensus(sender, args);
             }
+            case "biomeraster" -> {
+                return handleBiomeRaster(sender, args.length >= 2 ? args[1] : "overworld");
+            }
+            case "dumpbiomeparams" -> {
+                return handleDumpBiomeParams(sender);
+            }
             case "genprof" -> {
                 if (args.length > 1 && args[1].equalsIgnoreCase("reset")) {
                     com.ckemere.cubeworld.generation.GenProfiler.reset();
@@ -454,6 +466,160 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(Component.text(String.format(Locale.ROOT,
                 "TOTAL surface: %,d blocks  (6 faces x %d^2)",
                 samples * blocksPerSample, size), NamedTextColor.GOLD));
+        return true;
+    }
+
+    /**
+     * Export a per-chunk surface-biome raster for all six faces to
+     * {@code plugins/CubeWorld/biomes/overworld.cwbr}, so the map tool can
+     * biome-filter computed structure positions offline. Uses the exact biome
+     * provider chunk gen uses (ground truth) and is seed-independent, so it's
+     * computed once. Big-endian CWBR format: magic, version, faceSize, chunks,
+     * palette (writeUTF keys), then per face: name, minX, minZ, chunks^2 shorts
+     * (palette index), row-major with the x-index outer and z-index inner.
+     */
+    private boolean handleBiomeRaster(CommandSender sender, String dim) {
+        boolean nether = dim.equalsIgnoreCase("nether");
+        org.bukkit.World world = null;
+        for (org.bukkit.World w : org.bukkit.Bukkit.getWorlds()) {
+            if ((w.getEnvironment() == org.bukkit.World.Environment.NETHER) == nether) {
+                world = w;
+                break;
+            }
+        }
+        // biome sampler per dimension (both are position-based, seed-independent)
+        java.util.function.BiFunction<Integer, Integer, org.bukkit.block.Biome> sample;
+        if (nether) {
+            if (world == null || !(world.getGenerator() instanceof
+                    com.ckemere.cubeworld.generation.CubeNetherChunkGenerator gen)) {
+                sender.sendMessage(Component.text("Nether is not a cube world.", NamedTextColor.RED));
+                return true;
+            }
+            org.bukkit.World nw = world;
+            var bp = gen.biomeProvider();
+            sample = (x, z) -> bp.getBiome(nw, x, 64, z);
+        } else {
+            if (world == null || !(world.getGenerator() instanceof
+                    com.ckemere.cubeworld.generation.CubeWorldChunkGenerator gen)) {
+                sender.sendMessage(Component.text("Overworld is not a cube world.", NamedTextColor.RED));
+                return true;
+            }
+            org.bukkit.World ow = world;
+            var bp = gen.biomeProvider();
+            sample = (x, z) -> bp.surfaceBiome(ow, x, z);
+        }
+        CubeGeometry geom = nether ? netherGeometry : geometry;   // nether cube is 1:8
+        int size = geom.faceSize();
+        int chunks = size >> 4;
+        long t0 = System.currentTimeMillis();
+        java.util.LinkedHashMap<String, Integer> palette = new java.util.LinkedHashMap<>();
+        java.util.List<short[]> grids = new java.util.ArrayList<>();
+        for (CubeFace f : CubeFace.values()) {
+            int minX = geom.faceMinX(f);
+            int minZ = geom.faceMinZ(f);
+            short[] grid = new short[chunks * chunks];
+            for (int i = 0; i < chunks; i++) {
+                int x = minX + (i << 4) + 8;
+                for (int j = 0; j < chunks; j++) {
+                    int z = minZ + (j << 4) + 8;
+                    String key = sample.apply(x, z).getKey().toString();
+                    Integer idx = palette.get(key);
+                    if (idx == null) {
+                        idx = palette.size();
+                        palette.put(key, idx);
+                    }
+                    grid[i * chunks + j] = idx.shortValue();
+                }
+            }
+            grids.add(grid);
+        }
+        java.nio.file.Path out = org.bukkit.Bukkit.getPluginManager().getPlugin("CubeWorld")
+                .getDataFolder().toPath().resolve("biomes")
+                .resolve((nether ? "nether" : "overworld") + ".cwbr");
+        try {
+            java.nio.file.Files.createDirectories(out.getParent());
+            try (java.io.DataOutputStream o = new java.io.DataOutputStream(
+                    new java.io.BufferedOutputStream(java.nio.file.Files.newOutputStream(out)))) {
+                o.writeBytes("CWBR");
+                o.writeInt(1);
+                o.writeInt(size);
+                o.writeInt(chunks);
+                o.writeInt(palette.size());
+                for (String k : palette.keySet()) {
+                    o.writeUTF(k);
+                }
+                int fi = 0;
+                for (CubeFace f : CubeFace.values()) {
+                    o.writeUTF(f.name());
+                    o.writeInt(geom.faceMinX(f));
+                    o.writeInt(geom.faceMinZ(f));
+                    for (short s : grids.get(fi++)) {
+                        o.writeShort(s);
+                    }
+                }
+            }
+        } catch (java.io.IOException e) {
+            sender.sendMessage(Component.text("biomeraster write failed: " + e, NamedTextColor.RED));
+            return true;
+        }
+        sender.sendMessage(Component.text(String.format(Locale.ROOT,
+                "biomeraster: %d^2 x6 faces, %d biomes -> %s (%dms)",
+                chunks, palette.size(), out, System.currentTimeMillis() - t0),
+                NamedTextColor.GREEN));
+        return true;
+    }
+
+    /**
+     * Dump vanilla's overworld multi-noise biome partition (the ~N climate
+     * parameter points + their biomes) to JSON, so a portable biome generator
+     * can reproduce {@code VanillaBiomeMapper} outside the game. Values are the
+     * game's quantised longs (climate value * 10000). One-time extraction.
+     */
+    private boolean handleDumpBiomeParams(CommandSender sender) {
+        try {
+            var server = ((org.bukkit.craftbukkit.CraftServer) org.bukkit.Bukkit.getServer())
+                    .getServer();
+            var reg = server.registryAccess().lookupOrThrow(
+                    net.minecraft.core.registries.Registries.MULTI_NOISE_BIOME_SOURCE_PARAMETER_LIST);
+            var preset = reg.getOrThrow(
+                    net.minecraft.world.level.biome.MultiNoiseBiomeSourceParameterLists.OVERWORLD);
+            var source = net.minecraft.world.level.biome.MultiNoiseBiomeSource
+                    .createFromPreset(preset);
+            var method = net.minecraft.world.level.biome.MultiNoiseBiomeSource.class
+                    .getDeclaredMethod("parameters");
+            method.setAccessible(true);
+            var plist = method.invoke(source);
+            @SuppressWarnings("unchecked")
+            var values = (java.util.List<com.mojang.datafixers.util.Pair<
+                    net.minecraft.world.level.biome.Climate.ParameterPoint,
+                    net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>>>)
+                    plist.getClass().getMethod("values").invoke(plist);
+            java.util.List<String> rows = new java.util.ArrayList<>();
+            for (var pair : values) {
+                var p = pair.getFirst();
+                String id = org.bukkit.craftbukkit.block.CraftBiome
+                        .minecraftHolderToBukkit(pair.getSecond()).getKey().toString();
+                long[] q = {p.temperature().min(), p.temperature().max(),
+                        p.humidity().min(), p.humidity().max(),
+                        p.continentalness().min(), p.continentalness().max(),
+                        p.erosion().min(), p.erosion().max(),
+                        p.depth().min(), p.depth().max(),
+                        p.weirdness().min(), p.weirdness().max(), p.offset()};
+                StringBuilder row = new StringBuilder("  [\"").append(id).append("\"");
+                for (long v : q) {
+                    row.append(",").append(v);
+                }
+                rows.add(row.append("]").toString());
+            }
+            java.nio.file.Path out = org.bukkit.Bukkit.getPluginManager().getPlugin("CubeWorld")
+                    .getDataFolder().toPath().resolve("biomes").resolve("overworld_params.json");
+            java.nio.file.Files.createDirectories(out.getParent());
+            java.nio.file.Files.writeString(out, "[\n" + String.join(",\n", rows) + "\n]\n");
+            sender.sendMessage(Component.text("dumped " + rows.size() + " biome params -> " + out,
+                    NamedTextColor.GREEN));
+        } catch (Exception e) {
+            sender.sendMessage(Component.text("dump failed: " + e, NamedTextColor.RED));
+        }
         return true;
     }
 
@@ -630,7 +796,7 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
         List<String> out = new ArrayList<>();
         if (args.length == 1) {
             for (String sub : new String[] {"ping", "face", "tp", "simulate", "biomeat",
-                    "tpcore", "tpstations"}) {
+                    "biomeraster", "tpcore", "tpstations"}) {
                 if (sub.startsWith(args[0].toLowerCase(Locale.ROOT))) {
                     out.add(sub);
                 }

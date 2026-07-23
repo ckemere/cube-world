@@ -137,18 +137,12 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
         return amp * Math.max(-1.0, Math.min(1.0, n / 1.7));
     }
 
-    /** True where the Earth river/lake mask marks a watercourse (above sea). */
+    /** True where the Earth river/lake mask marks a watercourse (above sea).
+     * Shares {@link EarthClimate#riverStrength} with the biome layer so water
+     * and the river biome coincide. */
     private boolean isRiver(MapSampler sampler, double wx, double wz) {
-        EarthData earth = maps.earthData();
-        if (earth == null || !earth.hasLayer("river")) {
-            return false;
-        }
-        com.ckemere.cubeworld.geometry.Vec3 p = sampler.cubePointAt(wx, wz);
-        if (p == null) {
-            return false;
-        }
-        double[] ll = earth.toLonLat(p);
-        return earth.sample("river", ll[0], ll[1]) > 0.2;
+        return EarthClimate.riverStrength(maps.earthData(), sampler, wx, wz)
+                > EarthClimate.RIVER_THRESHOLD;
     }
 
     /** Carve seam-consistent caves into a finished column (air, lava at the bottom). */
@@ -279,20 +273,33 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                     continue;
                 }
 
-                if (!hasRivers || earth.sample("river", ll[0], ll[1]) <= 0.2) {
+                if (!hasRivers
+                        || EarthClimate.riverStrength(earth, sampler, wx, wz)
+                                <= EarthClimate.RIVER_THRESHOLD) {
                     continue;
                 }
                 int predicted = (int) Math.round(sampler.heightAt(wx, wz));
                 if (predicted <= SEA_LEVEL + 2) {
                     continue; // meets the sea; vanilla's ocean fill handles it
                 }
-                // Level the water line to the neighbourhood minimum so a raster
-                // bump is carved through rather than climbed; cap the canyon.
-                double hmin = sampler.heightAt(wx, wz);
-                for (double[] o : RIVER_KERNEL) {
-                    hmin = Math.min(hmin, sampler.heightAt(wx + o[0], wz + o[1]));
+                // Prefer the precomputed DOWNHILL water surface (river_y): it is
+                // monotonically non-increasing from source to mouth, so the river
+                // is guaranteed to never flow uphill. The gravel bed below fills
+                // any noise dip so the water sits exactly at that surface. Fall
+                // back to local neighbourhood-min levelling where river_y is
+                // absent (thin data gaps).
+                int waterTop;
+                double rym = EarthClimate.riverWaterY(earth, sampler, wx, wz);
+                if (!Double.isNaN(rym)) {
+                    waterTop = (int) Math.round(EarthMapSpec.elevationToBlockY(rym));
+                    waterTop = Math.min(waterTop, predicted - 1);   // always a channel
+                } else {
+                    double hmin = sampler.heightAt(wx, wz);
+                    for (double[] o : RIVER_KERNEL) {
+                        hmin = Math.min(hmin, sampler.heightAt(wx + o[0], wz + o[1]));
+                    }
+                    waterTop = Math.max((int) Math.round(hmin) - 1, predicted - 14);
                 }
-                int waterTop = Math.max((int) Math.round(hmin) - 1, predicted - 14);
                 if (waterTop <= SEA_LEVEL) {
                     continue;
                 }

@@ -92,6 +92,11 @@ public final class CubeNetherChunkGenerator extends ChunkGenerator {
         return biomeProvider;
     }
 
+    /** The nether biome provider, for offline biome-raster export. */
+    public CubeNetherBiomeProvider biomeProvider() {
+        return biomeProvider;
+    }
+
     @Override
     public boolean shouldGenerateNoise() {
         return false;

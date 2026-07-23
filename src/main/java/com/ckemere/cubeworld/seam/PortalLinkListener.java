@@ -17,13 +17,12 @@ import org.bukkit.event.player.PlayerPortalEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 
 /**
- * Portal travel between the cube overworld and the cube nether preserves the
- * cube-surface position: both worlds share the same face size and topology,
- * so a portal at (face, local) links to (face, local) in the sibling world —
- * no vanilla /8 coordinate scatter, which would tear seam-adjacent points
- * hundreds of blocks apart in the nether. (An 8x-travel nether needs faces
- * scaled 1:8, which the Earth-map world will pick sizes for; the linkage
- * below only assumes the two worlds share one geometry.)
+ * Portal travel between the cube overworld and the cube nether maps by
+ * cube-surface correspondence: a portal at (face, local u/v) links to the same
+ * (face, local u/v) in the sibling world. Because the nether cube is 1:8, that
+ * correspondence IS the 8x compression (nether coords = overworld/8) — but done
+ * per-face so it stays seam-safe: an overworld point near a seam lands near the
+ * corresponding nether seam, never scattered onto a different face.
  *
  * <p>Destinations are clamped to the face interior so vanilla never builds
  * the return portal inside a margin or pillar, and y is looked up from the
@@ -35,12 +34,15 @@ public final class PortalLinkListener implements Listener {
     private static final int EDGE_CLEARANCE = 24;
 
     private final CubeWorldPlugin plugin;
-    private final CubeGeometry geometry;
+    private final CubeGeometry geometry;          // overworld cube
+    private final CubeGeometry netherGeometry;    // 1:8 nether cube
     private final MapService maps;
 
-    public PortalLinkListener(CubeWorldPlugin plugin, CubeGeometry geometry, MapService maps) {
+    public PortalLinkListener(CubeWorldPlugin plugin, CubeGeometry geometry,
+                              CubeGeometry netherGeometry, MapService maps) {
         this.plugin = plugin;
         this.geometry = geometry;
+        this.netherGeometry = netherGeometry;
         this.maps = maps;
     }
 
@@ -73,23 +75,30 @@ public final class PortalLinkListener implements Listener {
         if (target == null || !plugin.isCubeWorld(target)) {
             return null; // the end, or some other plugin's world
         }
+        boolean fromNether = from.getWorld().getEnvironment() == World.Environment.NETHER;
+        boolean toNether = target.getEnvironment() == World.Environment.NETHER;
+        CubeGeometry src = fromNether ? netherGeometry : geometry;
+        CubeGeometry dst = toNether ? netherGeometry : geometry;
         double x = from.getX();
         double z = from.getZ();
-        CubeFace face = geometry.faceAt((int) Math.floor(x), (int) Math.floor(z));
+        CubeFace face = src.faceAt((int) Math.floor(x), (int) Math.floor(z));
         if (face == null) {
             return null; // margin portals are cancelled elsewhere
         }
-        int size = geometry.faceSize();
-        double minX = geometry.faceMinX(face) + EDGE_CLEARANCE;
-        double minZ = geometry.faceMinZ(face) + EDGE_CLEARANCE;
-        x = Math.clamp(x, minX, minX + size - 2.0 * EDGE_CLEARANCE);
-        z = Math.clamp(z, minZ, minZ + size - 2.0 * EDGE_CLEARANCE);
-        boolean toNether = target.getEnvironment() == World.Environment.NETHER;
+        // source face-local (u,v) in [0,1] -> the same (u,v) on the destination
+        // cube (which is a different size, giving the 1:8 compression).
+        double fu = (x - src.faceMinX(face)) / src.faceSize();
+        double fv = (z - src.faceMinZ(face)) / src.faceSize();
+        double clr = (double) EDGE_CLEARANCE / dst.faceSize();
+        fu = Math.clamp(fu, clr, 1.0 - clr);
+        fv = Math.clamp(fv, clr, 1.0 - clr);
+        double dx = dst.faceMinX(face) + fu * dst.faceSize();
+        double dz = dst.faceMinZ(face) + fv * dst.faceSize();
         MapService.CubeWorldMap map = maps.mapFor(target.getSeed());
         MapSampler sampler = toNether ? map.netherSampler() : map.sampler();
         int floorLevel = toNether ? CubeNetherChunkGenerator.LAVA_LEVEL
                 : CubeWorldChunkGenerator.SEA_LEVEL;
-        double y = Math.max(sampler.heightAt(x, z), floorLevel) + 1;
-        return new Location(target, x, y, z, from.getYaw(), from.getPitch());
+        double y = Math.max(sampler.heightAt(dx, dz), floorLevel) + 1;
+        return new Location(target, dx, y, dz, from.getYaw(), from.getPitch());
     }
 }

@@ -25,23 +25,32 @@ public final class EarthClimate {
      * down into the warm (jungle) row while the dry ones stay hot (desert);
      * cold-wet places (taiga) are left untouched.
      */
-    // Annual-mean temp (C) -> vanilla temperature param, piecewise so the
-    // bands line up with real climate: tundra below ~-8C (frozen row), taiga
-    // around -5..0 (cold row), temperate ~5..12 (row 2), warm ~18, hot ~25+.
-    // A pure linear map made cold-winter boreal (Siberia) read as frozen.
-    private static final double[] TE = {-20, -8, -3, 5, 12, 18, 25, 32};
-    private static final double[] TT = {-1.0, -0.5, -0.3, -0.05, 0.2, 0.42, 0.7, 1.0};
+    // Annual-mean temp (C) -> vanilla temperature param. The knots are chosen so
+    // each real climate band lands in the vanilla row that hosts its biomes:
+    //   < -8C  -> frozen row (T < -0.45): tundra/ice
+    //   -8..3  -> cold row  (-0.45..-0.15): taiga
+    //   3..18  -> TEMPERATE row (-0.15..0.2): plains/forest  <-- the key band
+    //   18..24 -> warm row (0.2..0.45): savanna / warm forest
+    //   24+    -> hot row (0.45..1.0): jungle (if wet, folded below) / desert
+    // The old curve pushed 12C up to 0.2, i.e. into the subtropical savanna/
+    // jungle row, so temperate grassland (the Great Plains) came out jungle.
+    private static final double[] TE = {-25, -8, 0, 8, 18, 24, 30, 40};
+    private static final double[] TT = {-1.0, -0.45, -0.22, -0.05, 0.18, 0.45, 0.70, 1.0};
 
     public static double temperature(double tempC, double humidityParam, boolean land) {
         double base = interp(tempC, TE, TT);
-        // Land only: vanilla's hottest row is desert regardless of moisture,
-        // and jungle/savanna live one row cooler. Real tropics (desert,
-        // savanna, jungle) share ~hot mean temps, so keep only genuinely arid
-        // tropics in the hot row (desert) and drop the rest to the warm row,
-        // where humidity selects jungle (wet) vs savanna (dry). Over ocean we
-        // skip this so tropical seas stay warm (coral) rather than lukewarm.
+        // Land only. Two corrections, because vanilla's hottest row is desert
+        // regardless of moisture while jungle lives one row cooler:
         if (land && base > 0.55 && humidityParam >= -0.65) {
+            // Hot & wet: drop into the warm row, where high humidity picks
+            // jungle (rainforest) instead of the desert the hot row would give.
             base = 0.35;
+        } else if (land && humidityParam < -0.6 && tempC > 15) {
+            // Warm & arid: real hot deserts (Sahara, Arabia, Egypt) have only a
+            // moderate MEAN temperature, so they miss the hot row on temperature
+            // alone. Aridity, not mean temp, is what makes them desert — so pin
+            // genuinely dry warm land to the desert row explicitly.
+            base = Math.max(base, 0.72);
         }
         return clamp(base, -1, 1);
     }
@@ -96,7 +105,7 @@ public final class EarthClimate {
      *  elevM, tempC, precipMm].
      */
     public static double[] params(EarthData earth, MapSampler sampler,
-                                  double wx, double wz, int y) {
+                                  double wx, double wz, int y, long seed) {
         Vec3 p = sampler.cubePointAt(wx, wz);
         if (p == null) {
             return null;
@@ -118,20 +127,82 @@ public final class EarthClimate {
         }
         double rugged = ruggedness(earth, lon, lat, elev);
         double surfaceY = sampler.heightAt(wx, wz);
-        double h = humidity(precip);
-        // Boreal correction: cold forests grow on modest rainfall because cold
-        // means low evaporation, so real taiga looks "dry" by precipitation
-        // alone and would read as cold steppe (plains). Floor the effective
-        // moisture in the cold band so Siberia/Canada come out taiga, while
-        // genuinely frozen (polar) and warm bands are untouched.
-        double baseTemp = interp(temp, TE, TT);
+        // --- seed-based local variation (identical to biomegen.py) blended onto
+        // the strong Earth constraint: humidity/temp wobble gives e.g. savanna
+        // patches in the Sahara, weirdness picks vanilla variants. ---
+        int ns = (int) seed;
+        double nh = ClimateNoise.fbm(wx, wz, ns + 11, NOISE_WL, NOISE_OCT) * AMP_HUM;
+        double nt = ClimateNoise.fbm(wx, wz, ns + 23, NOISE_WL, NOISE_OCT) * AMP_TEMP_C;
+        double nc = ClimateNoise.fbm(wx, wz, ns + 41, NOISE_WL, NOISE_OCT) * AMP_CONT;
+        double ne = ClimateNoise.fbm(wx, wz, ns + 57, NOISE_WL, NOISE_OCT) * AMP_EROS;
+        double raw = ClimateNoise.fbm(wx, wz, ns + 83, NOISE_WL * 1.7, NOISE_OCT);
+        double weird = Math.signum(raw) * (0.10 + AMP_WEIRD * Math.abs(raw));
+
+        double tc = temp + nt;
+        double h = clamp(humidity(precip) + nh, -1, 1);
+        // Boreal correction (cold forests grow on modest rainfall): floor moisture
+        // in the cold band so Siberia/Canada come out taiga, not cold steppe.
+        double baseTemp = interp(tc, TE, TT);
         if (land && baseTemp >= -0.45 && baseTemp < -0.05) {
             h = Math.max(h, 0.12);
         }
         return new double[] {
-                temperature(temp, h, land), h, continentalness(elev), erosion(rugged),
-                depth(surfaceY, y), weirdness(p, elev), elev, temp, precip};
+                temperature(tc, h, land), h, clamp(continentalness(elev) + nc, -1, 1),
+                clamp(erosion(rugged) + ne, -1, 1), depth(surfaceY, y), weird,
+                elev, temp, precip};
     }
+
+    // Noise-blend constants — must match biomegen/biomegen.py exactly.
+    private static final double NOISE_WL = 340.0;
+    private static final int NOISE_OCT = 3;
+    private static final double AMP_HUM = 0.34;
+    private static final double AMP_TEMP_C = 3.2;
+    private static final double AMP_CONT = 0.05;
+    private static final double AMP_EROS = 0.16;
+    private static final double AMP_WEIRD = 0.62;
+
+    /**
+     * River-mask strength at a column (0..1), the SAME value the biome layer and
+     * the water carve both key off — so the river biome and the carved water
+     * always coincide (no dry river-biome banks). The river layer is a smooth
+     * distance ramp (1 on the centreline/lake, falling to 0 over ~3 px), so one
+     * bilinear tap already gives a continuous watercourse — no neighbourhood
+     * max, which would only widen it. NaN (off-net) reads as 0.
+     */
+    public static double riverStrength(EarthData earth, MapSampler sampler, double wx, double wz) {
+        if (earth == null || !earth.hasLayer("river")) {
+            return 0.0;
+        }
+        Vec3 p = sampler.cubePointAt(wx, wz);
+        if (p == null) {
+            return 0.0;
+        }
+        double[] ll = earth.toLonLat(p);
+        double r = earth.sample("river", ll[0], ll[1]);
+        return Double.isNaN(r) ? 0.0 : r;
+    }
+
+    /** The precomputed DOWNHILL water-surface elevation (metres) at a river
+     * column, or NaN off-river. Monotonically non-increasing downstream by
+     * construction (running-minimum from each river's source), so the carved
+     * river never flows uphill regardless of the raster + ridge noise. */
+    public static double riverWaterY(EarthData earth, MapSampler sampler, double wx, double wz) {
+        if (earth == null || !earth.hasLayer("river_y")) {
+            return Double.NaN;
+        }
+        Vec3 p = sampler.cubePointAt(wx, wz);
+        if (p == null) {
+            return Double.NaN;
+        }
+        double[] ll = earth.toLonLat(p);
+        return earth.sample("river_y", ll[0], ll[1]);
+    }
+
+    // Threshold on the river ramp. The ramp's first ring (one pixel off the
+    // centreline) is 0.75; staying just below it keeps diagonal line segments
+    // continuous while a higher value would make the river dotty. Raise it for a
+    // thinner river (at the cost of continuity), lower it for a wider one.
+    public static final double RIVER_THRESHOLD = 0.7;
 
     /** Local relief in metres, ~0.08 deg (~9 km) around the point. */
     public static double ruggedness(EarthData earth, double lon, double lat, double elev) {

@@ -123,16 +123,16 @@ public final class StrongholdSphereHook {
             if (z > 0) {
                 face = CubeFace.EQ_PRIME; u = px; v = -py;
             } else {
-                face = CubeFace.EQ_BACK; u = px; v = py;
+                face = CubeFace.EQ_BACK; u = -px; v = -py;
             }
         } else {
             double s = 1.0 / ax;
             double py = y * s;
             double pz = z * s;
             if (x > 0) {
-                face = CubeFace.EQ_EAST; u = -py; v = pz;
+                face = CubeFace.EQ_EAST; u = -pz; v = -py;
             } else {
-                face = CubeFace.EQ_WEST; u = py; v = pz;
+                face = CubeFace.EQ_WEST; u = pz; v = -py;
             }
         }
         double h = geometry.faceSize() / 2.0;

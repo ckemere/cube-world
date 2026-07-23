@@ -16,12 +16,12 @@ import numpy as np
 # rows increase south (+Z). North pole is the centre of the cross.
 FACES = ["NORTH_POLE", "EQ_PRIME", "EQ_EAST", "EQ_BACK", "EQ_WEST", "SOUTH_POLE"]
 GRID = {
-    "NORTH_POLE": (0, 0),
-    "EQ_PRIME": (0, 1),
+    "NORTH_POLE": (0, -1),
+    "EQ_PRIME": (0, 0),
     "EQ_EAST": (1, 0),
-    "EQ_BACK": (0, -1),
+    "EQ_BACK": (2, 0),
     "EQ_WEST": (-1, 0),
-    "SOUTH_POLE": (0, 2),
+    "SOUTH_POLE": (0, 1),
 }
 FACE_LABEL = {
     "NORTH_POLE": "N POLE",
@@ -46,12 +46,12 @@ def cube_point(face, u, v):
         return u, -v, one
     if face == "SOUTH_POLE":
         return u, -one, -v
-    if face == "EQ_BACK":
-        return u, v, -one
     if face == "EQ_EAST":
-        return one, -u, v
+        return one, -v, -u
+    if face == "EQ_BACK":
+        return -u, -v, -one
     if face == "EQ_WEST":
-        return -one, u, v
+        return -one, -v, u
     raise ValueError(face)
 
 
@@ -115,9 +115,9 @@ class CubeProjection:
             return ("NORTH_POLE", p[0], p[2]) if d[1] > 0 else ("SOUTH_POLE", p[0], -p[2])
         if az >= ax:
             p = d / az
-            return ("EQ_PRIME", p[0], -p[1]) if d[2] > 0 else ("EQ_BACK", p[0], p[1])
+            return ("EQ_PRIME", p[0], -p[1]) if d[2] > 0 else ("EQ_BACK", -p[0], -p[1])
         p = d / ax
-        return ("EQ_EAST", -p[1], p[2]) if d[0] > 0 else ("EQ_WEST", p[1], p[2])
+        return ("EQ_EAST", -p[2], -p[1]) if d[0] > 0 else ("EQ_WEST", p[2], -p[1])
 
     def pillars(self):
         """The 8 cube vertices as (lon, lat)."""

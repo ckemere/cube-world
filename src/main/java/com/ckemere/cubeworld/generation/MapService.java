@@ -18,11 +18,13 @@ public final class MapService {
     }
 
     private final CubeTopology topology;
+    private final CubeTopology netherTopology;      // 1:8 nether cube
     private final Map<Long, CubeWorldMap> cache = new ConcurrentHashMap<>();
     private volatile EarthData earth;
 
-    public MapService(CubeTopology topology) {
+    public MapService(CubeTopology topology, CubeTopology netherTopology) {
         this.topology = topology;
+        this.netherTopology = netherTopology;
     }
 
     /** Supply real Earth rasters; when set, the overworld uses {@link EarthMapSpec}
@@ -47,8 +49,8 @@ public final class MapService {
                     ? new EarthMapSpec(topology.geometry(), earth)
                     : new SphericalDemoSpec(topology.geometry(), seeds);
             MapSampler sampler = new MapSampler(topology, overworldSpec);
-            MapSampler netherSampler = new MapSampler(topology,
-                    new NetherDemoSpec(topology.geometry(), seeds));
+            MapSampler netherSampler = new MapSampler(netherTopology,
+                    new NetherDemoSpec(netherTopology.geometry(), seeds));
             return new CubeWorldMap(s, sampler, netherSampler,
                     new CaveCarver(seeds), new CaveBiomes(seeds));
         });

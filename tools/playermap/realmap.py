@@ -22,8 +22,8 @@ from anvil import read_region
 # ---- cube net geometry (mirrors server.world_to_cube / cubemap embedding) ----
 FACE = int(os.environ.get("FACE_SIZE", "10240"))
 H = FACE / 2.0
-GRID = {"NORTH_POLE": (0, 0), "EQ_PRIME": (0, 1), "EQ_EAST": (1, 0),
-        "EQ_BACK": (0, -1), "EQ_WEST": (-1, 0), "SOUTH_POLE": (0, 2)}
+GRID = {"NORTH_POLE": (0, -1), "EQ_PRIME": (0, 0), "EQ_EAST": (1, 0),
+        "EQ_BACK": (2, 0), "EQ_WEST": (-1, 0), "SOUTH_POLE": (0, 1)}
 FACE_ORDER = ["NORTH_POLE", "SOUTH_POLE", "EQ_PRIME", "EQ_BACK", "EQ_EAST", "EQ_WEST"]
 _CELL = {(c, r): f for f, (c, r) in GRID.items()}
 

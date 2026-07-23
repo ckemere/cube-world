@@ -62,11 +62,13 @@ class CubeSurfaceTest {
     void inPlaneEdgesAgreeInThreeSpace() {
         record Adj(CubeFace a, CubeFace b, double x0, double z0, double x1, double z1) {}
         Adj[] shared = {
-                new Adj(CubeFace.NORTH_POLE, CubeFace.EQ_PRIME, -H, H, H, H),
-                new Adj(CubeFace.NORTH_POLE, CubeFace.EQ_EAST, H, -H, H, H),
-                new Adj(CubeFace.NORTH_POLE, CubeFace.EQ_BACK, -H, -H, H, -H),
-                new Adj(CubeFace.NORTH_POLE, CubeFace.EQ_WEST, -H, -H, -H, H),
-                new Adj(CubeFace.EQ_PRIME, CubeFace.SOUTH_POLE, -H, 3 * H, H, 3 * H),
+                // The equatorial band: W-P-E-B contiguous west to east.
+                new Adj(CubeFace.EQ_WEST, CubeFace.EQ_PRIME, -H, -H, -H, H),
+                new Adj(CubeFace.EQ_PRIME, CubeFace.EQ_EAST, H, -H, H, H),
+                new Adj(CubeFace.EQ_EAST, CubeFace.EQ_BACK, 3 * H, -H, 3 * H, H),
+                // The poles hung off the prime meridian.
+                new Adj(CubeFace.NORTH_POLE, CubeFace.EQ_PRIME, -H, -H, H, -H),
+                new Adj(CubeFace.EQ_PRIME, CubeFace.SOUTH_POLE, -H, H, H, H),
         };
         for (Adj adj : shared) {
             for (double t = 0.0; t <= 1.0; t += 0.25) {
@@ -81,10 +83,10 @@ class CubeSurfaceTest {
     /** Face centers hit the six axis points. */
     @Test
     void faceCentersAreAxisPoints() {
-        assertSamePoint(new Vec3(0, 1, 0), surface.point(CubeFace.NORTH_POLE, 0, 0), "N");
-        assertSamePoint(new Vec3(0, -1, 0), surface.point(CubeFace.SOUTH_POLE, 0, 2 * S), "S");
-        assertSamePoint(new Vec3(0, 0, 1), surface.point(CubeFace.EQ_PRIME, 0, S), "E0");
-        assertSamePoint(new Vec3(0, 0, -1), surface.point(CubeFace.EQ_BACK, 0, -S), "E180");
+        assertSamePoint(new Vec3(0, 1, 0), surface.point(CubeFace.NORTH_POLE, 0, -S), "N");
+        assertSamePoint(new Vec3(0, -1, 0), surface.point(CubeFace.SOUTH_POLE, 0, S), "S");
+        assertSamePoint(new Vec3(0, 0, 1), surface.point(CubeFace.EQ_PRIME, 0, 0), "E0");
+        assertSamePoint(new Vec3(0, 0, -1), surface.point(CubeFace.EQ_BACK, 2 * S, 0), "E180");
         assertSamePoint(new Vec3(1, 0, 0), surface.point(CubeFace.EQ_EAST, S, 0), "E90");
         assertSamePoint(new Vec3(-1, 0, 0), surface.point(CubeFace.EQ_WEST, -S, 0), "E270");
     }
@@ -93,16 +95,16 @@ class CubeSurfaceTest {
      *  point's source maps to the 3D point the margin visually continues. */
     @Test
     void marginSourcesAgreeInThreeSpace() {
-        // Just beyond EQ_PRIME's east edge, mid-face.
+        // Just beyond SOUTH_POLE's east edge (a stitched seam), mid-face.
         MarginSource src = topo.marginSource(H + 4, 2 * H, 96);
         assertNotNull(src);
         CubeFace sourceFace = geo.faceAt((int) Math.floor(src.source().x()), (int) Math.floor(src.source().z()));
         assertNotNull(sourceFace);
         Vec3 viaSource = surface.point(sourceFace, src.source().x(), src.source().z());
-        // The margin point continues EQ_PRIME's chart past its edge; in 3D
+        // The margin point continues SOUTH_POLE's chart past its edge; in 3D
         // that walks off the face onto the adjacent one. Nearness check: the
         // source's 3D point must be within the fold distance of the edge.
-        Vec3 edge = surface.point(CubeFace.EQ_PRIME, H, 2 * H);
+        Vec3 edge = surface.point(CubeFace.SOUTH_POLE, H, 2 * H);
         double d = Math.abs(viaSource.x() - edge.x()) + Math.abs(viaSource.y() - edge.y())
                 + Math.abs(viaSource.z() - edge.z());
         assertTrue(d < 0.05, "source 3D point near the fold edge, was " + d);
