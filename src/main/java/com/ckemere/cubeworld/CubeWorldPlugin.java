@@ -89,7 +89,8 @@ public final class CubeWorldPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new EntitySeamListener(this, mirrors), this);
         getServer().getPluginManager().registerEvents(new PillarGuardListener(this, topology, MARGIN_BLOCKS), this);
         getServer().getPluginManager().registerEvents(
-                new PortalLinkListener(this, geometry, netherGeometry, maps), this);
+                new PortalLinkListener(this, geometry, netherGeometry, topology,
+                        netherTopology, maps), this);
         // Teleport network: reskinned-lodestone stations on amethyst pads, with
         // the 30 cities pre-seeded (built as their chunks load).
         teleport = new com.ckemere.cubeworld.teleport.TeleportService(this);
