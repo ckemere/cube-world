@@ -1,0 +1,13 @@
+[package]
+name = "cubeworld-bot"
+version = "0.1.0"
+edition = "2021"
+
+# Azalea's published crate is 0.16.0+mc26.1; our server is 26.2 (protocol 776),
+# which only exists on git main. Pinned to a specific commit for reproducibility.
+[dependencies]
+azalea = { git = "https://github.com/azalea-rs/azalea", rev = "6249c295d353b9b3ef68f665b311cba39211fd19" }
+azalea-world = { git = "https://github.com/azalea-rs/azalea", rev = "6249c295d353b9b3ef68f665b311cba39211fd19" }
+tokio = { version = "1", features = ["full"] }
+eyre = "0.6"
+parking_lot = "0.12"

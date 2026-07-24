@@ -1,0 +1,4 @@
+# azalea's simdnbt uses nightly-only #![feature(portable_simd)], so this project
+# builds on nightly. Scoped here so the rest of the system stays on stable.
+[toolchain]
+channel = "nightly"
