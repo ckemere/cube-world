@@ -27,16 +27,40 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
     private final MirrorService mirrors;
     private final MapService maps;
     private final com.ckemere.cubeworld.teleport.TeleportService teleport;
+    private final com.ckemere.cubeworld.trades.MasterTraderService masterTraders;
 
     public CubeWorldCommand(CubeGeometry geometry, CubeGeometry netherGeometry, SeamService seams,
                             MirrorService mirrors, MapService maps,
-                            com.ckemere.cubeworld.teleport.TeleportService teleport) {
+                            com.ckemere.cubeworld.teleport.TeleportService teleport,
+                            com.ckemere.cubeworld.trades.MasterTraderService masterTraders) {
         this.geometry = geometry;
         this.netherGeometry = netherGeometry;
         this.seams = seams;
         this.mirrors = mirrors;
         this.maps = maps;
         this.teleport = teleport;
+        this.masterTraders = masterTraders;
+    }
+
+    /** Angular error (deg) between the lon/lat at world (x,z) and a target, or a
+     * huge value off the net. Used to invert the world -> lon/lat projection. */
+    private double latLonErr(com.ckemere.cubeworld.generation.EarthData earth,
+                             double x, double z, double tLat, double tLon) {
+        com.ckemere.cubeworld.geometry.Vec3 p = sampler().cubePointAt(x, z);
+        if (p == null) {
+            return Double.MAX_VALUE / 4;
+        }
+        double[] ll = earth.toLonLat(p);
+        double dLat = ll[1] - tLat;
+        double dLon = ll[0] - tLon;
+        if (dLon > 180) {
+            dLon -= 360;
+        }
+        if (dLon < -180) {
+            dLon += 360;
+        }
+        dLon *= Math.cos(Math.toRadians(tLat));   // scale to real angular distance
+        return Math.sqrt(dLat * dLat + dLon * dLon);
     }
 
     /** The sampler for the main world's seed. */
@@ -139,6 +163,32 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                     p.getInventory().addItem(book);
                     p.sendMessage(Component.text("Gave you the ticket book.", NamedTextColor.AQUA));
                 }
+                return true;
+            }
+            case "mastertrader" -> {
+                if (args.length >= 2) {                       // by city name (console/RCON friendly)
+                    String name = String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length));
+                    var s = teleport.byName(name);
+                    if (s == null || !s.city()) {
+                        sender.sendMessage(Component.text("No special city named '" + name + "'.",
+                                NamedTextColor.RED));
+                        return true;
+                    }
+                    boolean ok = masterTraders.forceSpawnAt(s);
+                    sender.sendMessage(ok
+                            ? Component.text("Master Trader summoned to " + s.name() + ".", NamedTextColor.GOLD)
+                            : Component.text("Could not spawn (world not loaded).", NamedTextColor.RED));
+                    return true;
+                }
+                if (!(sender instanceof Player p)) {
+                    sender.sendMessage(Component.text("Usage: /cubeworld mastertrader <city name>",
+                            NamedTextColor.RED));
+                    return true;
+                }
+                String city = masterTraders.forceSpawnNearest(p.getLocation());
+                sender.sendMessage(city != null
+                        ? Component.text("Master Trader summoned to " + city + ".", NamedTextColor.GOLD)
+                        : Component.text("No special city found in this world.", NamedTextColor.RED));
                 return true;
             }
             case "tpsim" -> {
@@ -265,6 +315,64 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage(Component.text(String.format(Locale.ROOT,
                         "T=%.2f H=%.2f C=%.2f E=%.2f D=%.2f W=%.2f | elev=%.0f temp=%.1f precip=%.0f",
                         c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8]), NamedTextColor.AQUA));
+                return true;
+            }
+            case "findlatlon" -> {
+                if (args.length != 3) {
+                    sender.sendMessage(Component.text("Usage: /cubeworld findlatlon <lat> <lon>",
+                            NamedTextColor.RED));
+                    return true;
+                }
+                com.ckemere.cubeworld.generation.EarthData earth = maps.earthData();
+                if (earth == null) {
+                    sender.sendMessage(Component.text("No Earth data loaded.", NamedTextColor.YELLOW));
+                    return true;
+                }
+                double tLat = Double.parseDouble(args[1]);
+                double tLon = Double.parseDouble(args[2]);
+                // Coarse scan every face, then refine: the forward map
+                // (world -> cube point -> lon/lat) is the only one we have, so
+                // invert it numerically. Cheap and exact enough (<1 block).
+                double bx = 0;
+                double bz = 0;
+                double best = Double.MAX_VALUE;
+                for (CubeFace f : CubeFace.values()) {
+                    double x0 = geometry.faceMinX(f);
+                    double z0 = geometry.faceMinZ(f);
+                    for (int i = 0; i <= 64; i++) {
+                        for (int j = 0; j <= 64; j++) {
+                            double x = x0 + i * (geometry.faceSize() / 64.0);
+                            double z = z0 + j * (geometry.faceSize() / 64.0);
+                            double d = latLonErr(earth, x, z, tLat, tLon);
+                            if (d < best) {
+                                best = d;
+                                bx = x;
+                                bz = z;
+                            }
+                        }
+                    }
+                }
+                for (double step = geometry.faceSize() / 64.0; step > 0.4; step /= 2.0) {
+                    for (int i = -2; i <= 2; i++) {
+                        for (int j = -2; j <= 2; j++) {
+                            double x = bx + i * step;
+                            double z = bz + j * step;
+                            double d = latLonErr(earth, x, z, tLat, tLon);
+                            if (d < best) {
+                                best = d;
+                                bx = x;
+                                bz = z;
+                            }
+                        }
+                    }
+                }
+                int rx = (int) Math.round(bx);
+                int rz = (int) Math.round(bz);
+                CubeFace f = geometry.faceAt(rx, rz);
+                sender.sendMessage(Component.text(String.format(Locale.ROOT,
+                        "lat %.4f lon %.4f -> world (%d, %d) on %s  [err %.3f deg]",
+                        tLat, tLon, rx, rz, f == null ? "margin" : f.displayName(), best),
+                        NamedTextColor.AQUA));
                 return true;
             }
             case "biomeat" -> {

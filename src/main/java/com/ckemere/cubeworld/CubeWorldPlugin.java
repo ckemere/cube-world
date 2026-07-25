@@ -55,6 +55,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
     private final MirrorService netherMirrors = new MirrorService(netherTopology, MARGIN_BLOCKS);
     private final Map<UUID, WorldServices> perWorld = new LinkedHashMap<>();
     private com.ckemere.cubeworld.teleport.TeleportService teleport;
+    private com.ckemere.cubeworld.trades.MasterTraderService masterTraders;
 
     /** Per-world seam machinery. Both cube worlds share geometry and topology. */
     public record WorldServices(World world, LiquidSeamService liquids,
@@ -101,6 +102,9 @@ public final class CubeWorldPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(
                 new com.ckemere.cubeworld.teleport.TeleporterListener(this, teleport), this);
         getServer().getScheduler().runTaskTimer(this, teleport::ambientTick, 40L, 40L);
+        // Rare "Master Traders" visit the special cities with exceptional goods.
+        masterTraders = new com.ckemere.cubeworld.trades.MasterTraderService(this, teleport);
+        masterTraders.start();
         loadEarthData();
         // Fold vanilla's terrain router onto the sphere BEFORE spawn chunks
         // generate. WorldInitEvent fires during world load (this STARTUP plugin
@@ -159,7 +163,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, exploration::tick, 100L, 20L);
 
         CubeWorldCommand executor = new CubeWorldCommand(geometry, netherGeometry, seams, mirrors,
-                maps, teleport);
+                maps, teleport, masterTraders);
         PluginCommand command = getCommand("cubeworld");
         if (command != null) {
             command.setExecutor(executor);
@@ -271,6 +275,9 @@ public final class CubeWorldPlugin extends JavaPlugin {
             services.tickets().releaseAll(services.world());
         }
         perWorld.clear();
+        if (masterTraders != null) {
+            masterTraders.stop();
+        }
         if (teleport != null) {
             teleport.save();
         }
