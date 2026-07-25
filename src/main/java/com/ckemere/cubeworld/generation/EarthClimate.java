@@ -171,9 +171,14 @@ public final class EarthClimate {
         if (elevM < 0) {
             return 0.0;
         }
-        double flat = clamp(1.0 - ruggedMeters / 60.0, 0.0, 1.0);
-        double low = clamp(1.0 - elevM / 80.0, 0.0, 1.0);
-        double wet = clamp((precipMm - 700.0) / 500.0, 0.0, 1.0);
+        // Loosened from rug<60/elev<80/precip>700 (which qualified only 3.0% of
+        // land and yielded 1.62% swamp) to roughly double the footprint. Kept
+        // deliberately short of a "flat + low + wet" rule that would also capture
+        // the Amazon basin, which is all three yet is rainforest, not swamp -- the
+        // elevation term is the main guard there.
+        double flat = clamp(1.0 - ruggedMeters / 100.0, 0.0, 1.0);
+        double low = clamp(1.0 - elevM / 150.0, 0.0, 1.0);
+        double wet = clamp((precipMm - 600.0) / 500.0, 0.0, 1.0);
         // The raw product of three [0,1] terms peaks near 0.48 at p99, so lerping
         // erosion toward 0.68 with it never entered vanilla's swamp band. Smoothstep
         // it so genuine wetlands saturate: measured ~3% of land above 0.15.

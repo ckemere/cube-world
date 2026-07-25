@@ -43,6 +43,26 @@ public final class EarthMapSpec implements MapSpec {
     private static final double OCEAN_DEEP = 0.004;          // blocks per metre below OCEAN_BREAK
     private static final double OCEAN_FLOOR = 60.0;          // max blocks below sea (min y 3)
     private static final double LAND_CAP = 253.0;
+
+    /** Non-linear land curve below {@link #HIGH_BREAK}: metres -> blocks above sea.
+     * Slope rises monotonically (0.014 -> 0.034 blocks/m) so shorelines ramp gently
+     * while inland ranges keep their height. Ends exactly at
+     * 4000 m -> 114 blocks (= 4000 * LAND_EXAGGERATION) for continuity. */
+    private static final double[] LOW_M = {0, 50, 150, 300, 1000, 2000, 4000};
+    private static final double[] LOW_B = {0, 0.7, 2.2, 4.8, 19.0, 46.0, 114.0};
+
+    private static double interp(double x, double[] xs, double[] ys) {
+        if (x <= xs[0]) {
+            return ys[0];
+        }
+        for (int i = 1; i < xs.length; i++) {
+            if (x <= xs[i]) {
+                double t = (x - xs[i - 1]) / (xs[i] - xs[i - 1]);
+                return ys[i - 1] + t * (ys[i] - ys[i - 1]);
+            }
+        }
+        return ys[ys.length - 1];
+    }
     private static final double TERRAIN_CEIL = 250.0;        // just under vanilla's top slide
 
     private final CubeGeometry geometry;
@@ -73,7 +93,14 @@ public final class EarthMapSpec implements MapSpec {
             // clips every 8000er to the same ceiling.
             double blocks;
             if (meters <= HIGH_BREAK) {
-                blocks = meters * LAND_EXAGGERATION;
+                // Non-linear below the knee. A single 0.0285 blocks/m ramp made
+                // 300 m of real coastal relief an 8.55-block riser, and because
+                // 1 block ~ 1 km horizontally that step lands within a few blocks
+                // of the waterline -- a cliff exactly where villages try to build.
+                // This is gentler near sea level and steeper inland, and is
+                // constructed to pass through 4000 m -> 114 blocks so every
+                // elevation at or above the knee (Everest included) is unchanged.
+                blocks = interp(meters, LOW_M, LOW_B);
             } else {
                 blocks = HIGH_BREAK * LAND_EXAGGERATION
                         + (meters - HIGH_BREAK) * HIGH_EXAGGERATION;
