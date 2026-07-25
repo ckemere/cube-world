@@ -68,6 +68,35 @@ public final class EarthClimate {
         return interp(elevM, CE, CC);
     }
 
+    /** distance-to-coast (km) -> continentalness, matching vanilla's inland bands:
+     * coast -0.19..-0.11, near-inland -0.11..0.03, mid-inland 0.03..0.30,
+     * far-inland 0.30..1.0. Fitted to the measured distribution of the coast
+     * raster (land p50 594 km, p90 1687 km, max 2896 km). */
+    private static final double[] DK = {0, 15, 60, 200, 600, 1400, 2600};
+    private static final double[] DC = {-0.11, -0.02, 0.06, 0.22, 0.42, 0.70, 1.00};
+
+    /**
+     * Continentalness for LAND from true distance to the ocean, which is what
+     * vanilla's parameter actually means. The old elevation proxy pinned land
+     * near 0 (most land is 0-800 m), so coast/near-inland swallowed nearly every
+     * column and vanilla's mid/far-inland bands were never used. Elevation still
+     * contributes a small lift so high plateaus read as more interior.
+     */
+    public static double continentalnessFromCoast(double coastKm, double elevM) {
+        double c = interp(coastKm, DK, DC);
+        double lift = clamp(elevM / 6000.0, 0.0, 1.0) * 0.25;
+        c += lift;
+        // Vanilla's "coast" band (C <= -0.11) is where beach lives, and beaches are
+        // a few blocks wide. Our coast raster is ~18 km/px, so distance alone cannot
+        // resolve that and would paint every shoreline region as beach. Only
+        // genuinely low ground is allowed into the band; anything with real
+        // elevation is floored into near-inland.
+        if (elevM > 25.0) {
+            c = Math.max(c, -0.05);
+        }
+        return clamp(c, -1, 1);
+    }
+
     /** Metres of relief that map to one unit of erosion depression. Fitted to the
      * measured global distribution (tools/compact/relief_stats.py): land relief is
      * p50 48 m, p90 382 m, p95 578 m, p99 1053 m. The old divisor of 500 saturated
@@ -96,14 +125,86 @@ public final class EarthClimate {
      * column's own height above sea level restores the coupling: only genuinely
      * high AND rugged ground reads as mountain.
      */
+    /** Relief (m) -> erosion, as a percentile curve fitted to the MEASURED global
+     * distribution (relief_stats.py: land p50 48 m, p75 153, p90 382, p95 578,
+     * p99 1053) and mapped onto vanilla's own erosion band edges
+     * (-0.78 / -0.375 / -0.2225 / 0.05 / 0.45).
+     *
+     * <p>The previous linear form {@code 0.45 - rugged/750} put 70% of all land
+     * into a 0.074-wide sliver against its own 0.45 ceiling, so vanilla's seven
+     * erosion bands collapsed to about one. That is what made
+     * {@code windswept_savanna} — whose box is exactly E [0.45, 0.55] — 17% of all
+     * land, and left swamps to appear only as overspill from the +-0.16 noise. */
+    private static final double[] RM = {0, 48, 153, 382, 578, 1053, 2000};
+    private static final double[] RE = {0.44, 0.30, 0.05, -0.2225, -0.375, -0.78, -1.0};
+
+    /** Erosion for genuinely low ground, before any relief is credited. Kept below
+     * vanilla's windswept band (0.45) so flat land does not pile into it. */
+    private static final double LOWLAND_EROSION = 0.40;
+
     public static double erosion(double ruggedMeters, double blocksAboveSea) {
+        double fromRelief = interp(ruggedMeters, RM, RE);
+        // Altitude still gates how much the relief is believed: vanilla couples
+        // "jagged" to "tall", and relief is max|dh| to neighbours ~9 km out, so a
+        // low coastal cell beside a mountain would otherwise read as mountain.
         double gate = clamp(blocksAboveSea / MOUNTAIN_FULL_BLOCKS, 0.0, 1.0);
-        return clamp(0.45 - (ruggedMeters / RELIEF_PER_EROSION) * gate, -1, 0.5);
+        return clamp(LOWLAND_EROSION * (1.0 - gate) + fromRelief * gate, -1, 1);
     }
 
     /** Ungated form, for callers with no altitude to hand (map previews). */
     public static double erosion(double ruggedMeters) {
         return erosion(ruggedMeters, MOUNTAIN_FULL_BLOCKS);
+    }
+
+    /**
+     * Wetland score 0..1 — flat, low, wet ground: deltas, floodplains and coastal
+     * marshes. Vanilla puts BOTH swamp and mangrove_swamp at erosion >= 0.55 and
+     * splits them purely on temperature (below +0.20 swamp, above mangrove), so
+     * pushing erosion into that band here is all that is needed; the
+     * temperate/tropical split then happens for free.
+     *
+     * <p>Measured coverage of this rule: ~2-4% of land, against roughly 5-8% for
+     * real Earth wetlands. Deliberately conservative — the erosion band is shared
+     * with nothing else, so over-firing would carpet the world in swamp.
+     */
+    public static double wetland(double elevM, double ruggedMeters, double precipMm) {
+        if (elevM < 0) {
+            return 0.0;
+        }
+        double flat = clamp(1.0 - ruggedMeters / 60.0, 0.0, 1.0);
+        double low = clamp(1.0 - elevM / 80.0, 0.0, 1.0);
+        double wet = clamp((precipMm - 700.0) / 500.0, 0.0, 1.0);
+        // The raw product of three [0,1] terms peaks near 0.48 at p99, so lerping
+        // erosion toward 0.68 with it never entered vanilla's swamp band. Smoothstep
+        // it so genuine wetlands saturate: measured ~3% of land above 0.15.
+        double s = flat * low * wet;
+        double t = clamp((s - 0.10) / (0.35 - 0.10), 0.0, 1.0);
+        return t * t * (3 - 2 * t);
+    }
+
+    /** Erosion inside a wetland, i.e. within vanilla's swamp band [0.55, 1.0]. */
+    private static final double WETLAND_EROSION = 0.68;
+
+    /** Continentalness from the coast sidecar when it is loaded, else the old
+     * elevation proxy. */
+    public static double continentalnessAt(EarthData earth, double lon, double lat,
+                                           double elevM) {
+        if (elevM >= 0 && earth.hasLayer("coast")) {
+            double km = earth.sample("coast", lon, lat);
+            if (!Double.isNaN(km)) {
+                return continentalnessFromCoast(km, elevM);
+            }
+        }
+        return continentalness(elevM);
+    }
+
+    /** Erosion, lifted into vanilla's swamp band over wetlands. */
+    public static double erosionAt(EarthData earth, double lon, double lat, double elevM,
+                                   double ruggedMeters, double precipMm,
+                                   double blocksAboveSea) {
+        double e = erosion(ruggedMeters, blocksAboveSea);
+        double w = wetland(elevM, ruggedMeters, precipMm);
+        return w > 0 ? e * (1.0 - w) + WETLAND_EROSION * w : e;
     }
 
     // weirdness is vanilla's peaks-and-valleys selector: |w| picks the terrain
@@ -163,7 +264,12 @@ public final class EarthClimate {
         double lat = ll[1];
         // Restore named summits the same way TERRAIN does (SphereDensity), so the
         // climate the biome layer sees matches the mountain the generator builds.
-        double elev = Math.max(earth.sample("height", lon, lat), peakCone(lon, lat));
+        double raster = earth.sample("height", lon, lat);
+        // Only LIFT to a summit cone; never let cone==0 clamp a negative (ocean)
+        // elevation up to 0. Math.max(-3757, 0) made every ocean column read as
+        // sea-level land, so c[6] < 0 never fired and oceanBiome() never ran.
+        double cone = peakCone(lon, lat);
+        double elev = cone > 0 ? Math.max(raster, cone) : raster;
         double temp = earth.sample("temp", lon, lat);
         double precip = earth.sample("precip", lon, lat);
         boolean land = elev >= 0;
@@ -186,7 +292,12 @@ public final class EarthClimate {
         double nc = ClimateNoise.fbm(wx, wz, ns + 41, NOISE_WL, NOISE_OCT) * AMP_CONT;
         double ne = ClimateNoise.fbm(wx, wz, ns + 57, NOISE_WL, NOISE_OCT) * AMP_EROS;
         double raw = ClimateNoise.fbm(wx, wz, ns + 83, NOISE_WL * 1.7, NOISE_OCT);
-        double weird = Math.signum(raw) * (0.10 + AMP_WEIRD * Math.abs(raw));
+        // Widened from 0.10 + 0.62*|raw| (which topped out at |W| = 0.66) so the
+        // extreme bands are reachable: sulfur_caves needs W <= -0.85, and vanilla's
+        // outermost variant bands start at |W| = 0.78. A small deadband remains so
+        // W never sits at 0, where vanilla selects valley/river variants that would
+        // fight our dedicated river layer.
+        double weird = Math.signum(raw) * (0.05 + 0.98 * Math.abs(raw));
 
         double tc = temp + nt;
         double h = clamp(humidity(precip) + nh, -1, 1);
@@ -197,8 +308,9 @@ public final class EarthClimate {
             h = Math.max(h, 0.12);
         }
         return new double[] {
-                temperature(tc, h, land), h, clamp(continentalness(elev) + nc, -1, 1),
-                clamp(erosion(rugged, surfaceY - EarthMapSpec.SEA_LEVEL) + ne, -1, 1),
+                temperature(tc, h, land), h, clamp(continentalnessAt(earth, lon, lat, elev) + nc, -1, 1),
+                clamp(erosionAt(earth, lon, lat, elev, rugged, precip,
+                        surfaceY - EarthMapSpec.SEA_LEVEL) + ne, -1, 1),
                 depth(surfaceY, y), weird,
                 elev, temp, precip};
     }
@@ -283,7 +395,10 @@ public final class EarthClimate {
         for (double[] o : new double[][] {{d, 0}, {-d, 0}, {0, d}, {0, -d}}) {
             double hh = earth.sample("height", lon + o[0], lat + o[1]);
             if (!Double.isNaN(hh)) {
-                hh = Math.max(hh, peakCone(lon + o[0], lat + o[1]));
+                double nc = peakCone(lon + o[0], lat + o[1]);
+                if (nc > 0) {
+                    hh = Math.max(hh, nc);       // lift only; see params() above
+                }
                 max = Math.max(max, Math.abs(hh - elev));
             }
         }

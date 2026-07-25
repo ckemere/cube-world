@@ -182,8 +182,24 @@ public final class CubeWorldPlugin extends JavaPlugin {
                 try {
                     com.ckemere.cubeworld.generation.EarthData earth =
                             com.ckemere.cubeworld.generation.EarthData.load(p);
+                    // Sidecar rasters (distance-to-coast) live beside earth.dat so
+                    // a layer can be added without rewriting the 359 MB bundle.
+                    for (java.nio.file.Path side : new java.nio.file.Path[] {
+                            p.resolveSibling("coast.dat"),
+                            java.nio.file.Path.of("coast.dat")}) {
+                        if (java.nio.file.Files.exists(side)) {
+                            try {
+                                earth.merge(side);
+                                getLogger().info("Merged sidecar raster " + side);
+                            } catch (Exception ex) {
+                                getLogger().warning("Failed to merge " + side + ": " + ex);
+                            }
+                            break;
+                        }
+                    }
                     maps.setEarthData(earth);
-                    getLogger().info("Loaded Earth data from " + p + " (roll " + earth.roll() + ")");
+                    getLogger().info("Loaded Earth data from " + p + " (roll " + earth.roll()
+                            + ", coast=" + earth.hasLayer("coast") + ")");
                     return;
                 } catch (Exception e) {
                     getLogger().warning("Failed to load Earth data from " + p + ": " + e);

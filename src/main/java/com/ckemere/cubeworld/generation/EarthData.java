@@ -60,6 +60,19 @@ public final class EarthData {
         return layers.containsKey(name);
     }
 
+    /**
+     * Merge the layers of another CWE1 file into this one. Used for sidecar
+     * rasters (currently {@code coast.dat}, the distance-to-ocean field that
+     * drives continentalness) so a new layer can be added without rewriting the
+     * 359 MB main bundle. Existing layers are not overwritten.
+     */
+    public void merge(Path path) throws IOException {
+        EarthData other = load(path);
+        for (Map.Entry<String, Layer> e : other.layers.entrySet()) {
+            layers.putIfAbsent(e.getKey(), e.getValue());
+        }
+    }
+
     public static EarthData load(Path path) throws IOException {
         ByteBuffer buf = ByteBuffer.wrap(Files.readAllBytes(path)).order(ByteOrder.LITTLE_ENDIAN);
         byte[] magic = new byte[4];
