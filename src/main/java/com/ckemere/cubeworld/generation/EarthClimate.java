@@ -167,7 +167,8 @@ public final class EarthClimate {
      * real Earth wetlands. Deliberately conservative — the erosion band is shared
      * with nothing else, so over-firing would carpet the world in swamp.
      */
-    public static double wetland(double elevM, double ruggedMeters, double precipMm) {
+    public static double wetland(double elevM, double ruggedMeters, double precipMm,
+                                double tempC) {
         if (elevM < 0) {
             return 0.0;
         }
@@ -178,7 +179,16 @@ public final class EarthClimate {
         // elevation term is the main guard there.
         double flat = clamp(1.0 - ruggedMeters / 100.0, 0.0, 1.0);
         double low = clamp(1.0 - elevM / 150.0, 0.0, 1.0);
-        double wet = clamp((precipMm - 600.0) / 500.0, 0.0, 1.0);
+        // Waterlogging is precipitation against EVAPORATION, not raw rainfall.
+        // A raw precip>600 rule caught every tropical delta but excluded the boreal
+        // peatlands -- Siberia, Canada, Scandinavia get 300-500 mm yet are soaked
+        // because nothing evaporates -- which left mangrove outnumbering swamp 3:1,
+        // backwards from Earth. PET is proxied linearly from mean temperature
+        // (~300 mm/yr in the Arctic, ~1650 at 30 C).
+        // Floor the PET itself, not the temperature: 300 + 45*(-5) would be 75 mm,
+        // which makes even a desert-dry Arctic read as waterlogged.
+        double pet = Math.max(250.0, 300.0 + 45.0 * tempC);
+        double wet = clamp((precipMm / pet - 0.70) / 0.60, 0.0, 1.0);
         // The raw product of three [0,1] terms peaks near 0.48 at p99, so lerping
         // erosion toward 0.68 with it never entered vanilla's swamp band. Smoothstep
         // it so genuine wetlands saturate: measured ~3% of land above 0.15.
@@ -205,10 +215,10 @@ public final class EarthClimate {
 
     /** Erosion, lifted into vanilla's swamp band over wetlands. */
     public static double erosionAt(EarthData earth, double lon, double lat, double elevM,
-                                   double ruggedMeters, double precipMm,
+                                   double ruggedMeters, double precipMm, double tempC,
                                    double blocksAboveSea) {
         double e = erosion(ruggedMeters, blocksAboveSea);
-        double w = wetland(elevM, ruggedMeters, precipMm);
+        double w = wetland(elevM, ruggedMeters, precipMm, tempC);
         return w > 0 ? e * (1.0 - w) + WETLAND_EROSION * w : e;
     }
 
@@ -314,7 +324,7 @@ public final class EarthClimate {
         }
         return new double[] {
                 temperature(tc, h, land), h, clamp(continentalnessAt(earth, lon, lat, elev) + nc, -1, 1),
-                clamp(erosionAt(earth, lon, lat, elev, rugged, precip,
+                clamp(erosionAt(earth, lon, lat, elev, rugged, precip, temp,
                         surfaceY - EarthMapSpec.SEA_LEVEL) + ne, -1, 1),
                 depth(surfaceY, y), weird,
                 elev, temp, precip};
