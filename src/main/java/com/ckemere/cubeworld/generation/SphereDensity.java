@@ -386,7 +386,7 @@ public final class SphereDensity {
      * column), so caching them together keeps the 30-city distance scan and the
      * raster/peak lookups off the hot path. */
     private final ThreadLocal<double[]> reliefCache =
-            ThreadLocal.withInitial(() -> new double[] {Double.NaN, Double.NaN, 0.0, 0.0});
+            ThreadLocal.withInitial(() -> new double[] {Double.NaN, Double.NaN, 0.0, 0.0, 0.0});
 
     private void fillColumn(int bx, int bz) {
         double[] c = reliefCache.get();
@@ -409,6 +409,7 @@ public final class SphereDensity {
         c[1] = bz;
         c[2] = r;
         c[3] = cityInfluence(bx + 0.5, bz + 0.5);
+        c[4] = sampler.heightAt(bx + 0.5, bz + 0.5);
     }
 
     private double reliefAt(int bx, int bz) {
@@ -421,10 +422,24 @@ public final class SphereDensity {
         return reliefCache.get()[3];
     }
 
+    /** 0 below sea level, ramping to 1 a few blocks above it. Terrain CHARACTER
+     * must not be dramatic underwater: relief is max|dh| to neighbours ~9 km out,
+     * so a shoal in a bay surrounded by 1000 m deep ocean reads as maximally rugged
+     * and gets FACTOR_RUGGED, i.e. ~25 blocks of noise freedom. That punched the
+     * seabed straight through the sea surface as rock pillars (measured: intended
+     * seabed y=54, generated terrain y=77, a spire reaching y=100 in Antioch's
+     * bay). Ocean floor should hug the bathymetry. */
+    private double landGate(int bx, int bz) {
+        fillColumn(bx, bz);
+        double above = reliefCache.get()[4] - EarthMapSpec.SEA_LEVEL;
+        return Math.clamp(above / 8.0, 0.0, 1.0);
+    }
+
     /** 0 (flat) .. 1 (very rugged), from metres of local relief over ~9 km. */
     private double reliefNorm(int bx, int bz) {
         return Math.clamp(reliefAt(bx, bz) / RELIEF_FULL, 0.0, 1.0)
-                * (1.0 - cityInfluenceCached(bx, bz));   // cities get calm ground
+                * (1.0 - cityInfluenceCached(bx, bz))    // cities get calm ground
+                * landGate(bx, bz);                      // and so does the seabed
     }
 
     // ------------------------------------------------------- city build pads
