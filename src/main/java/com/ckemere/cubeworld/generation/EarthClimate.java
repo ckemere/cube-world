@@ -68,12 +68,42 @@ public final class EarthClimate {
         return interp(elevM, CE, CC);
     }
 
-    /** ruggedness (m of local relief) -> erosion. Flat land sits in the middle
-     * bands (~0.45), rugged land goes negative (mountain/peak biomes). Capped
-     * at 0.5 — the 0.55-1.0 band is vanilla's swamp reserve, which we don't
-     * want to hit everywhere (real wetlands come from a dedicated layer). */
+    /** Metres of relief that map to one unit of erosion depression. Fitted to the
+     * measured global distribution (tools/compact/relief_stats.py): land relief is
+     * p50 48 m, p90 382 m, p95 578 m, p99 1053 m. The old divisor of 500 saturated
+     * at 725 m, i.e. at about p95, which clamped 3% of ALL land to the -1.00 floor
+     * and made K2 indistinguishable from ordinary hill country. 750 puts
+     * saturation near p99 so mountains actually differentiate. */
+    private static final double RELIEF_PER_EROSION = 750.0;
+
+    /** Blocks above sea level at which terrain counts as fully mountainous. */
+    private static final double MOUNTAIN_FULL_BLOCKS = 45.0;
+
+    /**
+     * ruggedness (m of local relief) + in-game altitude -> erosion. Flat land sits
+     * in the middle bands (~0.45); rugged HIGH land goes negative (mountain/peak
+     * biomes). Capped at 0.5 — the 0.55-1.0 band is vanilla's swamp reserve, which
+     * we don't want to hit everywhere (real wetlands come from a dedicated layer).
+     *
+     * <p>The altitude gate matters because vanilla COUPLES "jagged" to "tall": the
+     * same splines that lower erosion also raise {@code offset}, so vanilla only
+     * reaches its snowy slope/peak biome families on terrain it has actually built
+     * tall. We broke that link — erosion comes from real relief while altitude
+     * comes from real elevation compressed ~35x vertically — and relief is
+     * {@code max|dh|} to neighbours ~9 km out, so a low coastal cell beside a
+     * mountain inherits mountain-grade relief. That produced snowy {@code grove}
+     * on a 13 C Mediterranean hillside at y=65. Gating the depression by the
+     * column's own height above sea level restores the coupling: only genuinely
+     * high AND rugged ground reads as mountain.
+     */
+    public static double erosion(double ruggedMeters, double blocksAboveSea) {
+        double gate = clamp(blocksAboveSea / MOUNTAIN_FULL_BLOCKS, 0.0, 1.0);
+        return clamp(0.45 - (ruggedMeters / RELIEF_PER_EROSION) * gate, -1, 0.5);
+    }
+
+    /** Ungated form, for callers with no altitude to hand (map previews). */
     public static double erosion(double ruggedMeters) {
-        return clamp(0.45 - ruggedMeters / 500.0, -1, 0.5);
+        return erosion(ruggedMeters, MOUNTAIN_FULL_BLOCKS);
     }
 
     // weirdness is vanilla's peaks-and-valleys selector: |w| picks the terrain
@@ -168,7 +198,8 @@ public final class EarthClimate {
         }
         return new double[] {
                 temperature(tc, h, land), h, clamp(continentalness(elev) + nc, -1, 1),
-                clamp(erosion(rugged) + ne, -1, 1), depth(surfaceY, y), weird,
+                clamp(erosion(rugged, surfaceY - EarthMapSpec.SEA_LEVEL) + ne, -1, 1),
+                depth(surfaceY, y), weird,
                 elev, temp, precip};
     }
 
