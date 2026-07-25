@@ -381,13 +381,17 @@ public final class SphereDensity {
      * geography, so before this hook an 8849 m Himalayan peak got whatever
      * steepness the Perlin happened to roll there.
      */
+    /** Per-thread column cache: [bx, bz, reliefMetres, cityInfluence]. Both are
+     * per-column quantities but are read once per density SAMPLE (many y per
+     * column), so caching them together keeps the 30-city distance scan and the
+     * raster/peak lookups off the hot path. */
     private final ThreadLocal<double[]> reliefCache =
-            ThreadLocal.withInitial(() -> new double[] {Double.NaN, Double.NaN, 0.0});
+            ThreadLocal.withInitial(() -> new double[] {Double.NaN, Double.NaN, 0.0, 0.0});
 
-    private double reliefAt(int bx, int bz) {
+    private void fillColumn(int bx, int bz) {
         double[] c = reliefCache.get();
         if (c[0] == bx && c[1] == bz) {
-            return c[2];
+            return;
         }
         double r = 0.0;
         Vec3 p = sampler.cubePointAt(bx + 0.5, bz + 0.5);
@@ -404,12 +408,125 @@ public final class SphereDensity {
         c[0] = bx;
         c[1] = bz;
         c[2] = r;
-        return r;
+        c[3] = cityInfluence(bx + 0.5, bz + 0.5);
+    }
+
+    private double reliefAt(int bx, int bz) {
+        fillColumn(bx, bz);
+        return reliefCache.get()[2];
+    }
+
+    private double cityInfluenceCached(int bx, int bz) {
+        fillColumn(bx, bz);
+        return reliefCache.get()[3];
     }
 
     /** 0 (flat) .. 1 (very rugged), from metres of local relief over ~9 km. */
     private double reliefNorm(int bx, int bz) {
-        return Math.clamp(reliefAt(bx, bz) / RELIEF_FULL, 0.0, 1.0);
+        return Math.clamp(reliefAt(bx, bz) / RELIEF_FULL, 0.0, 1.0)
+                * (1.0 - cityInfluenceCached(bx, bz));   // cities get calm ground
+    }
+
+    // ------------------------------------------------------- city build pads
+    /**
+     * The 30 anchored cities need ground they can actually be built on. Vanilla
+     * normally picks its own village sites and so never lands one in the sea, but
+     * {@code VillageAnchorHook} FORCES a village at each historical coordinate, and
+     * 8 of the 30 (Alexandria, Carthage, Basra, Nanjing, Angkor, Guangzhou,
+     * Caracol, Baghdad) are deltas or harbours sitting within a block of sea
+     * level — historically correct, but the jigsaw then spills buildings out over
+     * the water: measured 21% of Pataliputra's columns and 15-20% stilted across
+     * most cities.
+     *
+     * <p>Moving the anchors inland would break the geography, so instead the
+     * terrain itself is terraformed: within {@link #CITY_PAD_FULL} blocks the
+     * surface is blended to a flat height safely above sea level, fading back to
+     * natural terrain by {@link #CITY_PAD_FADE}, and relief-driven jaggedness is
+     * suppressed over the same footprint.
+     */
+    private static final double CITY_PAD_FULL = 80.0;
+    private static final double CITY_PAD_FADE = 180.0;
+    /** Blocks above sea level a pad is lifted to, so no building stands in water. */
+    private static final int CITY_PAD_CLEARANCE = 4;
+
+    private record City(double x, double z, double y) { }
+
+    private volatile City[] cityCache;
+
+    private City[] cities() {
+        City[] c = cityCache;
+        if (c != null) {
+            return c;
+        }
+        synchronized (this) {
+            if (cityCache != null) {
+                return cityCache;
+            }
+            java.util.List<City> list = new java.util.ArrayList<>();
+            try (java.io.InputStream in =
+                         SphereDensity.class.getResourceAsStream("/cities_anchor.csv")) {
+                if (in != null) {
+                    java.io.BufferedReader r = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(in, java.nio.charset.StandardCharsets.UTF_8));
+                    String line;
+                    while ((line = r.readLine()) != null) {
+                        if (line.isBlank() || line.startsWith("#")) {
+                            continue;
+                        }
+                        String[] p = line.split(",");
+                        if (p.length < 2) {
+                            continue;
+                        }
+                        double x = Double.parseDouble(p[0].trim());
+                        double z = Double.parseDouble(p[1].trim());
+                        // Pad height: the natural surface here, but never below a
+                        // safe margin over the sea.
+                        double y = Math.max(sampler.heightAt(x + 0.5, z + 0.5),
+                                EarthMapSpec.SEA_LEVEL + CITY_PAD_CLEARANCE);
+                        list.add(new City(x, z, y));
+                    }
+                }
+            } catch (Exception ignored) {
+                // no anchors available: pads simply do not apply
+            }
+            cityCache = list.toArray(new City[0]);
+            return cityCache;
+        }
+    }
+
+    /** Smooth 0..1 weight of the nearest city build pad at a column. */
+    private double cityInfluence(double wx, double wz) {
+        double best = 0.0;
+        for (City c : cities()) {
+            double dx = wx - c.x();
+            double dz = wz - c.z();
+            double d2 = dx * dx + dz * dz;
+            if (d2 >= CITY_PAD_FADE * CITY_PAD_FADE) {
+                continue;
+            }
+            double d = Math.sqrt(d2);
+            double t = d <= CITY_PAD_FULL ? 1.0
+                    : 1.0 - (d - CITY_PAD_FULL) / (CITY_PAD_FADE - CITY_PAD_FULL);
+            t = t * t * (3 - 2 * t);                       // smoothstep
+            best = Math.max(best, t);
+        }
+        return best;
+    }
+
+    /** Pad height of the nearest influencing city, or NaN if none. */
+    private double cityPadY(double wx, double wz) {
+        double best = Double.NaN;
+        double bd = Double.MAX_VALUE;
+        for (City c : cities()) {
+            double dx = wx - c.x();
+            double dz = wz - c.z();
+            double d2 = dx * dx + dz * dz;
+            if (d2 < CITY_PAD_FADE * CITY_PAD_FADE && d2 < bd) {
+                bd = d2;
+                best = c.y();
+            }
+        }
+        return best;
     }
 
     /**
@@ -505,6 +622,16 @@ public final class SphereDensity {
                             h = ph;
                         }
                     }
+                }
+            }
+            // Blend toward a flat build pad near an anchored city, so the forced
+            // jigsaw village has level, dry ground instead of spilling buildings
+            // over water or leaving them stilted on a slope.
+            double ci = cityInfluence(wx, wz);
+            if (ci > 0) {
+                double pad = cityPadY(wx, wz);
+                if (!Double.isNaN(pad)) {
+                    h = h * (1.0 - ci) + pad * ci;
                 }
             }
             return h;
