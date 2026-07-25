@@ -92,10 +92,28 @@ public final class EarthClimate {
         return mag * (s >= 0 ? 1.0 : -1.0);
     }
 
+    /** Deep-underground plateau: the value {@link #depth} saturates at. Vanilla's
+     * depth axis runs to ~1.5 at the world bottom, and its BOTTOM biomes (only
+     * deep dark) are registered at exactly {@code point(1.1)} while every SURFACE
+     * biome is registered twice, at {@code point(0.0)} AND {@code point(1.0)}.
+     * The old cap of 0.9 therefore made the whole deep underground nearest to the
+     * surface-biome-at-1.0 entry, so the surface biome just extended downward and
+     * deep dark was unreachable everywhere, at any Y, forever. 1.25 sits just
+     * past 1.1 so the deep zone is closest to deep dark (0.15 away vs 0.25 to the
+     * surface entry) and erosion decides, exactly as in vanilla.
+     *
+     * <p>Deliberately not larger: the ramp is surface-relative, so under an
+     * 8000 m peak an uncapped depth would reach ~3.8 — far outside anything
+     * vanilla registers, where nearest-neighbour results get arbitrary. */
+    public static final double DEEP_PLATEAU = 1.25;
+
     public static double depth(double surfaceY, int y) {
-        // Cave biomes live at depth 0.2-0.9; cap there so the deep underground
-        // sits firmly in that band (surface biome fades out ~14 blocks down).
-        return clamp((surfaceY - y) / 70.0, -0.1, 0.9);
+        // Cave biomes live at depth 0.2-0.9 (vanilla addUndergroundBiome), and
+        // bottom biomes at 1.1; run past that to DEEP_PLATEAU so both bands are
+        // reachable. 70 blocks per unit => caves 14-63 blocks down, deep dark
+        // from ~77 down. Ocean is naturally excluded: the deepest sea floor sits
+        // at y~2, so even at bedrock depth only reaches (2+64)/70 = 0.94.
+        return clamp((surfaceY - y) / 70.0, -0.1, DEEP_PLATEAU);
     }
 
     /**
@@ -113,7 +131,9 @@ public final class EarthClimate {
         double[] ll = earth.toLonLat(p);
         double lon = ll[0];
         double lat = ll[1];
-        double elev = earth.sample("height", lon, lat);
+        // Restore named summits the same way TERRAIN does (SphereDensity), so the
+        // climate the biome layer sees matches the mountain the generator builds.
+        double elev = Math.max(earth.sample("height", lon, lat), peakCone(lon, lat));
         double temp = earth.sample("temp", lon, lat);
         double precip = earth.sample("precip", lon, lat);
         boolean land = elev >= 0;
@@ -205,12 +225,34 @@ public final class EarthClimate {
     public static final double RIVER_THRESHOLD = 0.7;
 
     /** Local relief in metres, ~0.08 deg (~9 km) around the point. */
+    /**
+     * Named-summit cone elevation (m) at a lon/lat — {@link PeakField}'s restored
+     * peak, or 0 away from the 6000 m summits. The GEBCO raster averages summits
+     * down (Everest reads ~5000 m, not 8849), and {@code SphereDensity} restores
+     * them for TERRAIN; the climate path must see them too or a named peak reads
+     * as gentle mid-altitude ground — no jagged-peak biome, and erosion stays
+     * positive so no deep dark can form beneath it. Cheap away from peaks: the
+     * bins for the 9 surrounding whole degrees are almost always empty.
+     */
+    public static double peakCone(double lon, double lat) {
+        return PeakField.get().coneElevation(lon, lat);
+    }
+
+    /**
+     * Local relief in metres: the largest elevation difference to four neighbours
+     * ~0.08 deg (~9 km) away. Summit cones are folded in on both sides, so a
+     * named peak becomes a relief spike — Everest's cone falls ~2800 m over that
+     * 9 km baseline, which drives {@link #erosion} to its -1.0 floor and makes
+     * the summit a centre of jagged, least-eroded terrain (and deep-dark-capable
+     * rock below it), matching the terrain the height field actually builds.
+     */
     public static double ruggedness(EarthData earth, double lon, double lat, double elev) {
         double d = 0.08;
         double max = 0;
         for (double[] o : new double[][] {{d, 0}, {-d, 0}, {0, d}, {0, -d}}) {
             double hh = earth.sample("height", lon + o[0], lat + o[1]);
             if (!Double.isNaN(hh)) {
+                hh = Math.max(hh, peakCone(lon + o[0], lat + o[1]));
                 max = Math.max(max, Math.abs(hh - elev));
             }
         }

@@ -163,9 +163,13 @@ public final class CubeWorldBiomeProvider extends BiomeProvider {
             }
             return col.ocean;
         }
-        if (depth >= 0.9) {
+        // Cache ONLY the saturated plateau, where depth is constant by definition
+        // of the clamp, so caching is lossless. Everything between the clamps is
+        // computed per-Y below, which is what lets cave biomes stack vertically
+        // (surface biome -> lush/dripstone at 0.2-0.9 -> deep dark past 1.1).
+        if (depth >= EarthClimate.DEEP_PLATEAU) {
             if (col.deep == null) {
-                col.deep = vanillaBiome(c, 0.9);
+                col.deep = vanillaBiome(c, EarthClimate.DEEP_PLATEAU);
             }
             return col.deep;
         }
