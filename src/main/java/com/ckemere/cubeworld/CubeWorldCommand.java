@@ -317,6 +317,56 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                         c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8]), NamedTextColor.AQUA));
                 return true;
             }
+            case "shapeprobe" -> {
+                // Calibration/reconnaissance for driving vanilla's FACTOR and
+                // JAGGEDNESS from Earth relief. NoiseRouter exposes continents/
+                // erosion/ridges but NOT offset/factor/jaggedness (those live inside
+                // finalDensity), so before writing a replacement we need to know
+                // (a) what the tree looks like, (b) whether the router's exposed
+                // leaves are identity-shared with the nodes inside the tree, and
+                // (c) what value ranges the splines actually produce.
+                org.bukkit.World w = org.bukkit.Bukkit.getWorlds().get(0);
+                var level = ((org.bukkit.craftbukkit.CraftWorld) w).getHandle();
+                var rs = level.getChunkSource().randomState();
+                var router = rs.router();
+                java.util.Map<String, Integer> hist = new java.util.TreeMap<>();
+                java.util.List<net.minecraft.world.level.levelgen.DensityFunction> all =
+                        new java.util.ArrayList<>();
+                net.minecraft.world.level.levelgen.DensityFunction.Visitor probe = node -> {
+                    hist.merge(node.getClass().getSimpleName(), 1, Integer::sum);
+                    all.add(node);
+                    return node;
+                };
+                router.finalDensity().mapAll(probe);
+                sender.sendMessage(Component.text("finalDensity tree: " + all.size()
+                        + " nodes", NamedTextColor.AQUA));
+                StringBuilder sb = new StringBuilder();
+                hist.forEach((k, v) -> sb.append(k).append('=').append(v).append(' '));
+                sender.sendMessage(Component.text(sb.toString(), NamedTextColor.GRAY));
+                // identity sharing with the router's exposed leaves?
+                record Probe(String name, net.minecraft.world.level.levelgen.DensityFunction f) { }
+                for (Probe p : new Probe[] {
+                        new Probe("continents", router.continents()),
+                        new Probe("erosion", router.erosion()),
+                        new Probe("ridges", router.ridges()),
+                        new Probe("depth", router.depth())}) {
+                    long n = all.stream().filter(x -> x == p.f()).count();
+                    sender.sendMessage(Component.text(String.format(Locale.ROOT,
+                            "  %-11s identity-shared occurrences in finalDensity: %d   "
+                            + "[%.3f .. %.3f]", p.name(), n, p.f().minValue(), p.f().maxValue()),
+                            n > 0 ? NamedTextColor.GREEN : NamedTextColor.RED));
+                }
+                // spline nodes = the offset/factor/jaggedness family
+                int si = 0;
+                for (var n : all) {
+                    if (n instanceof net.minecraft.world.level.levelgen.DensityFunctions.Spline sp) {
+                        sender.sendMessage(Component.text(String.format(Locale.ROOT,
+                                "  spline[%d] range [%.3f .. %.3f]", si++,
+                                sp.minValue(), sp.maxValue()), NamedTextColor.YELLOW));
+                    }
+                }
+                return true;
+            }
             case "findlatlon" -> {
                 if (args.length != 3) {
                     sender.sendMessage(Component.text("Usage: /cubeworld findlatlon <lat> <lon>",

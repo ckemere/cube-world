@@ -34,6 +34,47 @@ public final class SphereDensity {
     /** Blocks of y per unit of vanilla "depth" (yClampedGradient -64..320, 1.5..-1.5). */
     private static final double DEPTH_SLOPE = 128.0;
 
+    // ---- Earth-driven terrain SHAPE (vanilla factor/jaggedness from real relief).
+    /** Metres of local relief (over the ~9 km ruggedness baseline) that count as
+     * fully rugged. Himalayan/Andean flanks exceed this; plains are near 0. */
+    private static final double RELIEF_FULL = 700.0;
+    /** factor for flat ground: tight surface, hugs the Earth elevation (~5 blocks
+     * of noise freedom). Deliberately ABOVE vanilla's spline ceiling of 6.3:
+     * vanilla never needs a tighter surface because its offset is synthesised,
+     * whereas ours is a real elevation raster that flat land should hug. */
+    private static final double FACTOR_FLAT = 9.0;
+    /** factor for rugged ground: shallow gradient, so the 3D noise gets ~25
+     * blocks to carve cliffs and overhangs. */
+    private static final double FACTOR_RUGGED = 1.25;
+    /** Peak ridge-noise amplitude on the most rugged terrain (vanilla's jaggedness
+     * spline tops out at 0.63). */
+    private static final double JAGGED_MAX = 0.60;
+    /** Off switch for A/B: {@code -Dcubeworld.earthShape=false} restores vanilla's
+     * own (geography-blind) factor/jaggedness. */
+    private static final boolean EARTH_SHAPE =
+            !"false".equalsIgnoreCase(System.getProperty("cubeworld.earthShape", "true"));
+
+    /** Vanilla's factor and jaggedness reach the density tree as Spline nodes, and
+     * NoiseRouter exposes neither (they live inside finalDensity). RandomState
+     * rebuilds every node via mapAll, so registry identity is broken — probed
+     * live: 0 identity-shared occurrences. They are, however, cleanly separable by
+     * their value RANGE, which is the same behavioural-fingerprint trick
+     * isDepthGradient uses. Measured on 26.2: jaggedness [0.000, 0.630],
+     * factor [0.625, 6.300], three copies of each in finalDensity. */
+    private static boolean isJaggednessSpline(DensityFunction df) {
+        return df instanceof DensityFunctions.Spline
+                && near(df.minValue(), 0.0, 1.0e-3) && near(df.maxValue(), 0.63, 1.0e-2);
+    }
+
+    private static boolean isFactorSpline(DensityFunction df) {
+        return df instanceof DensityFunctions.Spline
+                && near(df.minValue(), 0.625, 1.0e-2) && near(df.maxValue(), 6.3, 1.0e-2);
+    }
+
+    private static boolean near(double a, double b, double eps) {
+        return Math.abs(a - b) <= eps;
+    }
+
     private final MapSampler sampler;
     private final double radius;
     private final boolean earthHeight;
@@ -271,6 +312,18 @@ public final class SphereDensity {
             if (earthHeight && isOffsetToDepth(node)) {
                 return new EarthDepth();
             }
+            // Terrain CHARACTER from real relief. Without this the surface sits at
+            // the right altitude but its steepness and spikiness come from vanilla
+            // Perlin that is uncorrelated with Earth, so a real 8000 m peak can get
+            // flat-plains treatment and a real plain can get spikes.
+            if (earthHeight && EARTH_SHAPE && earth != null) {
+                if (isFactorSpline(node)) {
+                    return new EarthFactor();
+                }
+                if (isJaggednessSpline(node)) {
+                    return new EarthJagged();
+                }
+            }
             return node;
         }
     }
@@ -320,6 +373,101 @@ public final class SphereDensity {
      * many Y per column, so cache it per (x, z) per thread — a big saving since
      * each miss does a cube-point resolve, an elevation lookup and a peak scan.
      */
+    /**
+     * Local relief in metres at a column, cached per thread. This is the physical
+     * quantity that should drive terrain CHARACTER: vanilla derives its
+     * {@code factor} and {@code jaggedness} splines from its own
+     * continents/erosion/ridges noise, which has nothing to do with real
+     * geography, so before this hook an 8849 m Himalayan peak got whatever
+     * steepness the Perlin happened to roll there.
+     */
+    private final ThreadLocal<double[]> reliefCache =
+            ThreadLocal.withInitial(() -> new double[] {Double.NaN, Double.NaN, 0.0});
+
+    private double reliefAt(int bx, int bz) {
+        double[] c = reliefCache.get();
+        if (c[0] == bx && c[1] == bz) {
+            return c[2];
+        }
+        double r = 0.0;
+        Vec3 p = sampler.cubePointAt(bx + 0.5, bz + 0.5);
+        if (p != null && earth != null) {
+            long t = System.nanoTime();
+            double[] ll = earth.toLonLat(p);
+            double elev = Math.max(earth.sample("height", ll[0], ll[1]),
+                    EarthClimate.peakCone(ll[0], ll[1]));
+            if (!Double.isNaN(elev)) {
+                r = EarthClimate.ruggedness(earth, ll[0], ll[1], elev);
+            }
+            GenProfiler.add("earthShape.relief", t);
+        }
+        c[0] = bx;
+        c[1] = bz;
+        c[2] = r;
+        return r;
+    }
+
+    /** 0 (flat) .. 1 (very rugged), from metres of local relief over ~9 km. */
+    private double reliefNorm(int bx, int bz) {
+        return Math.clamp(reliefAt(bx, bz) / RELIEF_FULL, 0.0, 1.0);
+    }
+
+    /**
+     * Replaces vanilla's {@code factor} spline. factor multiplies depth in
+     * {@code 4 * (depth * factor).quarterNegative()}, so it sets how sharply
+     * density crosses zero — i.e. how much vertical room the 3D noise gets to
+     * carve cliffs and overhangs. dy ~ 32/factor blocks, so a LOW factor gives
+     * dramatic mountain terrain and a HIGH factor a tight surface that hugs the
+     * Earth elevation. Range matches the vanilla spline it replaces.
+     */
+    private final class EarthFactor implements DensityFunction {
+        @Override
+        public double compute(FunctionContext c) {
+            double n = reliefNorm(c.blockX(), c.blockZ());
+            return FACTOR_FLAT + (FACTOR_RUGGED - FACTOR_FLAT) * n;
+        }
+
+        @Override
+        public void fillArray(double[] out, ContextProvider p) {
+            for (int i = 0; i < out.length; i++) {
+                out[i] = compute(p.forIndex(i));
+            }
+        }
+
+        @Override public DensityFunction mapChildren(Visitor v) { return this; }
+        @Override public double minValue() { return Math.min(FACTOR_RUGGED, FACTOR_FLAT); }
+        @Override public double maxValue() { return Math.max(FACTOR_RUGGED, FACTOR_FLAT); }
+        @Override
+        public net.minecraft.util.KeyDispatchDataCodec<? extends DensityFunction> codec() {
+            return DensityFunctions.constant(0).codec();      // never serialised
+        }
+    }
+
+    /** Replaces vanilla's {@code jaggedness} spline: ridge-noise amplitude, so
+     * spikes appear on real mountain flanks and nowhere else. */
+    private final class EarthJagged implements DensityFunction {
+        @Override
+        public double compute(FunctionContext c) {
+            double n = reliefNorm(c.blockX(), c.blockZ());
+            return JAGGED_MAX * n * n;                        // squared: flat land stays flat
+        }
+
+        @Override
+        public void fillArray(double[] out, ContextProvider p) {
+            for (int i = 0; i < out.length; i++) {
+                out[i] = compute(p.forIndex(i));
+            }
+        }
+
+        @Override public DensityFunction mapChildren(Visitor v) { return this; }
+        @Override public double minValue() { return 0.0; }
+        @Override public double maxValue() { return JAGGED_MAX; }
+        @Override
+        public net.minecraft.util.KeyDispatchDataCodec<? extends DensityFunction> codec() {
+            return DensityFunctions.constant(0).codec();
+        }
+    }
+
     private final class EarthDepth implements DensityFunction {
         private final ThreadLocal<double[]> cache =
                 ThreadLocal.withInitial(() -> new double[] {Double.NaN, Double.NaN, 0.0});
