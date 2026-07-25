@@ -46,6 +46,15 @@ public final class VillageAnchorHook {
     }
 
     public static boolean install(World world, Plugin plugin, Logger log) {
+        // Escape hatch for inspecting the RAW terrain a city would be built on:
+        // -Dcubeworld.anchorCities=false generates the world with no anchored
+        // villages, so the ground at each historical site can be judged on its own
+        // before deciding whether it is buildable.
+        if ("false".equalsIgnoreCase(System.getProperty("cubeworld.anchorCities", "true"))) {
+            log.info("Village anchor: DISABLED via -Dcubeworld.anchorCities=false "
+                    + "(raw terrain only, no city villages).");
+            return false;
+        }
         try {
             ServerLevel level = ((CraftWorld) world).getHandle();
             ChunkGeneratorStructureState state = level.getChunkSource().getGeneratorState();
