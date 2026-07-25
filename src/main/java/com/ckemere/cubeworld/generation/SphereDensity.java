@@ -459,10 +459,23 @@ public final class SphereDensity {
      * natural terrain by {@link #CITY_PAD_FADE}, and relief-driven jaggedness is
      * suppressed over the same footprint.
      */
-    private static final double CITY_PAD_FULL = 80.0;
-    private static final double CITY_PAD_FADE = 180.0;
+    // Sized to the MEASURED village footprint, not guessed: Antioch's jigsaw
+    // reaches 117 blocks from the anchor (p50 43, p90 68). With FULL at 80 the
+    // outer third of the village fell off the pad onto near-sea-level ground and
+    // 14.3% of its columns ended up standing over water.
+    private static final double CITY_PAD_FULL = 125.0;
+    private static final double CITY_PAD_FADE = 260.0;
     /** Blocks above sea level a pad is lifted to, so no building stands in water. */
-    private static final int CITY_PAD_CLEARANCE = 4;
+    // The pad TARGET must clear sea level by more than the noise can swing, or
+    // individual columns dip to the waterline: with FACTOR_CITY the noise band is
+    // ~1.6 blocks, so sea+8 keeps every column comfortably dry. At sea+5 with the
+    // old +-3.6 swing, columns bottomed out at y=63 and vanilla refused to site the
+    // village at all.
+    private static final int CITY_PAD_CLEARANCE = 8;
+
+    /** Density factor inside a city pad. Far above FACTOR_FLAT so the build site is
+     * genuinely level (~1.6 blocks of noise instead of ~3.6). */
+    private static final double FACTOR_CITY = 20.0;
 
     private record City(double x, double z, double y) { }
 
@@ -556,7 +569,9 @@ public final class SphereDensity {
         @Override
         public double compute(FunctionContext c) {
             double n = reliefNorm(c.blockX(), c.blockZ());
-            return FACTOR_FLAT + (FACTOR_RUGGED - FACTOR_FLAT) * n;
+            double f = FACTOR_FLAT + (FACTOR_RUGGED - FACTOR_FLAT) * n;
+            double ci = cityInfluenceCached(c.blockX(), c.blockZ());
+            return f * (1.0 - ci) + FACTOR_CITY * ci;
         }
 
         @Override
@@ -568,7 +583,7 @@ public final class SphereDensity {
 
         @Override public DensityFunction mapChildren(Visitor v) { return this; }
         @Override public double minValue() { return Math.min(FACTOR_RUGGED, FACTOR_FLAT); }
-        @Override public double maxValue() { return Math.max(FACTOR_RUGGED, FACTOR_FLAT); }
+        @Override public double maxValue() { return FACTOR_CITY; }
         @Override
         public net.minecraft.util.KeyDispatchDataCodec<? extends DensityFunction> codec() {
             return DensityFunctions.constant(0).codec();      // never serialised
