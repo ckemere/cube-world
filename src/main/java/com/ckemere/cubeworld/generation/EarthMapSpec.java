@@ -45,11 +45,11 @@ public final class EarthMapSpec implements MapSpec {
     private static final double LAND_CAP = 253.0;
 
     /** Non-linear land curve below {@link #HIGH_BREAK}: metres -> blocks above sea.
-     * Slope rises monotonically (0.014 -> 0.034 blocks/m) so shorelines ramp gently
+     * Slope rises monotonically (0.005 -> 0.046 blocks/m) so shorelines ramp gently
      * while inland ranges keep their height. Ends exactly at
      * 4000 m -> 114 blocks (= 4000 * LAND_EXAGGERATION) for continuity. */
-    private static final double[] LOW_M = {0, 50, 150, 300, 1000, 2000, 4000};
-    private static final double[] LOW_B = {0, 0.7, 2.2, 4.8, 19.0, 46.0, 114.0};
+    private static final double[] LOW_M = {0, 100, 300, 800, 1500, 2500, 4000};
+    private static final double[] LOW_B = {0, 0.5, 1.8, 6.0, 15.0, 45.0, 114.0};
 
     private static double interp(double x, double[] xs, double[] ys) {
         if (x <= xs[0]) {
