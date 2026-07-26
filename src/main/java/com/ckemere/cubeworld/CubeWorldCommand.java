@@ -317,6 +317,23 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                         c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8]), NamedTextColor.AQUA));
                 return true;
             }
+            case "terrainprobe" -> {
+                if (args.length != 3) {
+                    sender.sendMessage(Component.text("Usage: /cubeworld terrainprobe <x> <z>",
+                            NamedTextColor.RED));
+                    return true;
+                }
+                var sd = com.ckemere.cubeworld.generation.SphereDensity.LAST;
+                if (sd == null) {
+                    sender.sendMessage(Component.text("no SphereDensity (hook not installed)",
+                            NamedTextColor.RED));
+                    return true;
+                }
+                sender.sendMessage(Component.text(sd.probeTerms(
+                        Integer.parseInt(args[1]) + 0.5, Integer.parseInt(args[2]) + 0.5),
+                        NamedTextColor.AQUA));
+                return true;
+            }
             case "shapeprobe" -> {
                 // Calibration/reconnaissance for driving vanilla's FACTOR and
                 // JAGGEDNESS from Earth relief. NoiseRouter exposes continents/

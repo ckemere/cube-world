@@ -1,7 +1,6 @@
 package com.ckemere.cubeworld.city;
 
 import com.ckemere.cubeworld.CubeWorldPlugin;
-import com.ckemere.cubeworld.generation.EarthMapSpec;
 import java.util.ArrayList;
 import java.util.List;
 import org.bukkit.Chunk;
@@ -28,7 +27,7 @@ import org.bukkit.event.world.ChunkLoadEvent;
  * AFTER the structure exists — the same "build on chunk load" pattern the teleport
  * stations use.
  *
- * <p>The footprint is DILATED before filling. Filling only the columns that carry
+ * <p>The footprint is dilated by one block before filling. Filling only the columns that carry
  * a village block would leave the gaps between buildings — the paths and yards
  * villagers actually walk on — as open water, which is precisely where they would
  * drown.
@@ -40,10 +39,7 @@ import org.bukkit.event.world.ChunkLoadEvent;
 public final class VillageGroundFixer implements Listener {
 
     /** Blocks of dilation around village material, so paths and yards are covered. */
-    private static final int DILATE = 4;
-    /** A water body at least this many of its 5x5 neighbours is "large" (sea, river,
-     * lake) rather than a well or a decorative pool. */
-    private static final int LARGE_BODY = 16;
+    private static final int DILATE = 1;
     /** How far below the walking surface to keep filling before giving up. */
     private static final int MAX_FILL_DEPTH = 24;
 
@@ -158,13 +154,15 @@ public final class VillageGroundFixer implements Listener {
         boolean any = false;
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
+                // LOWEST village block in the column = the foundation. Using the
+                // highest gave the ROOF, and filling downward from a roof packs the
+                // room below it with dirt.
                 vy[lx][lz] = Integer.MIN_VALUE;
                 int y = w.getHighestBlockYAt(ox + lx, oz + lz);
-                for (int probe = y; probe > y - 8 && probe > w.getMinHeight(); probe--) {
+                for (int probe = y; probe > y - 20 && probe > w.getMinHeight(); probe--) {
                     if (isVillageBlock(w.getBlockAt(ox + lx, probe, oz + lz).getType())) {
-                        vy[lx][lz] = probe;
+                        vy[lx][lz] = probe;      // keep descending: ends at the lowest
                         any = true;
-                        break;
                     }
                 }
             }
@@ -206,7 +204,6 @@ public final class VillageGroundFixer implements Listener {
         //    (b) a void DIRECTLY under a village block is filled, so nothing is
         //        left stilted. Air above the local surface is never touched.
         int filledHere = 0;
-        int seaTop = EarthMapSpec.SEA_LEVEL;
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
                 if (!near[lx][lz]) {
@@ -215,34 +212,26 @@ public final class VillageGroundFixer implements Listener {
                 int x = ox + lx;
                 int z = oz + lz;
 
-                // (a) water surface within the footprint
-                int wtop = Integer.MIN_VALUE;
-                for (int y = seaTop + 6; y > seaTop - MAX_FILL_DEPTH; y--) {
-                    if (w.getBlockAt(x, y, z).getType() == Material.WATER) {
-                        wtop = y;
-                        break;
-                    }
-                }
-                if (wtop != Integer.MIN_VALUE && largeBody(w, x, wtop, z)) {
-                    Material fill = groundFor(w.getBiome(x, wtop, z));
-                    for (int y = wtop, d = 0; y > w.getMinHeight() && d < MAX_FILL_DEPTH;
-                            y--, d++) {
-                        Block b = w.getBlockAt(x, y, z);
-                        Material m = b.getType();
-                        if (m == Material.WATER || m.isAir()) {
-                            b.setType(fill, false);
-                            filledHere++;
-                        } else {
-                            break;
+                // plinth: the lowest village block in this column or any of its 8
+                // neighbours (a rectangle one block larger than the footprint), and
+                // fill from ONE LEVEL BELOW that downward. Because the reference is
+                // the FOUNDATION, never the roof, this cannot reach a room interior;
+                // and because it only ever fills below, villagers step up onto the
+                // building rather than being walled in.
+                int base = Integer.MAX_VALUE;
+                for (int dx = -1; dx <= 1; dx++) {
+                    for (int dz = -1; dz <= 1; dz++) {
+                        int nx = lx + dx;
+                        int nz = lz + dz;
+                        if (nx >= 0 && nx < 16 && nz >= 0 && nz < 16
+                                && vy[nx][nz] != Integer.MIN_VALUE && vy[nx][nz] < base) {
+                            base = vy[nx][nz];
                         }
                     }
                 }
-
-                // (b) void directly beneath a village block in THIS column only
-                int v = vy[lx][lz];
-                if (v != Integer.MIN_VALUE) {
-                    Material fill = groundFor(w.getBiome(x, v, z));
-                    for (int y = v - 1, d = 0; y > w.getMinHeight() && d < 12; y--, d++) {
+                if (base != Integer.MAX_VALUE) {
+                    Material fill = groundFor(w.getBiome(x, base, z));
+                    for (int y = base - 1, d = 0; y > w.getMinHeight() && d < 12; y--, d++) {
                         Block b = w.getBlockAt(x, y, z);
                         Material m = b.getType();
                         if (m.isAir() || m == Material.WATER) {
@@ -258,18 +247,6 @@ public final class VillageGroundFixer implements Listener {
         return filledHere;
     }
 
-    /** True if (x,y,z) belongs to a large water body rather than a well or pond. */
-    private static boolean largeBody(World w, int x, int y, int z) {
-        int n = 0;
-        for (int dx = -2; dx <= 2; dx++) {
-            for (int dz = -2; dz <= 2; dz++) {
-                if (w.getBlockAt(x + dx, y, z + dz).getType() == Material.WATER) {
-                    n++;
-                }
-            }
-        }
-        return n >= LARGE_BODY;
-    }
 
     private static Material groundFor(Biome b) {
         String k = b.getKey().getKey();
