@@ -107,6 +107,10 @@ def main():
     # faces read these, and they must be regenerated for a fresh world (else the
     # web map's structure overlay comes up empty). Cheap; safe to always run.
     print("refreshing map biome rasters (overworld/nether) + biome params ...")
+    # Let the village ground fixer drain its queue before the chunks unload;
+    # otherwise its repairs are skipped and villages keep standing over water.
+    print("  settling (village ground repair) ...")
+    time.sleep(45)
     rcon(["cubeworld biomeraster overworld", "cubeworld biomeraster nether",
           "cubeworld dumpbiomeparams", "save-all", "forceload remove all"], timeout=90)
     n = built_count()

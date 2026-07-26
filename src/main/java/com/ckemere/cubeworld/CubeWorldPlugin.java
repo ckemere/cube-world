@@ -102,6 +102,11 @@ public final class CubeWorldPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(
                 new com.ckemere.cubeworld.teleport.TeleporterListener(this, teleport), this);
         getServer().getScheduler().runTaskTimer(this, teleport::ambientTick, 40L, 40L);
+        // Repair the ground under the forced city villages once the structure
+        // exists: fill water and voids across the walkable footprint so nothing
+        // floats and no villager can walk into deep water.
+        getServer().getPluginManager().registerEvents(
+                new com.ckemere.cubeworld.city.VillageGroundFixer(this, 200.0), this);
         // Rare "Master Traders" visit the special cities with exceptional goods.
         masterTraders = new com.ckemere.cubeworld.trades.MasterTraderService(this, teleport);
         masterTraders.start();
@@ -301,6 +306,38 @@ public final class CubeWorldPlugin extends JavaPlugin {
 
     public CubeGeometry geometry() {
         return geometry;
+    }
+
+    private volatile java.util.List<double[]> cityAnchorCache;
+
+    /** (x, z) of every anchored city, from the cities_anchor.csv resource. */
+    public java.util.List<double[]> cityAnchors() {
+        java.util.List<double[]> c = cityAnchorCache;
+        if (c != null) {
+            return c;
+        }
+        java.util.List<double[]> out = new java.util.ArrayList<>();
+        try (java.io.InputStream in = getResource("cities_anchor.csv")) {
+            if (in != null) {
+                java.io.BufferedReader r = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(in, java.nio.charset.StandardCharsets.UTF_8));
+                String line;
+                while ((line = r.readLine()) != null) {
+                    if (line.isBlank() || line.startsWith("#")) {
+                        continue;
+                    }
+                    String[] p = line.split(",");
+                    if (p.length >= 2) {
+                        out.add(new double[] {Double.parseDouble(p[0].trim()),
+                                Double.parseDouble(p[1].trim())});
+                    }
+                }
+            }
+        } catch (Exception e) {
+            getLogger().warning("cityAnchors: " + e);
+        }
+        cityAnchorCache = out;
+        return out;
     }
 
     public CubeTopology topology() {
