@@ -37,27 +37,43 @@ Wanted:
   `MerchantRecipe.addIngredient` supports two ingredients, so this is a data change
   in `MasterTrades.pool()`, not new machinery.
 
-## 3. Village ground fill — algorithm is still wrong
+## 3. Village ground fill — DONE (structure-aware)
 
-Symptom: dirt still appears under roofs at Antioch.
+`city/VillageGroundFixer.java` now works from vanilla's own jigsaw data:
 
-Cause: the plinth level is a **per-column** minimum (with a 1-block neighbour ring),
-not a per-STRUCTURE minimum. A column containing only an eave or roof overhang has
-that roof as its own lowest village block, so the fill starts just under the roof
-and packs the air beneath it.
+- accepts **every** structure start in the chunk, then filters by template pool
+  (`/houses/`, `/streets/`, `/town_centers/`). Filtering on the *structure name*
+  was the bug that kept it silent for a whole round of testing — the anchored
+  cities are `cubeworld:plains_large`, `desert_huge`, ... which contain no
+  "village", even though their `start_pool` is `minecraft:village/<style>/*`.
+- floor = minimum solid Y over the **whole piece**, so it can never sit under a
+  roof; fills only air strictly below it.
+- footprint grown by 1 block in X and Z; fill copies the material of the solid
+  block the column lands on.
 
-Agreed direction: take the minimum Y over the **whole structure**, so the fill
-reference is the true foundation and can never sit under a roof.
+Measured at Antioch: ~8k blocks filled, houses solidly founded (verified in
+cross-section). Residual "gaps" in the metrics are one-block **roof eaves**
+overhanging sloped ground — correct to leave alone; filling them is the
+dirt-to-the-ceilings regression.
 
-Vanilla already knows the buildings, which avoids all material guesswork:
-- `StructureManager.getStructureAt(BlockPos, Structure)` / `startsForStructure(...)`
-- `StructureStart.getBoundingBox()` and its `PiecesContainer`
-- `StructurePiece.getBoundingBox()` — one box per jigsaw element, i.e. per building
+Note `tools/compact/city_terrain.py`'s "stilted" number is misleading: it counts
+air under the column's *topmost* block, which for a house is the roof, so it
+reports room interiors as stilts. Measure from the *lowest* village block instead.
 
-Still to decide (see discussion): whole-village minimum vs per-piece minimum, and
-how to handle buildings that span chunks.
+## 4. Streets that run below sea level  (open — needs a decision)
 
-## 4. Open: stilted village columns
+At Antioch 119 of 2209 village columns are `dirt_path` over water, and 68 have
+water *directly above* the path: the jigsaw walks a street down the shore and the
+last few blocks end up submerged at y61 with the sea surface at y62. The ground
+fill is doing its job (solid ground under the path) — the path top is simply below
+the waterline.
 
-13.8% of Antioch's village columns still have >=3 blocks of air beneath. Should be
-resolved by fixing item 3.
+Options discussed:
+- **Causeway** (preferred): inside house/street/town_center footprints, where water
+  sits directly above the walkable village block, replace that water with the block
+  below it, up to sea level. Places solid, never removes water, so no
+  flow-physics problem. Turns the submerged street end into a small pier.
+- Drain the footprint: removing water with physics off just floods back on the next
+  block update.
+- Regenerate the ground so cities never reach below sea level: this is the city pad,
+  which was deliberately removed.

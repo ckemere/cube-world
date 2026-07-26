@@ -1,87 +1,102 @@
 package com.ckemere.cubeworld.city;
 
 import com.ckemere.cubeworld.CubeWorldPlugin;
-import java.util.ArrayList;
-import java.util.List;
+import java.lang.reflect.Field;
+import java.util.HashSet;
+import java.util.Set;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.levelgen.structure.BoundingBox;
+import net.minecraft.world.level.levelgen.structure.PoolElementStructurePiece;
+import net.minecraft.world.level.levelgen.structure.StructurePiece;
+import net.minecraft.world.level.levelgen.structure.StructureStart;
 import org.bukkit.Chunk;
 import org.bukkit.Material;
 import org.bukkit.World;
-import org.bukkit.block.Block;
-import org.bukkit.block.Biome;
+import org.bukkit.craftbukkit.CraftWorld;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.world.ChunkLoadEvent;
 
 /**
- * Gives the anchored city villages dry, continuous ground to stand on.
+ * Fills the air under village floors so nothing is left standing on stilts.
  *
- * <p>{@code VillageAnchorHook} forces a village at each historical coordinate,
- * bypassing the site checks vanilla uses to avoid bad ground, and several of the
- * 30 are genuine ports and river cities. Measured on a clean regen, ~13% of
- * Antioch's village columns stood over water and ~15% were stilted.
+ * <p>Works from vanilla's own structure data rather than guessing at block
+ * materials. A village is a jigsaw of named template pieces, and the pools
+ * separate exactly along the line that matters here:
  *
- * <p>Reshaping the terrain cannot fix that: a coastal city's village legitimately
- * sprawls over its bay, and lifting the seabed there would destroy the harbour and
- * the gentle coastline. So the terrain is left alone and the ground is repaired
- * AFTER the structure exists — the same "build on chunk load" pattern the teleport
- * stations use.
+ * <pre>
+ *   village/&lt;style&gt;/houses        houses AND workshops   -&gt; fill
+ *   village/&lt;style&gt;/streets       paths villagers walk   -&gt; fill
+ *   village/&lt;style&gt;/town_centers  the well / plaza       -&gt; fill
+ *   village/&lt;style&gt;/trees         trees                  -&gt; leave alone
+ *   village/&lt;style&gt;/decor, terminators, villagers, zombie -&gt; leave alone
+ * </pre>
  *
- * <p>The footprint is dilated by one block before filling. Filling only the columns that carry
- * a village block would leave the gaps between buildings — the paths and yards
- * villagers actually walk on — as open water, which is precisely where they would
- * drown.
+ * <p>For each qualifying piece the floor is the minimum Y of that piece's solid
+ * blocks taken over the WHOLE piece. That single number is the crux: earlier
+ * versions took a per-column minimum, and a column holding only a roof overhang
+ * has its roof as that minimum, so the fill started just under the eave and packed
+ * the room below it with dirt. A whole-piece minimum cannot reach a roof, because
+ * the roof is by definition above the floor.
  *
- * <p>Only large bodies of water are filled. A village well or a decorative pond is
- * a couple of blocks across; the sea and a river are not. The 5x5 neighbour test
- * keeps wells intact while still closing a bay or a channel.
+ * <p>Only air strictly below the floor is filled, out to the piece footprint
+ * expanded by one block in X and Z, and the fill copies whatever solid block the
+ * column lands on so the plinth matches the ground it grows from.
  */
 public final class VillageGroundFixer implements Listener {
 
-    /** Blocks of dilation around village material, so paths and yards are covered. */
-    private static final int DILATE = 1;
-    /** How far below the walking surface to keep filling before giving up. */
-    private static final int MAX_FILL_DEPTH = 24;
+    /** Template pool paths whose pieces get a floor. */
+    private static final String[] FILL_POOLS = {"/houses/", "/streets/", "/town_centers/"};
 
-    /** Blocks a jigsaw village is built from. Deliberately excludes materials that
-     * also occur naturally in bulk (plain sandstone, terracotta, smooth stone),
-     * because a false positive here would fill natural ground. */
-    private static boolean isVillageBlock(Material m) {
-        return switch (m) {
-            case COBBLESTONE, MOSSY_COBBLESTONE, COBBLESTONE_STAIRS, COBBLESTONE_SLAB,
-                 OAK_PLANKS, SPRUCE_PLANKS, BIRCH_PLANKS, ACACIA_PLANKS, JUNGLE_PLANKS,
-                 OAK_STAIRS, SPRUCE_STAIRS, BIRCH_STAIRS, ACACIA_STAIRS,
-                 OAK_LOG, SPRUCE_LOG, BIRCH_LOG, ACACIA_LOG,
-                 STRIPPED_OAK_LOG, STRIPPED_SPRUCE_LOG, STRIPPED_BIRCH_LOG,
-                 OAK_FENCE, SPRUCE_FENCE, BIRCH_FENCE, ACACIA_FENCE,
-                 DIRT_PATH, HAY_BLOCK, BOOKSHELF, CRAFTING_TABLE, COMPOSTER,
-                 BELL, LANTERN, GLASS_PANE, FARMLAND -> true;
-            default -> false;
-        };
+    /** Footprint is grown by this many blocks in X and Z. */
+    private static final int MARGIN = 1;
+
+    /** Give up after this many blocks of air below a floor. */
+    private static final int MAX_DEPTH = 24;
+
+    /** Pieces repaired per tick. */
+    private static final int PER_TICK = 4;
+
+    private static final Field ELEMENT_FIELD;
+
+    static {
+        Field f = null;
+        try {
+            f = PoolElementStructurePiece.class.getDeclaredField("element");
+            f.setAccessible(true);
+        } catch (Exception ignored) {
+            f = null;               // without it we cannot tell houses from trees
+        }
+        ELEMENT_FIELD = f;
     }
 
-    /** Chunks repaired per tick. City seeding force-loads thousands of chunks at
-     * once, and scheduling every repair with runTask() put them all on ONE tick --
-     * millions of block operations at once. Throttled, but not too hard: at 2/tick
-     * the queue drained slower than seeding force-loaded, so chunks unloaded before
-     * they were repaired and the fill silently did nothing. Measured cost is only
-     * ~500 blocks per chunk, so 10/tick is comfortable. */
-    private static final int PER_TICK = 10;
-
     private final CubeWorldPlugin plugin;
-    private final double radius;
     private final java.util.ArrayDeque<Chunk> queue = new java.util.ArrayDeque<>();
-    private int fixed;
-    private int chunks;
-    private int seen;
-    private int nearHits;
+    /** Pieces already handled, keyed by their bounding-box minimum corner. */
+    private final Set<Long> done = new HashSet<>();
+    private int pieces;
+    private int filled;
 
-    public VillageGroundFixer(CubeWorldPlugin plugin, double radius) {
+    public VillageGroundFixer(CubeWorldPlugin plugin) {
         this.plugin = plugin;
-        this.radius = radius;
         plugin.getServer().getScheduler().runTaskTimer(plugin, this::drain, 20L, 1L);
-        plugin.getLogger().info("VillageGroundFixer: " + plugin.cityAnchors().size()
-                + " anchors, radius " + (int) radius);
+        if (ELEMENT_FIELD == null) {
+            plugin.getLogger().warning(
+                    "VillageGroundFixer: cannot read jigsaw template names; disabled.");
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onChunkLoad(ChunkLoadEvent e) {
+        if (!plugin.isCubeWorld(e.getWorld())
+                || e.getWorld().getEnvironment() != World.Environment.NORMAL) {
+            return;
+        }
+        synchronized (queue) {
+            queue.add(e.getChunk());
+        }
     }
 
     private void drain() {
@@ -95,14 +110,7 @@ public final class VillageGroundFixer implements Listener {
             }
             if (c.isLoaded()) {
                 try {
-                    int n = fix(c);
-                    if (n > 0) {
-                        fixed += n;
-                        if (++chunks % 25 == 0) {
-                            plugin.getLogger().info("VillageGroundFixer: " + chunks
-                                    + " chunks, " + fixed + " blocks filled");
-                        }
-                    }
+                    scanChunk(c);
                 } catch (Exception ex) {
                     plugin.getLogger().warning("VillageGroundFixer: " + ex);
                 }
@@ -110,155 +118,127 @@ public final class VillageGroundFixer implements Listener {
         }
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onChunkLoad(ChunkLoadEvent e) {
-        if (!e.isNewChunk() || !plugin.isCubeWorld(e.getWorld())) {
+    /** Find village pieces overlapping this chunk and floor any not yet done. */
+    private void scanChunk(Chunk c) {
+        if (ELEMENT_FIELD == null) {
             return;
         }
-        Chunk c = e.getChunk();
-        seen++;
-        if (!nearCity(c.getX() << 4, c.getZ() << 4)) {
-            return;
-        }
-        if (++nearHits % 100 == 0) {
-            plugin.getLogger().info("VillageGroundFixer: queued " + nearHits
-                    + " city chunks (of " + seen + " new)");
-        }
-        // Queue rather than schedule: see PER_TICK.
-        synchronized (queue) {
-            queue.add(c);
+        World bw = c.getWorld();
+        ServerLevel level = ((CraftWorld) bw).getHandle();
+        // Accept every structure start in the chunk and let the template-pool filter
+        // decide. Matching on the structure's own name would not work: the historical
+        // cities are anchored as cubeworld:plains_large, desert_huge and so on, which
+        // carry no "village" in their id even though their start_pool -- and therefore
+        // every piece they place -- is minecraft:village/<style>/*.
+        java.util.List<StructureStart> starts = level.structureManager()
+                .startsForStructure(new ChunkPos(c.getX(), c.getZ()), st -> true);
+        for (StructureStart start : starts) {
+            for (StructurePiece piece : start.getPieces()) {
+                if (!wanted(piece)) {
+                    continue;
+                }
+                BoundingBox bb = piece.getBoundingBox();
+                long id = (((long) bb.minX()) << 40) ^ (((long) bb.minY()) << 20) ^ bb.minZ();
+                if (done.contains(id)) {
+                    continue;
+                }
+                if (!boxLoaded(bw, bb)) {
+                    continue;       // retry when the rest of it loads
+                }
+                done.add(id);
+                floorPiece(bw, bb);
+                pieces++;
+                if (pieces % 100 == 0) {
+                    plugin.getLogger().info("VillageGroundFixer: " + pieces
+                            + " pieces, " + filled + " blocks");
+                }
+            }
         }
     }
 
-    private boolean nearCity(int bx, int bz) {
-        for (double[] a : plugin.cityAnchors()) {
-            double dx = bx + 8 - a[0];
-            double dz = bz + 8 - a[1];
-            if (dx * dx + dz * dz <= radius * radius) {
+    /** Houses, workshops, streets and the town centre; never trees or decor. */
+    private static boolean wanted(StructurePiece piece) {
+        if (!(piece instanceof PoolElementStructurePiece pe)) {
+            return false;
+        }
+        String tpl;
+        try {
+            tpl = String.valueOf(ELEMENT_FIELD.get(pe));
+        } catch (Exception e) {
+            return false;
+        }
+        for (String p : FILL_POOLS) {
+            if (tpl.contains(p)) {
                 return true;
             }
         }
         return false;
     }
 
-    /** Fill water and voids under the village footprint so nothing floats and
-     * nothing can walk into deep water. */
-    private int fix(Chunk c) {
-        World w = c.getWorld();
-        int ox = c.getX() << 4;
-        int oz = c.getZ() << 4;
-        int top = w.getMaxHeight() - 1;
-
-        // 1. mark columns carrying village material, with their surface height
-        int[][] vy = new int[16][16];
-        boolean any = false;
-        for (int lx = 0; lx < 16; lx++) {
-            for (int lz = 0; lz < 16; lz++) {
-                // LOWEST village block in the column = the foundation. Using the
-                // highest gave the ROOF, and filling downward from a roof packs the
-                // room below it with dirt.
-                vy[lx][lz] = Integer.MIN_VALUE;
-                int y = w.getHighestBlockYAt(ox + lx, oz + lz);
-                for (int probe = y; probe > y - 20 && probe > w.getMinHeight(); probe--) {
-                    if (isVillageBlock(w.getBlockAt(ox + lx, probe, oz + lz).getType())) {
-                        vy[lx][lz] = probe;      // keep descending: ends at the lowest
-                        any = true;
-                    }
+    private static boolean boxLoaded(World w, BoundingBox bb) {
+        for (int cx = (bb.minX() - MARGIN) >> 4; cx <= (bb.maxX() + MARGIN) >> 4; cx++) {
+            for (int cz = (bb.minZ() - MARGIN) >> 4; cz <= (bb.maxZ() + MARGIN) >> 4; cz++) {
+                if (!w.isChunkLoaded(cx, cz)) {
+                    return false;
                 }
             }
         }
-        if (!any) {
-            return 0;
-        }
-
-        // 2. dilate the FOOTPRINT ONLY (a boolean mask). The previous version
-        // dilated the village-block HEIGHT and took the max, which for a column
-        // beside a house is its ROOF -- then filled air downward from there and
-        // buried the buildings in dirt. Height must never propagate sideways.
-        boolean[][] near = new boolean[16][16];
-        boolean[][] tmp = new boolean[16][16];
-        for (int lz = 0; lz < 16; lz++) {
-            for (int lx = 0; lx < 16; lx++) {
-                boolean hit = false;
-                for (int dx = -DILATE; dx <= DILATE && !hit; dx++) {
-                    int nx = lx + dx;
-                    hit = nx >= 0 && nx < 16 && vy[nx][lz] != Integer.MIN_VALUE;
-                }
-                tmp[lx][lz] = hit;
-            }
-        }
-        for (int lx = 0; lx < 16; lx++) {
-            for (int lz = 0; lz < 16; lz++) {
-                boolean hit = false;
-                for (int dz = -DILATE; dz <= DILATE && !hit; dz++) {
-                    int nz = lz + dz;
-                    hit = nz >= 0 && nz < 16 && tmp[lx][nz];
-                }
-                near[lx][lz] = hit;
-            }
-        }
-
-        // 3. Two narrow repairs, neither of which may touch open air:
-        //    (a) a large water body inside the footprint is filled from its own
-        //        surface downward, turning the bay into ground at water level;
-        //    (b) a void DIRECTLY under a village block is filled, so nothing is
-        //        left stilted. Air above the local surface is never touched.
-        int filledHere = 0;
-        for (int lx = 0; lx < 16; lx++) {
-            for (int lz = 0; lz < 16; lz++) {
-                if (!near[lx][lz]) {
-                    continue;
-                }
-                int x = ox + lx;
-                int z = oz + lz;
-
-                // plinth: the lowest village block in this column or any of its 8
-                // neighbours (a rectangle one block larger than the footprint), and
-                // fill from ONE LEVEL BELOW that downward. Because the reference is
-                // the FOUNDATION, never the roof, this cannot reach a room interior;
-                // and because it only ever fills below, villagers step up onto the
-                // building rather than being walled in.
-                int base = Integer.MAX_VALUE;
-                for (int dx = -1; dx <= 1; dx++) {
-                    for (int dz = -1; dz <= 1; dz++) {
-                        int nx = lx + dx;
-                        int nz = lz + dz;
-                        if (nx >= 0 && nx < 16 && nz >= 0 && nz < 16
-                                && vy[nx][nz] != Integer.MIN_VALUE && vy[nx][nz] < base) {
-                            base = vy[nx][nz];
-                        }
-                    }
-                }
-                if (base != Integer.MAX_VALUE) {
-                    Material fill = groundFor(w.getBiome(x, base, z));
-                    for (int y = base - 1, d = 0; y > w.getMinHeight() && d < 12; y--, d++) {
-                        Block b = w.getBlockAt(x, y, z);
-                        Material m = b.getType();
-                        if (m.isAir() || m == Material.WATER) {
-                            b.setType(fill, false);
-                            filledHere++;
-                        } else {
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        return filledHere;
+        return true;
     }
 
+    /**
+     * Floor one building: minimum Y of its solid blocks over the WHOLE piece, then
+     * fill air below that across the footprint plus a one-block margin.
+     */
+    private void floorPiece(World w, BoundingBox bb) {
+        int floor = Integer.MAX_VALUE;
+        outer:
+        for (int y = bb.minY(); y <= bb.maxY(); y++) {
+            for (int x = bb.minX(); x <= bb.maxX(); x++) {
+                for (int z = bb.minZ(); z <= bb.maxZ(); z++) {
+                    if (w.getBlockAt(x, y, z).getType().isSolid()) {
+                        floor = y;
+                        break outer;
+                    }
+                }
+            }
+        }
+        if (floor == Integer.MAX_VALUE) {
+            return;
+        }
+        for (int x = bb.minX() - MARGIN; x <= bb.maxX() + MARGIN; x++) {
+            for (int z = bb.minZ() - MARGIN; z <= bb.maxZ() + MARGIN; z++) {
+                fillColumn(w, x, z, floor);
+            }
+        }
+    }
 
-    private static Material groundFor(Biome b) {
-        String k = b.getKey().getKey();
-        if (k.contains("desert") || k.contains("badlands")) {
-            return Material.SANDSTONE;
+    /** Fill the air gap between {@code floor} and the first solid block below it,
+     * copying that block's material so the plinth matches the surrounding ground. */
+    private void fillColumn(World w, int x, int z, int floor) {
+        int y = floor - 1;
+        int gap = 0;
+        while (y > w.getMinHeight() && gap < MAX_DEPTH) {
+            Material m = w.getBlockAt(x, y, z).getType();
+            if (m.isSolid()) {
+                break;
+            }
+            if (m != Material.AIR && m != Material.CAVE_AIR && m != Material.WATER) {
+                break;              // vegetation or another fluid: leave it
+            }
+            gap++;
+            y--;
         }
-        if (k.contains("beach") || k.contains("mangrove")) {
-            return Material.SAND;
+        if (gap == 0) {
+            return;                 // already supported
         }
-        if (k.contains("snowy") || k.contains("frozen") || k.contains("grove")) {
-            return Material.STONE;
+        Material fill = w.getBlockAt(x, Math.max(y, w.getMinHeight()), z).getType();
+        if (!fill.isSolid()) {
+            fill = Material.DIRT;
         }
-        return Material.DIRT;
+        for (int fy = y + 1; fy <= floor - 1; fy++) {
+            w.getBlockAt(x, fy, z).setType(fill, false);
+            filled++;
+        }
     }
 }

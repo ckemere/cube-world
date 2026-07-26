@@ -106,7 +106,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
         // exists: fill water and voids across the walkable footprint so nothing
         // floats and no villager can walk into deep water.
         getServer().getPluginManager().registerEvents(
-                new com.ckemere.cubeworld.city.VillageGroundFixer(this, 200.0), this);
+                new com.ckemere.cubeworld.city.VillageGroundFixer(this), this);
         // Rare "Master Traders" visit the special cities with exceptional goods.
         masterTraders = new com.ckemere.cubeworld.trades.MasterTraderService(this, teleport);
         masterTraders.start();
