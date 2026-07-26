@@ -1,6 +1,7 @@
 package com.ckemere.cubeworld.city;
 
 import com.ckemere.cubeworld.CubeWorldPlugin;
+import com.ckemere.cubeworld.generation.EarthMapSpec;
 import java.util.ArrayList;
 import java.util.List;
 import org.bukkit.Chunk;
@@ -172,73 +173,84 @@ public final class VillageGroundFixer implements Listener {
             return 0;
         }
 
-        // 2. dilate: the walkable footprint is wider than the built blocks.
-        // Separable (two 1-D max passes) - a 9x9 box per column was 20k iterations
-        // per chunk and helped stall the server watchdog.
-        int[][] tmp = new int[16][16];
-        int[][] target = new int[16][16];
+        // 2. dilate the FOOTPRINT ONLY (a boolean mask). The previous version
+        // dilated the village-block HEIGHT and took the max, which for a column
+        // beside a house is its ROOF -- then filled air downward from there and
+        // buried the buildings in dirt. Height must never propagate sideways.
+        boolean[][] near = new boolean[16][16];
+        boolean[][] tmp = new boolean[16][16];
         for (int lz = 0; lz < 16; lz++) {
             for (int lx = 0; lx < 16; lx++) {
-                int best = Integer.MIN_VALUE;
-                for (int dx = -DILATE; dx <= DILATE; dx++) {
+                boolean hit = false;
+                for (int dx = -DILATE; dx <= DILATE && !hit; dx++) {
                     int nx = lx + dx;
-                    if (nx >= 0 && nx < 16 && vy[nx][lz] > best) {
-                        best = vy[nx][lz];
-                    }
+                    hit = nx >= 0 && nx < 16 && vy[nx][lz] != Integer.MIN_VALUE;
                 }
-                tmp[lx][lz] = best;
+                tmp[lx][lz] = hit;
             }
         }
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
-                int best = Integer.MIN_VALUE;
-                for (int dz = -DILATE; dz <= DILATE; dz++) {
+                boolean hit = false;
+                for (int dz = -DILATE; dz <= DILATE && !hit; dz++) {
                     int nz = lz + dz;
-                    if (nz >= 0 && nz < 16 && tmp[lx][nz] > best) {
-                        best = tmp[lx][nz];
-                    }
+                    hit = nz >= 0 && nz < 16 && tmp[lx][nz];
                 }
-                target[lx][lz] = best;
+                near[lx][lz] = hit;
             }
         }
 
-        // 3. fill
+        // 3. Two narrow repairs, neither of which may touch open air:
+        //    (a) a large water body inside the footprint is filled from its own
+        //        surface downward, turning the bay into ground at water level;
+        //    (b) a void DIRECTLY under a village block is filled, so nothing is
+        //        left stilted. Air above the local surface is never touched.
         int filledHere = 0;
+        int seaTop = EarthMapSpec.SEA_LEVEL;
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
-                int ty = target[lx][lz];
-                if (ty == Integer.MIN_VALUE) {
+                if (!near[lx][lz]) {
                     continue;
                 }
                 int x = ox + lx;
                 int z = oz + lz;
-                Material fill = groundFor(w.getBiome(x, ty, z));
-                boolean bodyChecked = false;
-                boolean bodyLarge = false;
-                // Walk down from just under the village surface, replacing water and
-                // air until solid ground. Leaves small water features alone.
-                for (int y = ty - 1, depth = 0; y > w.getMinHeight() && depth < MAX_FILL_DEPTH;
-                        y--, depth++) {
-                    Block b = w.getBlockAt(x, y, z);
-                    Material m = b.getType();
-                    if (m == Material.WATER) {
-                        if (!bodyChecked) {
-                            // Test the body ONCE per column at its surface: this is
-                            // 25 block reads, and doing it per block was ~150k reads
-                            // per chunk.
-                            bodyLarge = largeBody(w, x, y, z);
-                            bodyChecked = true;
+
+                // (a) water surface within the footprint
+                int wtop = Integer.MIN_VALUE;
+                for (int y = seaTop + 6; y > seaTop - MAX_FILL_DEPTH; y--) {
+                    if (w.getBlockAt(x, y, z).getType() == Material.WATER) {
+                        wtop = y;
+                        break;
+                    }
+                }
+                if (wtop != Integer.MIN_VALUE && largeBody(w, x, wtop, z)) {
+                    Material fill = groundFor(w.getBiome(x, wtop, z));
+                    for (int y = wtop, d = 0; y > w.getMinHeight() && d < MAX_FILL_DEPTH;
+                            y--, d++) {
+                        Block b = w.getBlockAt(x, y, z);
+                        Material m = b.getType();
+                        if (m == Material.WATER || m.isAir()) {
+                            b.setType(fill, false);
+                            filledHere++;
+                        } else {
+                            break;
                         }
-                        if (!bodyLarge) {
-                            break;          // a well or ornamental pool: leave it
+                    }
+                }
+
+                // (b) void directly beneath a village block in THIS column only
+                int v = vy[lx][lz];
+                if (v != Integer.MIN_VALUE) {
+                    Material fill = groundFor(w.getBiome(x, v, z));
+                    for (int y = v - 1, d = 0; y > w.getMinHeight() && d < 12; y--, d++) {
+                        Block b = w.getBlockAt(x, y, z);
+                        Material m = b.getType();
+                        if (m.isAir() || m == Material.WATER) {
+                            b.setType(fill, false);
+                            filledHere++;
+                        } else {
+                            break;
                         }
-                        b.setType(fill, false);
-                        filledHere++;
-                    } else if (m.isAir()) {
-                        b.setType(fill, false);
-                        filledHere++;
-                    } else {
-                        break;              // hit real ground
                     }
                 }
             }
