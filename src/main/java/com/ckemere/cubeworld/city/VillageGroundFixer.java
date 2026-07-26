@@ -154,7 +154,7 @@ public final class VillageGroundFixer implements Listener {
                     continue;       // retry when the rest of it loads
                 }
                 done.add(id);
-                floorPiece(bw, bb, margin);
+                floorPiece(bw, bb, margin, margin == 0);
                 pieces++;
                 if (pieces % 100 == 0) {
                     plugin.getLogger().info("VillageGroundFixer: " + pieces
@@ -204,10 +204,28 @@ public final class VillageGroundFixer implements Listener {
     }
 
     /**
-     * Floor one building: minimum Y of its solid blocks over the WHOLE piece, then
-     * fill air below that across the footprint grown by {@code margin}.
+     * Floor one piece, by one of two rules.
+     *
+     * <p>Buildings use the minimum Y of their solid blocks over the WHOLE piece. That is
+     * what keeps fill out from under roofs: a per-column minimum in a column holding only
+     * an eave takes the eave as its floor and packs the room beneath it.
+     *
+     * <p>Streets use a PER-COLUMN minimum instead. A street has no overhang to be fooled
+     * by, and it is built to descend a slope in steps -- so applying one whole-piece
+     * number to it paves over every step below the highest end and buries the path.
      */
-    private void floorPiece(World w, BoundingBox bb, int margin) {
+    private void floorPiece(World w, BoundingBox bb, int margin, boolean perColumn) {
+        if (perColumn) {
+            for (int x = bb.minX(); x <= bb.maxX(); x++) {
+                for (int z = bb.minZ(); z <= bb.maxZ(); z++) {
+                    int floor = lowestSolid(w, x, z, bb.minY(), bb.maxY());
+                    if (floor != Integer.MAX_VALUE) {
+                        fillColumn(w, x, z, floor);
+                    }
+                }
+            }
+            return;
+        }
         int floor = Integer.MAX_VALUE;
         outer:
         for (int y = bb.minY(); y <= bb.maxY(); y++) {
@@ -230,6 +248,34 @@ public final class VillageGroundFixer implements Listener {
         }
     }
 
+    /** Lowest solid block in one column within the piece's Y span, or MAX_VALUE. */
+    private static int lowestSolid(World w, int x, int z, int minY, int maxY) {
+        for (int y = minY; y <= maxY; y++) {
+            if (w.getBlockAt(x, y, z).getType().isSolid()) {
+                return y;
+            }
+        }
+        return Integer.MAX_VALUE;
+    }
+
+    /**
+     * What a plinth should be made of, given the block it grows from.
+     *
+     * <p>The block the column lands on is often the wrong thing to copy. Topsoil only
+     * makes sense as a surface -- stacking {@code dirt_path} four high leaves a tower of
+     * path, and grass buried under a village never sees light. Structure blocks are worse
+     * still: landing on a street's stairs and copying them stacks stairs on stairs. Only
+     * genuine ground materials are copied through; everything else becomes dirt.
+     */
+    private static Material substrate(Material m) {
+        return switch (m) {
+            case DIRT, COARSE_DIRT, SAND, RED_SAND, GRAVEL, CLAY,
+                 SANDSTONE, RED_SANDSTONE, TERRACOTTA,
+                 STONE, DEEPSLATE, ANDESITE, DIORITE, GRANITE, TUFF, CALCITE -> m;
+            default -> Material.DIRT;
+        };
+    }
+
     /** Fill the air gap between {@code floor} and the first solid block below it,
      * copying that block's material so the plinth matches the surrounding ground. */
     private void fillColumn(World w, int x, int z, int floor) {
@@ -249,10 +295,7 @@ public final class VillageGroundFixer implements Listener {
         if (gap == 0) {
             return;                 // already supported
         }
-        Material fill = w.getBlockAt(x, Math.max(y, w.getMinHeight()), z).getType();
-        if (!fill.isSolid()) {
-            fill = Material.DIRT;
-        }
+        Material fill = substrate(w.getBlockAt(x, Math.max(y, w.getMinHeight()), z).getType());
         for (int fy = y + 1; fy <= floor - 1; fy++) {
             w.getBlockAt(x, fy, z).setType(fill, false);
             filled++;
