@@ -59,4 +59,7 @@ echo ">> Java   : $JAVA"
 echo ">> Paper  : $MCVER build $PBUILD   heap $HEAP"
 echo ">> Plugin : $(basename "$PLUGIN")"
 cd run
-exec "$JAVA" -Xmx"$HEAP" -jar "$BUNDLER" --nogui --add-plugin="$PLUGIN"
+# Extra args are passed straight to the JVM, e.g.
+#   ./run-server.sh -Dcubeworld.anchorCities=false
+# to generate raw terrain with no anchored city villages.
+exec "$JAVA" -Xmx"$HEAP" "$@" -jar "$BUNDLER" --nogui --add-plugin="$PLUGIN"
