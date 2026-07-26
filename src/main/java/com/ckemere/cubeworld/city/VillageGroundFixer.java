@@ -41,17 +41,24 @@ import org.bukkit.event.world.ChunkLoadEvent;
  * the room below it with dirt. A whole-piece minimum cannot reach a roof, because
  * the roof is by definition above the floor.
  *
- * <p>Only air strictly below the floor is filled, out to the piece footprint
- * expanded by one block in X and Z, and the fill copies whatever solid block the
- * column lands on so the plinth matches the ground it grows from.
+ * <p>Only air strictly below the floor is filled, and the fill copies whatever solid
+ * block the column lands on so the plinth matches the ground it grows from. Buildings
+ * are filled one block past their footprint so no wall stands on the very edge of its
+ * plinth; streets are filled to their footprint exactly, because a street box already
+ * runs down to the shore and a skirt there spills dirt out over the water.
  */
 public final class VillageGroundFixer implements Listener {
 
-    /** Template pool paths whose pieces get a floor. */
-    private static final String[] FILL_POOLS = {"/houses/", "/streets/", "/town_centers/"};
+    /** Buildings: fill the footprint plus a one-block skirt, so no wall sits on an edge. */
+    private static final String[] BUILDING_POOLS = {"/houses/", "/town_centers/"};
 
-    /** Footprint is grown by this many blocks in X and Z. */
-    private static final int MARGIN = 1;
+    /** Streets: fill the footprint exactly. A skirt here spills the fill sideways off
+     * the path -- a street bounding box already reaches the shore, and the extra ring
+     * pushes dirt out over open water. */
+    private static final String[] STREET_POOLS = {"/streets/"};
+
+    /** Pieces this fixer does not touch are marked with this margin. */
+    private static final int SKIP = -1;
 
     /** Give up after this many blocks of air below a floor. */
     private static final int MAX_DEPTH = 24;
@@ -134,7 +141,8 @@ public final class VillageGroundFixer implements Listener {
                 .startsForStructure(new ChunkPos(c.getX(), c.getZ()), st -> true);
         for (StructureStart start : starts) {
             for (StructurePiece piece : start.getPieces()) {
-                if (!wanted(piece)) {
+                int margin = marginFor(piece);
+                if (margin == SKIP) {
                     continue;
                 }
                 BoundingBox bb = piece.getBoundingBox();
@@ -142,11 +150,11 @@ public final class VillageGroundFixer implements Listener {
                 if (done.contains(id)) {
                     continue;
                 }
-                if (!boxLoaded(bw, bb)) {
+                if (!boxLoaded(bw, bb, margin)) {
                     continue;       // retry when the rest of it loads
                 }
                 done.add(id);
-                floorPiece(bw, bb);
+                floorPiece(bw, bb, margin);
                 pieces++;
                 if (pieces % 100 == 0) {
                     plugin.getLogger().info("VillageGroundFixer: " + pieces
@@ -156,28 +164,37 @@ public final class VillageGroundFixer implements Listener {
         }
     }
 
-    /** Houses, workshops, streets and the town centre; never trees or decor. */
-    private static boolean wanted(StructurePiece piece) {
+    /**
+     * How far past its footprint a piece is filled, or {@link #SKIP} to leave it alone.
+     * Houses, workshops and the town centre get a one-block skirt; streets get none;
+     * trees, decor, terminators and the rest are never touched.
+     */
+    private static int marginFor(StructurePiece piece) {
         if (!(piece instanceof PoolElementStructurePiece pe)) {
-            return false;
+            return SKIP;
         }
         String tpl;
         try {
             tpl = String.valueOf(ELEMENT_FIELD.get(pe));
         } catch (Exception e) {
-            return false;
+            return SKIP;
         }
-        for (String p : FILL_POOLS) {
+        for (String p : BUILDING_POOLS) {
             if (tpl.contains(p)) {
-                return true;
+                return 1;
             }
         }
-        return false;
+        for (String p : STREET_POOLS) {
+            if (tpl.contains(p)) {
+                return 0;
+            }
+        }
+        return SKIP;
     }
 
-    private static boolean boxLoaded(World w, BoundingBox bb) {
-        for (int cx = (bb.minX() - MARGIN) >> 4; cx <= (bb.maxX() + MARGIN) >> 4; cx++) {
-            for (int cz = (bb.minZ() - MARGIN) >> 4; cz <= (bb.maxZ() + MARGIN) >> 4; cz++) {
+    private static boolean boxLoaded(World w, BoundingBox bb, int margin) {
+        for (int cx = (bb.minX() - margin) >> 4; cx <= (bb.maxX() + margin) >> 4; cx++) {
+            for (int cz = (bb.minZ() - margin) >> 4; cz <= (bb.maxZ() + margin) >> 4; cz++) {
                 if (!w.isChunkLoaded(cx, cz)) {
                     return false;
                 }
@@ -188,9 +205,9 @@ public final class VillageGroundFixer implements Listener {
 
     /**
      * Floor one building: minimum Y of its solid blocks over the WHOLE piece, then
-     * fill air below that across the footprint plus a one-block margin.
+     * fill air below that across the footprint grown by {@code margin}.
      */
-    private void floorPiece(World w, BoundingBox bb) {
+    private void floorPiece(World w, BoundingBox bb, int margin) {
         int floor = Integer.MAX_VALUE;
         outer:
         for (int y = bb.minY(); y <= bb.maxY(); y++) {
@@ -206,8 +223,8 @@ public final class VillageGroundFixer implements Listener {
         if (floor == Integer.MAX_VALUE) {
             return;
         }
-        for (int x = bb.minX() - MARGIN; x <= bb.maxX() + MARGIN; x++) {
-            for (int z = bb.minZ() - MARGIN; z <= bb.maxZ() + MARGIN; z++) {
+        for (int x = bb.minX() - margin; x <= bb.maxX() + margin; x++) {
+            for (int z = bb.minZ() - margin; z <= bb.maxZ() + margin; z++) {
                 fillColumn(w, x, z, floor);
             }
         }

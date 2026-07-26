@@ -23,7 +23,10 @@ import org.bukkit.potion.PotionEffectType;
  * quite alike and it's worth catching several over time. Result items are plain
  * vanilla items — a Heart of the Sea is a Heart of the Sea; the "exceptional" part
  * is that these are otherwise hard/impossible to buy, and the gear comes enchanted.
- * Prices are premium (paid in emeralds).
+ * Prices are premium: most goods cost the better part of a stack of emeralds, and
+ * combat gear additionally demands a tribute of gold ingots (the stronger the piece,
+ * the more gold). A vanilla {@link MerchantRecipe} takes at most two ingredients, so
+ * that's emeralds + gold for war goods and emeralds alone for everything else.
  */
 public final class MasterTrades {
 
@@ -49,26 +52,28 @@ public final class MasterTrades {
      * mutable — it tracks uses). */
     private List<Supplier<MerchantRecipe>> pool() {
         return List.of(
-            () -> buy(item(Material.HEART_OF_THE_SEA), 32, 3),
+            () -> buy(item(Material.HEART_OF_THE_SEA), 48, 3),
+            // A tool, not a weapon — priced high but no gold tribute.
             () -> buy(ench(Material.NETHERITE_PICKAXE, Enchantment.EFFICIENCY, 4,
-                    Enchantment.UNBREAKING, 3, Enchantment.FORTUNE, 3, Enchantment.MENDING, 1), 40, 2),
-            () -> buy(ench(Material.NETHERITE_SWORD, Enchantment.SHARPNESS, 5,
-                    Enchantment.UNBREAKING, 3, Enchantment.LOOTING, 3, Enchantment.MENDING, 1), 45, 2),
-            () -> buy(ench(Material.DIAMOND_CHESTPLATE, Enchantment.PROTECTION, 4,
-                    Enchantment.UNBREAKING, 3, Enchantment.MENDING, 1), 30, 2),
-            () -> buy(book(Enchantment.MENDING, 1), 30, 3),
-            () -> buy(item(Material.ENCHANTED_GOLDEN_APPLE), 40, 2),
-            () -> buy(item(Material.WITHER_SKELETON_SKULL), 40, 2),
-            () -> buy(item(Material.CREEPER_HEAD), 16, 3),
-            () -> buy(item(Material.PIGLIN_HEAD), 16, 3),
-            () -> cityTicket(24, 4),
-            () -> buy(item(Material.DIAMOND_HORSE_ARMOR), 30, 3),
-            () -> buy(item(Material.MUSIC_DISC_PIGSTEP), 24, 3),
-            () -> buy(item(Material.BUDDING_AMETHYST), 40, 2),
-            () -> buy(ench(Material.TRIDENT, Enchantment.LOYALTY, 3, Enchantment.UNBREAKING, 3), 35, 2),
-            () -> buy(lingering(PotionEffectType.REGENERATION, 480, 1), 24, 4),
-            () -> buy(ench(Material.CROSSBOW, Enchantment.MULTISHOT, 1,
-                    Enchantment.QUICK_CHARGE, 3, Enchantment.MENDING, 1), 24, 3));
+                    Enchantment.UNBREAKING, 3, Enchantment.FORTUNE, 3, Enchantment.MENDING, 1), 60, 2),
+            () -> buyArmed(ench(Material.NETHERITE_SWORD, Enchantment.SHARPNESS, 5,
+                    Enchantment.UNBREAKING, 3, Enchantment.LOOTING, 3, Enchantment.MENDING, 1), 64, 25, 2),
+            () -> buyArmed(ench(Material.DIAMOND_CHESTPLATE, Enchantment.PROTECTION, 4,
+                    Enchantment.UNBREAKING, 3, Enchantment.MENDING, 1), 52, 16, 2),
+            () -> buy(book(Enchantment.MENDING, 1), 48, 3),
+            () -> buyArmed(item(Material.ENCHANTED_GOLDEN_APPLE), 56, 20, 2),
+            () -> buy(item(Material.WITHER_SKELETON_SKULL), 52, 2),
+            () -> buy(item(Material.CREEPER_HEAD), 40, 3),
+            () -> buy(item(Material.PIGLIN_HEAD), 40, 3),
+            () -> cityTicket(44, 4),
+            () -> buyArmed(item(Material.DIAMOND_HORSE_ARMOR), 48, 8, 3),
+            () -> buy(item(Material.MUSIC_DISC_PIGSTEP), 42, 3),
+            () -> buy(item(Material.BUDDING_AMETHYST), 56, 2),
+            () -> buyArmed(ench(Material.TRIDENT, Enchantment.LOYALTY, 3,
+                    Enchantment.UNBREAKING, 3), 58, 18, 2),
+            () -> buyArmed(lingering(PotionEffectType.REGENERATION, 480, 1), 44, 10, 4),
+            () -> buyArmed(ench(Material.CROSSBOW, Enchantment.MULTISHOT, 1,
+                    Enchantment.QUICK_CHARGE, 3, Enchantment.MENDING, 1), 50, 14, 3));
     }
 
     // --------------------------------------------------------------- builders
@@ -76,8 +81,21 @@ public final class MasterTrades {
      * XP (traders don't level), so no experience reward. */
     private static MerchantRecipe buy(ItemStack result, int emeralds, int maxUses) {
         MerchantRecipe r = new MerchantRecipe(result, 0, maxUses, false, 0, 0.0f);
-        r.addIngredient(new ItemStack(Material.EMERALD, Math.max(1, Math.min(64, emeralds))));
+        r.addIngredient(new ItemStack(Material.EMERALD, clampStack(emeralds)));
         return r;
+    }
+
+    /** "Pay emeralds <em>and</em> gold, receive item." The war-goods price: a vanilla
+     * recipe allows exactly two ingredients, and combat gear spends both slots. */
+    private static MerchantRecipe buyArmed(ItemStack result, int emeralds, int gold, int maxUses) {
+        MerchantRecipe r = buy(result, emeralds, maxUses);
+        r.addIngredient(new ItemStack(Material.GOLD_INGOT, clampStack(gold)));
+        return r;
+    }
+
+    /** Ingredient counts are one stack at most. */
+    private static int clampStack(int n) {
+        return Math.max(1, Math.min(64, n));
     }
 
     /** A teleport ticket to a random special city — reuses the transit system. */
