@@ -185,7 +185,69 @@ public final class SphereDensity {
         if (earthHeight) {
             LAST = this;          // overworld only; the nether instance has no Earth data
         }
-        return router.mapAll(new SphereVisitor());
+        NoiseRouter folded = router.mapAll(new SphereVisitor());
+        if (!earthHeight) {
+            return folded;
+        }
+        // preliminarySurfaceLevel is built by NoiseRouterData from `offset` and
+        // `factor` directly, NOT from `depth` -- so folding the depth node leaves
+        // it behind. We replace `factor` but never `offset`, and `offset` is still
+        // vanilla's spline over vanilla continents/erosion noise, uncorrelated with
+        // Earth. The result was a chimera: our factor, vanilla's altitude.
+        //
+        // Its only real consumer is the aquifer system (Aquifer.computeFluid, via
+        // NoiseChunk.preliminarySurfaceLevel), which uses it to decide whether an
+        // underground cell falls back to the global sea-level fluid or gets a local
+        // water table, and how high that table sits. Open ocean is unaffected --
+        // that comes from globalFluidPicker -- but perched water underground was
+        // being placed against terrain that does not exist here.
+        //
+        // The record is in hand, so substitute the field outright rather than trying
+        // to fingerprint the node.
+        return new NoiseRouter(
+                folded.barrierNoise(),
+                folded.fluidLevelFloodednessNoise(),
+                folded.fluidLevelSpreadNoise(),
+                folded.lavaNoise(),
+                folded.temperature(),
+                folded.vegetation(),
+                folded.continents(),
+                folded.erosion(),
+                folded.depth(),
+                folded.ridges(),
+                new EarthSurfaceLevel(),
+                folded.finalDensity(),
+                folded.veinToggle(),
+                folded.veinRidged(),
+                folded.veinGap());
+    }
+
+    /**
+     * The Earth surface height at a column, for the router's
+     * {@code preliminarySurfaceLevel} slot. NoiseChunk floors this and caches it
+     * per quantized column, so it only needs to be the altitude, not a density.
+     */
+    private final class EarthSurfaceLevel implements DensityFunction {
+        @Override
+        public double compute(FunctionContext c) {
+            fillColumn(c.blockX(), c.blockZ());
+            return reliefCache.get()[4];
+        }
+
+        @Override
+        public void fillArray(double[] out, ContextProvider p) {
+            for (int i = 0; i < out.length; i++) {
+                out[i] = compute(p.forIndex(i));
+            }
+        }
+
+        @Override public DensityFunction mapChildren(Visitor v) { return this; }
+        @Override public double minValue() { return -64.0; }
+        @Override public double maxValue() { return 320.0; }
+        @Override
+        public net.minecraft.util.KeyDispatchDataCodec<? extends DensityFunction> codec() {
+            return DensityFunctions.constant(0).codec();      // never serialised
+        }
     }
 
     /**
