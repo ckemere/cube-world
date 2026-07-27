@@ -199,3 +199,43 @@ diegetically and protects it from wardens by architecture.
    shell, so interior air has no water neighbour and stays dry. Do NOT do this in the
    density field -- vanilla's aquifer stage floods cavities below sea level.
 5. Teleport station on the hill, joining the ring network (also solves access).
+
+## 6. Cliffs at Antioch — root cause found (overnight session)
+
+**The plinths were never the bug; they were the symptom.** Rendering Antioch from
+the air with `-Dcubeworld.villageFix=false` shows the jigsaw village standing in
+open sea, joined to land along one edge only. `VillageGroundFixer` was faithfully
+manufacturing land under it, and the plinth edges are what read as "4 to 7 block
+cliffs". Measured: land covers 61% of the footprint within 48 blocks of the anchor.
+
+Tooling that made this visible: a numpy voxel raycaster over the region files
+(scratchpad `voxcam.py`, ~200 lines, 2.4 s/frame, 130 MB, no installs) reusing
+`tools/playermap/anvil.py` + `realmap.py`'s palette. Worth productionising into
+`tools/` -- three regen cycles were spent on this blind that one image settled.
+
+### Things established, with the measurements
+
+- **The freeboard/factor coupling works.** Against `terrainprobe`'s `natural`
+  (the density path's own target), residual wobble at low freeboard is sd 0.5-1.6
+  blocks. Do not tune `FREEBOARD_TIGHTNESS` further on transect noise.
+- **Use the right oracle.** `MapSampler.heightAt` goes through the map CELL GRID;
+  `terrainprobe natural` is what the density actually targets. They disagree, and
+  comparing against the wrong one manufactures phantom problems.
+- **Terrain height is not a free parameter.** Raising the low-elevation curve
+  (100 m -> 2.6 blocks) gave no land improvement (61% -> 59%) and DELETED Antioch's
+  village: `locate structure cubeworld:plains_large` went from 12 blocks to 2537.
+  `depth` is one of the six climate axes, so moving the surface moves biome
+  selection, and a city whose biome leaves `#cubeworld:anchor` never places.
+  **Any elevation-curve change must be validated with `locate structure` for all
+  30 cities.**
+- Most cities are fine: at margin 0, **24 of 30 sit on 100% land**. Only Istanbul,
+  Rome, Carthage, Ephesus, Antioch and Pachacamac are water-heavy -- all genuinely
+  coastal, which is the point of them.
+
+### Remaining approach
+
+Move the six affected anchors onto nearby land (`/cubeworld nudgeanchors`), capped
+so geography stays honest, and re-validate placement. For cities that are
+intrinsically on water (Istanbul on the Bosphorus), the village will always meet
+the sea, so the fixer's plinth should TAPER into the water as a bank rather than
+standing as a wall -- that is the remaining aesthetic fix, and it is in the fixer.

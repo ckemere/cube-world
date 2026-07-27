@@ -66,7 +66,7 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
     /** The sampler for the main world's seed. */
     /** Fraction of a disc of radius {@code r} whose target surface is above sea level. */
     private double landFraction(int cx, int cz, int r, int step, int margin) {
-        int land = 0;
+        double dry = 0.0;
         int total = 0;
         for (int dz = -r; dz <= r; dz += step) {
             for (int dx = -r; dx <= r; dx += step) {
@@ -74,13 +74,16 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                     continue;
                 }
                 total++;
-                if (sampler().heightAt(cx + dx, cz + dz)
-                        > com.ckemere.cubeworld.generation.EarthMapSpec.SEA_LEVEL + margin) {
-                    land++;
-                }
+                // Continuous dryness rather than a threshold: a hard cut at
+                // sea+2 scores every floodplain city 0 (Kaifeng, Alexandria and
+                // Angkor all sit under 2 blocks of target), which makes the
+                // search compare noise. Ramp over `margin` blocks instead.
+                double fbk = sampler().heightAt(cx + dx, cz + dz)
+                        - com.ckemere.cubeworld.generation.EarthMapSpec.SEA_LEVEL;
+                dry += Math.clamp(fbk / Math.max(1, margin), 0.0, 1.0);
             }
         }
-        return total == 0 ? 0.0 : (double) land / total;
+        return total == 0 ? 0.0 : dry / total;
     }
 
     private MapSampler sampler() {
