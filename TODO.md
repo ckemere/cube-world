@@ -253,3 +253,80 @@ Note the anchor scoring OVER-predicts land, because it uses the generator's targ
 rather than the wobbled result: Carthage scored 93% but measures 50% (it is a
 headland, which is correct for Carthage). Treat the score as a relative ranking
 between candidate sites, not an absolute.
+
+## 7. Biome generation — handoff for a fresh approach
+
+We keep going in circles here. This is what is actually established, so the next
+attempt does not re-derive it.
+
+### How it is wired today
+
+- `CubeWorldBiomeProvider` (a Bukkit `BiomeProvider`) computes the overworld biome
+  itself: `EarthClimate` produces the six vanilla params from Earth rasters, and
+  `VanillaBiomeMapper` hands them to vanilla's `MultiNoiseBiomeSource` (overworld
+  preset) and takes back whatever it returns.
+- The NETHER is different: `SphereRouterHook.installNether` rebinds
+  `RandomState.sampler` (a `Climate.Sampler`) from the folded router. The overworld
+  does NOT go through that path.
+- So "fixing biomes" almost always means changing the six numbers `EarthClimate`
+  emits, not changing any biome table.
+
+### The traps, each of which has cost us a session
+
+1. **Selection is NEAREST-NEIGHBOUR, not box containment.** A biome whose box does
+   not contain the point still wins if it is closest. This is the single biggest
+   source of surprises -- it is why swamps appear where the swamp box is not
+   satisfied, and why cave biomes surface (below).
+2. **You can compute vanilla's answer offline, exactly.**
+   `run/plugins/CubeWorld/biomes/overworld_params.json` is vanilla's real parameter
+   list (7594 entries), each `[biome, tMin,tMax, hMin,hMax, cMin,cMax, eMin,eMax,
+   dMin,dMax, wMin,wMax, offset]` scaled by 10000. Vanilla's fitness is: per axis,
+   `d = max(v-hi, lo-v, 0)`; sum of `d*d`; plus `offset*offset`; lowest wins. A
+   dozen lines of Python answers "why did I get this biome" definitively -- use it
+   before touching code.
+3. **THREE different surface heights exist and they disagree.**
+   `MapSampler.heightAt` (the map CELL GRID, several blocks off in rugged ground),
+   `terrainprobe`'s `natural` (the density path's target), and the actual generated
+   surface (target plus noise wobble). Comparing against the wrong one manufactures
+   problems that are not there. `CubeWorldBiomeProvider` currently uses the cell grid.
+4. **Terrain height is not free.** `depth` is one of the six axes, so moving the
+   surface moves biome selection. Raising the low-elevation curve once deleted
+   Antioch's village outright (`locate structure` went 12 blocks -> 2537). Validate
+   any elevation change with `locate structure` across all 30 cities.
+
+### Measurement tools that work
+
+- `/cubeworld biomecensus` — global share per biome.
+- `run/plugins/CubeWorld/biomes/overworld.cwbr` + `tools/playermap/structures/biomeraster.py`
+  — regional breakdowns offline (chunk resolution, sampled at the surface).
+- `/cubeworld climateat|biomeat|terrainprobe <x> <z>` — the six params, the biome,
+  and the density target at a column.
+- `python3 tools/voxcam.py <x> <z> --yaw .. --pitch ..` — look at it.
+
+### Open, measured, not fixed
+
+- **Cave biomes reach the surface.** ~0.95% of the surface around (-3075,-5332)
+  is `dripstone_block`/`pointed_dripstone` with stray copper ore; the chunk stores
+  `dripstone_caves` below ~y70 with `plains` above while the ground is at y67.
+  Cause: `EarthClimate.depth` uses **70 blocks per unit** (vanilla uses 128) so the
+  cave band starts ~14 blocks down, and nearest-neighbour means `dripstone_caves`
+  starts WINNING at only ~10 blocks down (measured by sweeping the fitness). Combined
+  with the cell-grid surface estimate sitting several blocks above real terrain in
+  rugged ground, exposed hillsides land in the cave band.
+  **Fix ready but NOT applied:** `CaveBiomes.SURFACE_BUFFER = 12` already exists but
+  is only enforced on the demo fallback path (`CubeWorldBiomeProvider:67`), never on
+  the Earth path. Enforce it in `earthBiome` -- hold `depth` below ~0.10 until the
+  sample is at least SURFACE_BUFFER under the surface -- and raise the buffer to ~20
+  so it clears both the 10-block win threshold and the surface-estimate error. This
+  keeps the 70-per-unit scale, so deep dark and ancient cities stay reachable.
+- **North America is a third birch.** 25-50N measures 20% `old_growth_birch_forest`
+  + 12% `birch_forest` + 18% `taiga`, where the Great Plains should be grassland.
+  Untouched; needs its own look at the T/H axes.
+- **Swamp is UNDER target, not over:** 1.05% globally against the 5-8% wanted
+  (North America 1.9%, Siberia 5.3% which is honest, Mesopotamia 0.0%). Ocean is
+  72.1% against Earth's real 71%.
+- **Wet floodplains as wetland** (discussed, not built): would need flow
+  accumulation from the DEM, since precipitation alone never identifies the Fertile
+  Crescent -- Mesopotamia is arid desert fed by exotic rivers. An elegant version is
+  a biome-aware freeboard floor: drop `LAND_FREEBOARD_MIN` where `EarthClimate
+  .wetland()` says wetland, so patchy standing water is correct rather than a bug.
