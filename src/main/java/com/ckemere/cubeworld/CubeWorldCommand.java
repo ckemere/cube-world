@@ -64,6 +64,25 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
     }
 
     /** The sampler for the main world's seed. */
+    /** Fraction of a disc of radius {@code r} whose target surface is above sea level. */
+    private double landFraction(int cx, int cz, int r, int step, int margin) {
+        int land = 0;
+        int total = 0;
+        for (int dz = -r; dz <= r; dz += step) {
+            for (int dx = -r; dx <= r; dx += step) {
+                if (dx * dx + dz * dz > r * r) {
+                    continue;
+                }
+                total++;
+                if (sampler().heightAt(cx + dx, cz + dz)
+                        > com.ckemere.cubeworld.generation.EarthMapSpec.SEA_LEVEL + margin) {
+                    land++;
+                }
+            }
+        }
+        return total == 0 ? 0.0 : (double) land / total;
+    }
+
     private MapSampler sampler() {
         return maps.mapFor(org.bukkit.Bukkit.getWorlds().get(0).getSeed()).sampler();
     }
@@ -253,6 +272,77 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
             }
             case "mirrorpush" -> {
                 return handleMirrorPush(sender, args);
+            }
+            case "nudgeanchors" -> {
+                // Cities are anchored at their true lat/lon, but our coastline lands a
+                // few blocks from where the raster says, so a coastal city can have a
+                // third of its footprint in the sea -- the jigsaw then builds out over
+                // water and the ground fixer plinths it, which is where the "cliffs"
+                // come from. Search for a nearby centre that is mostly land, using the
+                // generator's own target surface so no chunks need generating.
+                int searchR = args.length > 1 ? Integer.parseInt(args[1]) : 48;
+                int footprint = args.length > 2 ? Integer.parseInt(args[2]) : 48;
+                // A column only counts as land if its target clears sea level by enough
+                // to survive the residual noise; "above sea level" alone overstates land
+                // badly (spec said 87% at Antioch where the world delivered 61%).
+                int margin = args.length > 3 ? Integer.parseInt(args[3]) : 2;
+                final double want = 0.92;
+                final int step = 4;
+                java.util.List<String> rows = new java.util.ArrayList<>();
+                try (java.io.InputStream in = CubeWorldCommand.class.getClassLoader()
+                        .getResourceAsStream("cities_anchor.csv")) {
+                    java.io.BufferedReader br = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(in, java.nio.charset.StandardCharsets.UTF_8));
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        line = line.trim();
+                        if (line.isEmpty() || line.startsWith("#")) {
+                            continue;
+                        }
+                        String[] p = line.split(",");
+                        if (p.length < 4) {
+                            continue;
+                        }
+                        int cx = Integer.parseInt(p[0].trim());
+                        int cz = Integer.parseInt(p[1].trim());
+                        String name = p.length > 4 ? p[4].trim() : "?";
+                        double base = landFraction(cx, cz, footprint, step, margin);
+                        int bx = cx;
+                        int bz = cz;
+                        double bf = base;
+                        double bd = 0.0;
+                        for (int dz = -searchR; dz <= searchR; dz += step) {
+                            for (int dx = -searchR; dx <= searchR; dx += step) {
+                                double f = landFraction(cx + dx, cz + dz, footprint, step, margin);
+                                double d = Math.sqrt((double) dx * dx + (double) dz * dz);
+                                // nearest centre that is good enough; else the best one
+                                boolean better = (bf < want)
+                                        ? (f > bf + 1e-9 || (f >= want && d < bd))
+                                        : (f >= want && d < bd);
+                                if (better) {
+                                    bf = f;
+                                    bd = d;
+                                    bx = cx + dx;
+                                    bz = cz + dz;
+                                }
+                            }
+                        }
+                        rows.add(String.format(Locale.ROOT,
+                                "%s,%d,%d,%d,%d,%.0f%%,%.0f%%,%.0fkm",
+                                name, cx, cz, bx, bz, base * 100, bf * 100, bd * 0.98));
+                    }
+                } catch (Exception e) {
+                    sender.sendMessage(Component.text("nudgeanchors failed: " + e, NamedTextColor.RED));
+                    return true;
+                }
+                org.bukkit.Bukkit.getLogger().info(
+                        "nudgeanchors name,oldX,oldZ,newX,newZ,landBefore,landAfter,moved");
+                for (String r : rows) {
+                    org.bukkit.Bukkit.getLogger().info("nudgeanchors " + r);
+                }
+                sender.sendMessage(Component.text(
+                        "Evaluated " + rows.size() + " cities; see console.", NamedTextColor.AQUA));
+                return true;
             }
             case "height" -> {
                 if (args.length != 3) {
