@@ -201,3 +201,109 @@ print(sorted((fitness(e, (-100,-2300,8900,4600,400,-1700)), e[0]) for e in E)[:5
 That answers "why did I get this biome" in seconds and with certainty. Selection is
 **nearest-neighbour, not box containment**, which is the single biggest source of
 surprises — see `TODO.md` item 7 for the full set of traps.
+
+## 9. Regenerating `earth.dat` and `coast.dat` from source
+
+Copying is faster, but the pipeline is reproducible. Everything below was read
+out of the code and the existing files' headers, and both download URLs were
+checked live (HTTP 200) on 2026-07-27.
+
+### What the files actually contain
+
+`run/earth.dat` — CWE1, roll **-70.0** (the locked orientation), **5 layers**, 343 MB:
+
+| layer | grid | scale | source |
+|---|---|---|---|
+| `height` | 10800x5400 | 1.0 | ETOPO 2022, 60 arc-sec, downsampled by 2 |
+| `temp` | 2160x1080 | 0.1 | WorldClim v2.1 10m **BIO1** (annual mean temp) |
+| `precip` | 2160x1080 | 1.0 | WorldClim v2.1 10m **BIO12** (annual precip) |
+| `river` | 10800x5400 | 0.001 | Natural Earth rivers/lakes, as a distance ramp |
+| `river_y` | 10800x5400 | 1.0 | river surface elevation |
+
+`run/coast.dat` — CWE1, **1 layer** `coast` 2160x1080, 4.5 MB: true
+distance-to-ocean in km, chamfer transform. Derived FROM `earth.dat`, so it must
+be rebuilt whenever `earth.dat` changes.
+
+### Extra Python packages
+
+Beyond `python3-numpy` / `python3-pil` from section 1:
+
+```bash
+python3 -m pip install --user --break-system-packages netCDF4 tifffile
+```
+
+`netCDF4` reads the ETOPO `.nc`; `tifffile` reads the WorldClim GeoTIFFs.
+(`--break-system-packages` because this box's `python3 -m venv` ships without pip;
+a venv is cleaner if yours works.)
+
+### Source data
+
+Into `tools/cubemap/data/`:
+
+```bash
+mkdir -p tools/cubemap/data && cd tools/cubemap/data
+
+# ETOPO 2022, 60 arc-second surface elevation (~450 MB)
+curl -o etopo_60s.nc \
+  "https://www.ngdc.noaa.gov/thredds/fileServer/global/ETOPO2022/60s/60s_surface_elev_netcdf/ETOPO_2022_v1_60s_N90W180_surface.nc"
+
+# WorldClim v2.1 10-minute bioclimatic variables (~130 MB zip)
+curl -O "https://geodata.ucdavis.edu/climate/worldclim/2_1/base/wc2.1_10m_bio.zip"
+unzip -j wc2.1_10m_bio.zip 'wc2.1_10m_bio_1.tif' 'wc2.1_10m_bio_12.tif'
+```
+
+Natural Earth coastline/river vectors auto-download into the same `data/` dir on
+first run, so nothing to do for those.
+
+### Build
+
+```bash
+# 1. earth.dat  (STOP THE SERVER FIRST -- see the memory note below)
+cd tools/cubemap
+python3 -m cubemap export --dest ../../run/earth.dat
+
+# 2. coast.dat  (reads run/earth.dat, so it must come second)
+cd ../..
+python3 tools/compact/build_coast.py            # default 2160 wide
+```
+
+`--roll` defaults to the locked `EARTH_ROLL_DEG` of -70. **Do not change it**
+unless you intend to move every coastline and every one of the 30 anchored
+cities. `--height-step 2` is what produces the 10800x5400 height layer; step 1
+would quadruple the file.
+
+### Memory
+
+This is the step the memory note warns about. The export holds 10800x5400 arrays
+(116 MB each as int16, 233 MB as float32 intermediates) for several layers at
+once, so peak use runs to a couple of GB. **Stop the Paper server before running
+it** or the box will OOM-kill something.
+
+### Verify
+
+```bash
+python3 - <<'PY'
+import struct
+for path in ("run/earth.dat", "run/coast.dat"):
+    with open(path, "rb") as f:
+        magic = f.read(4); roll = struct.unpack("<f", f.read(4))[0]
+        n = struct.unpack("<i", f.read(4))[0]
+        print(f"{path}: {magic!r} roll={roll} layers={n}")
+        for _ in range(n):
+            name = f.read(8).rstrip(b"\0").decode()
+            w, h = struct.unpack("<ii", f.read(8))
+            sc, off = struct.unpack("<ff", f.read(8))
+            print(f"   {name:8s} {w}x{h} scale={sc}")
+PY
+```
+
+Expect exactly the five layers above with `roll=-70.0`. Then regenerate the world
+(section 6) — the rasters are read at world-gen time, so existing chunks keep the
+old terrain.
+
+### Not part of the pipeline
+
+`tools/compact/sst.py` is an **analysis script only** — it writes no file and no
+sea-surface-temperature layer exists in `earth.dat`. It needs a WOA23 extract
+fetched by hand (the URL is in its header) and exists to study ocean-temperature
+coverage. Ignore it when rebuilding.
