@@ -48,8 +48,18 @@ public final class EarthMapSpec implements MapSpec {
      * Slope rises monotonically (0.005 -> 0.046 blocks/m) so shorelines ramp gently
      * while inland ranges keep their height. Ends exactly at
      * 4000 m -> 114 blocks (= 4000 * LAND_EXAGGERATION) for continuity. */
-    /** Least freeboard, in blocks, that a pixel above 0 m is allowed to have. */
-    private static final double LAND_FREEBOARD_MIN = 1.0;
+    /**
+     * Least freeboard, in blocks, that a pixel above 0 m is allowed to have.
+     *
+     * <p>1.0 was not enough. The curve gives a floodplain like Mesopotamia about
+     * 0.3 blocks, so the floor was doing all the work and putting 64% of the region
+     * exactly one block over the waterline -- where the residual terrain noise
+     * (measured sd ~0.5 blocks even with the freeboard/factor coupling) dunks a
+     * large share of it. The biome source was correctly calling it desert while the
+     * player waded through it. Cradle-of-civilisation regions are all low
+     * floodplains, so this is where it hurts most.
+     */
+    private static final double LAND_FREEBOARD_MIN = 3.0;
 
     private static final double[] LOW_M = {0, 100, 300, 800, 1500, 2500, 4000};
     private static final double[] LOW_B = {0, 0.5, 1.8, 6.0, 15.0, 45.0, 114.0};
