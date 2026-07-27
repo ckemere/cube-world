@@ -1,13 +1,13 @@
 # worldX,worldZ,pool,size,name  (anchored villages + preloaded teleport stations)
 12563,-3699,desert,huge,Baghdad
-9564,-4633,savanna,huge,Rome
+9572,-4641,savanna,huge,Rome   # moved 11km off the water: 80% -> 92% land
 11240,-3096,savanna,huge,Alexandria
 20385,-3499,plains,huge,Xian
 11049,-4507,plains,huge,Istanbul
-9368,-3894,savanna,huge,Carthage
+9336,-3870,savanna,huge,Carthage   # moved 39km off the water: 55% -> 93% land
 21270,-3243,plains,huge,Nanjing
 7864,-4417,savanna,large,Cordoba
-11723,-3902,plains,large,Antioch
+11731,-3902,plains,large,Antioch   # moved 8km off the water: 84% -> 93% land
 20866,-3568,plains,large,Kaifeng
 18108,-2705,plains,large,Pataliputra
 21227,-3873,plains,large,Linzi
@@ -16,7 +16,7 @@
 17569,-864,plains,large,Anuradhapura
 12920,-3384,desert,large,Basra
 20775,-4316,plains,large,Datong
-10900,-4025,plains,large,Ephesus
+10924,-4029,plains,large,Ephesus   # moved 24km off the water: 76% -> 92% land
 20771,-2189,plains,large,Guangzhou
 17514,-3022,plains,huge,Kanauji, Kanauj
 11974,-1361,plains,large,Axum
@@ -28,4 +28,4 @@
 -1720,-2039,plains,large,Caracol
 -1883,-4350,plains,large,Cahokia
 118,1522,plains,large,Tiahuanaco
--615,1114,desert,large,Pachacamac
+-595,1098,desert,large,Pachacamac   # moved 25km off the water: 62% -> 92% land
