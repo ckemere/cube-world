@@ -58,6 +58,13 @@ public final class EarthMapSpec implements MapSpec {
      * large share of it. The biome source was correctly calling it desert while the
      * player waded through it. Cradle-of-civilisation regions are all low
      * floodplains, so this is where it hurts most.
+     *
+     * <p>2.0 was tried and rejected: Mesopotamia still came out 35.6% standing
+     * water against 13.2% at 3.0. The wobble sits right at this scale, so one block
+     * of floor is the difference between a desert and a marsh. The cost of 3.0 is
+     * that rivers, which cut to sea level, now run in banks about 3 blocks deep
+     * instead of 1 -- measured median shoreline step +3 on river edges, though
+     * OCEAN coasts stay gentle at median +1 with half the shoreline at sea level.
      */
     private static final double LAND_FREEBOARD_MIN = 3.0;
 
