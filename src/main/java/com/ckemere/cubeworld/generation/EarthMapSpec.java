@@ -48,6 +48,9 @@ public final class EarthMapSpec implements MapSpec {
      * Slope rises monotonically (0.005 -> 0.046 blocks/m) so shorelines ramp gently
      * while inland ranges keep their height. Ends exactly at
      * 4000 m -> 114 blocks (= 4000 * LAND_EXAGGERATION) for continuity. */
+    /** Least freeboard, in blocks, that a pixel above 0 m is allowed to have. */
+    private static final double LAND_FREEBOARD_MIN = 1.0;
+
     private static final double[] LOW_M = {0, 100, 300, 800, 1500, 2500, 4000};
     private static final double[] LOW_B = {0, 0.5, 1.8, 6.0, 15.0, 45.0, 114.0};
 
@@ -105,7 +108,10 @@ public final class EarthMapSpec implements MapSpec {
                 blocks = HIGH_BREAK * LAND_EXAGGERATION
                         + (meters - HIGH_BREAK) * HIGH_EXAGGERATION;
             }
-            y = SEA_LEVEL + Math.min(blocks, LAND_CAP);
+            // Anything the data calls land must clear the waterline. The curve
+            // gives 100 m only half a block, which rounds onto the sea surface
+            // even before noise touches it, so dry land came out as coast.
+            y = SEA_LEVEL + Math.max(LAND_FREEBOARD_MIN, Math.min(blocks, LAND_CAP));
         } else {
             // Mirror the mountain treatment downward: steep for shelves and
             // moderate seas so they read deep, gentler for the abyssal tail so

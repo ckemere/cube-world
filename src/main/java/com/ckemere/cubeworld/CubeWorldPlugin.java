@@ -98,6 +98,21 @@ public final class CubeWorldPlugin extends JavaPlugin {
         teleport.load();
         teleport.registerRecipe();
         teleport.selfTest();
+        // ...and again once the server has finished loading. plugin.yml sets
+        // load: STARTUP (the default world ignores the generator otherwise), so
+        // onEnable runs BEFORE datapacks load -- and RecipeManager.apply does
+        // "this.recipes = recipes", replacing the whole map and discarding any
+        // recipe a plugin added first. Registering here too survives that, and
+        // covers /reload for the same reason. registerRecipe is a no-op when the
+        // recipe is already present, so the startup call is left in place for the
+        // case where nothing reloads.
+        getServer().getPluginManager().registerEvents(new org.bukkit.event.Listener() {
+            @org.bukkit.event.EventHandler
+            public void onServerLoad(org.bukkit.event.server.ServerLoadEvent e) {
+                teleport.registerRecipe();
+                teleport.selfTest();
+            }
+        }, this);
         teleport.seedCities();
         getServer().getPluginManager().registerEvents(
                 new com.ckemere.cubeworld.teleport.TeleporterListener(this, teleport), this);

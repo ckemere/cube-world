@@ -79,6 +79,14 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage(Component.text("CubeWorld: pong!", NamedTextColor.GREEN));
                 return true;
             }
+            case "reciperecheck" -> {
+                teleport.registerRecipe();
+                teleport.selfTest();
+                sender.sendMessage(Component.text(
+                        "Re-registered the Teleporter Core recipe; see console for the self-test.",
+                        NamedTextColor.AQUA));
+                return true;
+            }
             case "tpcore" -> {
                 if (!(sender instanceof Player p)) {
                     sender.sendMessage(Component.text("Players only.", NamedTextColor.RED));

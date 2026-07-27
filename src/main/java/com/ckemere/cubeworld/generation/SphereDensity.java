@@ -49,6 +49,27 @@ public final class SphereDensity {
     /** Peak ridge-noise amplitude on the most rugged terrain (vanilla's jaggedness
      * spline tops out at 0.63). */
     private static final double JAGGED_MAX = 0.60;
+
+    /**
+     * Couples the noise amplitude to the freeboard -- how far above sea level the
+     * elevation data wants a column to be.
+     *
+     * <p>Surface displacement from unit noise is {@code 32 / factor} blocks. The
+     * first cut set this to 64, aiming the wobble at half the freeboard on that
+     * arithmetic, and measured 27% of land still drowning with the ground landing
+     * about 2 blocks low -- BASE_3D_NOISE plainly swings wider than the +/-1 the
+     * estimate assumed. 128 halves the wobble again to absorb it. Without this the two are independent, and they are on
+     * incompatible scales near the coast: the low-elevation curve grants 300 m of
+     * real terrain 1.8 blocks while FACTOR_FLAT hands the noise 3.6 blocks to play
+     * with, so below roughly 800 m the noise -- not the Earth data -- decides
+     * whether a column is land. Measured on a transect through the Antioch shore
+     * before this: 7 of 11 genuinely-land points generated as open sea, including
+     * one at 502 m.
+     */
+    private static final double FREEBOARD_TIGHTNESS = 128.0;
+
+    /** Tightest the surface may be pinned, i.e. at least 0.5 blocks of wobble. */
+    private static final double FACTOR_PINNED = 64.0;
     /** Off switch for A/B: {@code -Dcubeworld.earthShape=false} restores vanilla's
      * own (geography-blind) factor/jaggedness. */
     private static final boolean EARTH_SHAPE =
@@ -459,8 +480,17 @@ public final class SphereDensity {
     private final class EarthFactor implements DensityFunction {
         @Override
         public double compute(FunctionContext c) {
-            double n = reliefNorm(c.blockX(), c.blockZ());
-            return FACTOR_FLAT + (FACTOR_RUGGED - FACTOR_FLAT) * n;
+            double n = reliefNorm(c.blockX(), c.blockZ());   // also fills the column cache
+            double relief = FACTOR_FLAT + (FACTOR_RUGGED - FACTOR_FLAT) * n;
+            double freeboard = reliefCache.get()[4] - EarthMapSpec.SEA_LEVEL;
+            if (freeboard <= 0.0) {
+                return relief;                                // seabed: nothing to protect
+            }
+            // Whichever rule wants the tighter surface wins, so this can only ever
+            // REMOVE noise: on a mountain the freeboard is large, the term goes to
+            // nothing and the relief rule is untouched.
+            return Math.min(FACTOR_PINNED,
+                    Math.max(relief, FREEBOARD_TIGHTNESS / freeboard));
         }
 
         @Override
@@ -472,7 +502,7 @@ public final class SphereDensity {
 
         @Override public DensityFunction mapChildren(Visitor v) { return this; }
         @Override public double minValue() { return Math.min(FACTOR_RUGGED, FACTOR_FLAT); }
-        @Override public double maxValue() { return Math.max(FACTOR_RUGGED, FACTOR_FLAT); }
+        @Override public double maxValue() { return FACTOR_PINNED; }
         @Override
         public net.minecraft.util.KeyDispatchDataCodec<? extends DensityFunction> codec() {
             return DensityFunctions.constant(0).codec();      // never serialised
