@@ -232,10 +232,24 @@ Tooling that made this visible: a numpy voxel raycaster over the region files
   Rome, Carthage, Ephesus, Antioch and Pachacamac are water-heavy -- all genuinely
   coastal, which is the point of them.
 
-### Remaining approach
+### RESOLVED
 
-Move the six affected anchors onto nearby land (`/cubeworld nudgeanchors`), capped
-so geography stays honest, and re-validate placement. For cities that are
-intrinsically on water (Istanbul on the Bosphorus), the village will always meet
-the sea, so the fixer's plinth should TAPER into the water as a bank rather than
-standing as a wall -- that is the remaining aesthetic fix, and it is in the fixer.
+Five anchors moved onto nearby land (commit "Move five coastal city anchors off
+the water"); Istanbul deliberately left on the Bosphorus. All 30 verified placing
+within 128 blocks via `locate structure`. Antioch: land within 48 blocks 61% ->
+70%, village blocks over water 5.75% -> 2.17%, and the render shows buildings on a
+natural hillside with no plinths.
+
+Final over-water figures by city (48-block box): Carthage 1.6%, Antioch 2.3%,
+Rome 4.8%, Pachacamac 5.0%, Ephesus 6.8%, Istanbul 9.0%.
+
+**The plinth taper was considered and NOT built.** Close renders of Istanbul's and
+Carthage's waterfronts show houses on green shore with sand meeting the water --
+the residual percentage is small overhangs near the shoreline, not visible walls.
+Adding a taper would risk re-creating the dirt-to-the-ceilings failure for no
+visible gain. Revisit only if a specific ugly waterfront turns up.
+
+Note the anchor scoring OVER-predicts land, because it uses the generator's target
+rather than the wobbled result: Carthage scored 93% but measures 50% (it is a
+headland, which is correct for Carthage). Treat the score as a relative ranking
+between candidate sites, not an absolute.
