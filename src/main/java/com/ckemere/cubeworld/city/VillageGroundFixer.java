@@ -86,8 +86,16 @@ public final class VillageGroundFixer implements Listener {
     private int pieces;
     private int filled;
 
+    /** -Dcubeworld.villageFix=false leaves the raw jigsaw placement alone, so the
+     * gap between a building and the ground it was placed over can be measured. */
+    private final boolean enabled =
+            !"false".equalsIgnoreCase(System.getProperty("cubeworld.villageFix", "true"));
+
     public VillageGroundFixer(CubeWorldPlugin plugin) {
         this.plugin = plugin;
+        if (!enabled) {
+            plugin.getLogger().info("VillageGroundFixer: DISABLED via -Dcubeworld.villageFix=false");
+        }
         plugin.getServer().getScheduler().runTaskTimer(plugin, this::drain, 20L, 1L);
         if (ELEMENT_FIELD == null) {
             plugin.getLogger().warning(
@@ -97,7 +105,8 @@ public final class VillageGroundFixer implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onChunkLoad(ChunkLoadEvent e) {
-        if (!plugin.isCubeWorld(e.getWorld())
+        if (!enabled
+                || !plugin.isCubeWorld(e.getWorld())
                 || e.getWorld().getEnvironment() != World.Environment.NORMAL) {
             return;
         }
