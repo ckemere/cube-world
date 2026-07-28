@@ -25,6 +25,40 @@ import org.bukkit.craftbukkit.CraftWorld;
  */
 public final class SphereRouterHook {
 
+    /**
+     * Re-enable vanilla's aquifer system ({@code -Dcubeworld.aquifers=true}).
+     *
+     * <p>Aquifers were disabled so the ocean would be stable source water with
+     * no fluid ticks. It worked, but the cost was larger than it looked:
+     * {@code Aquifer.createDisabled} routes EVERY open block through the global
+     * fluid picker, which returns water for any y below sea level, so there is
+     * no dry cave anywhere under y63. Measured from real chunks -- below sea
+     * level air is 0.0-0.6% and fluid 4-13%; above it, air is 3-10%. Since our
+     * land mostly sits at y64-70, that leaves almost no explorable cave.
+     *
+     * <p>Open ocean does not actually need aquifers off. {@code computeSubstance}
+     * short-circuits to the global picker above {@code skipSamplingAboveY}
+     * (roughly 12 blocks above the preliminary surface) and explicitly does not
+     * schedule a fluid update there, so the water column over a seabed is
+     * handled by the same code either way. What the aquifer adds is a local
+     * water table BELOW the surface, which is exactly what we want back.
+     *
+     * <p>The precondition was {@code preliminarySurfaceLevel} telling the truth:
+     * the aquifer uses it to decide whether a block falls back to the global sea
+     * or gets a perched table. That is substituted with the Earth surface, and
+     * with the leaf hook the aquifer's {@code isDeepDarkRegion} check now reads
+     * OUR erosion and depth rather than mixing coordinate systems.
+     *
+     * <p>MEASURED after enabling, on fresh chunks: below sea level cave air went
+     * from ~0.3% to 2-7% and standing water from 4-13% down to 0-2.5%. Ocean is
+     * unaffected -- of 2340 sampled ocean columns the sea surface is y62 in
+     * every one, and the only interruptions in the water column are seagrass,
+     * coral and sea pickles; just 13 columns (0.6%) contain any air at all.
+     * TPS 20.0/19.1/19.1 and the terrain scorecard is unchanged at 18.5.
+     */
+    private static final boolean AQUIFERS =
+            "true".equalsIgnoreCase(System.getProperty("cubeworld.aquifers", "true"));
+
     private SphereRouterHook() {
     }
 
@@ -42,8 +76,11 @@ public final class SphereRouterHook {
                     .seed(world.getSeed())
                     .fold(rs.router());
             putFinalObject(rs, RandomState.class.getDeclaredField("router"), folded);
-            if (earthHeight) {
+            if (earthHeight && !AQUIFERS) {
                 disableAquifers(level, log);
+            } else if (earthHeight) {
+                log.info("Aquifers ENABLED: caves below sea level can hold air, "
+                        + "and underground water follows a local table.");
             }
             log.info("Sphere router hook: vanilla terrain folded onto the cube for '"
                     + world.getName() + "'"

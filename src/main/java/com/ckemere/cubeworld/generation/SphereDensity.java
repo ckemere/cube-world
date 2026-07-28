@@ -113,6 +113,18 @@ public final class SphereDensity {
     private static final double SEABED_JAG_HEADROOM =
             Double.parseDouble(System.getProperty("cubeworld.seabedHeadroom", "0.35"));
 
+    /**
+     * Drive the aquifer's floodedness from real hydrology
+     * ({@code -Dcubeworld.hydroAquifers=}).
+     *
+     * <p>Vanilla decides whether an underground pocket is dry, partially or
+     * fully flooded from a plain noise field. We have the data to do better:
+     * caves should be wet under rivers and in soaked climates and dry under
+     * deserts, which is a thing players can actually read off the landscape.
+     */
+    private static final boolean HYDRO_AQUIFERS =
+            !"false".equalsIgnoreCase(System.getProperty("cubeworld.hydroAquifers", "true"));
+
     /** Undersea ridges and trench walls ({@code -Dcubeworld.seabedJagged=}). */
     private static final boolean SEABED_JAGGED =
             !"false".equalsIgnoreCase(System.getProperty("cubeworld.seabedJagged", "true"));
@@ -414,7 +426,7 @@ public final class SphereDensity {
         // to fingerprint the node.
         return new NoiseRouter(
                 folded.barrierNoise(),
-                folded.fluidLevelFloodednessNoise(),
+                HYDRO_AQUIFERS ? new HydroFloodedness() : folded.fluidLevelFloodednessNoise(),
                 folded.fluidLevelSpreadNoise(),
                 folded.lavaNoise(),
                 folded.temperature(),
@@ -435,6 +447,78 @@ public final class SphereDensity {
      * {@code preliminarySurfaceLevel} slot. NoiseChunk floors this and caches it
      * per quantized column, so it only needs to be the altitude, not a density.
      */
+    /**
+     * Aquifer floodedness from Earth hydrology, standing in for
+     * {@code fluidLevelFloodednessNoise}.
+     *
+     * <p>The aquifer compares this against two thresholds (Aquifer
+     * .computeSurfaceLevel): above the higher one the pocket fills to sea level,
+     * above the lower it gets a randomised local table, below both it is dry. So
+     * the output is in the same [-1, 1] range as the noise it replaces, just
+     * with the sign carrying meaning -- wet climates and river courses positive,
+     * arid interiors negative.
+     */
+    private final class HydroFloodedness implements DensityFunction {
+        @Override
+        public double compute(FunctionContext c) {
+            double[] h = hydroCache.get();
+            int bx = c.blockX();
+            int bz = c.blockZ();
+            if (h[0] != bx || h[1] != bz) {
+                h[0] = bx;
+                h[1] = bz;
+                h[2] = hydroAt(bx + 0.5, bz + 0.5);
+            }
+            return h[2];
+        }
+
+        @Override
+        public void fillArray(double[] out, ContextProvider p) {
+            for (int i = 0; i < out.length; i++) {
+                out[i] = compute(p.forIndex(i));
+            }
+        }
+
+        @Override public DensityFunction mapAll(Visitor v) { return v.apply(this); }
+        @Override public DensityFunction mapChildren(Visitor v) { return this; }
+        @Override public double minValue() { return -1.0; }
+        @Override public double maxValue() { return 1.0; }
+        @Override
+        public net.minecraft.util.KeyDispatchDataCodec<? extends DensityFunction> codec() {
+            return DensityFunctions.constant(0).codec();
+        }
+    }
+
+    private final ThreadLocal<double[]> hydroCache =
+            ThreadLocal.withInitial(() -> new double[] {Double.NaN, Double.NaN, 0.0});
+
+    /**
+     * Wetness of the ground at a column, in the [-1, 1] the aquifer expects.
+     * Precipitation against evaporation (the same PET proxy the wetland rule
+     * uses, so a cold dry place still reads as waterlogged), lifted hard along
+     * river courses because a river IS a water table intersecting the surface.
+     */
+    private double hydroAt(double wx, double wz) {
+        Vec3 p = sampler.cubePointAt(wx, wz);
+        if (p == null || earth == null) {
+            return 0.0;
+        }
+        double[] ll = earth.toLonLat(p);
+        double precip = earth.sample("precip", ll[0], ll[1]);
+        double tempC = earth.sample("temp", ll[0], ll[1]);
+        if (Double.isNaN(precip)) {
+            precip = 700.0;
+        }
+        if (Double.isNaN(tempC)) {
+            tempC = 12.0;
+        }
+        double pet = Math.max(250.0, 300.0 + 45.0 * tempC);
+        // ratio ~0.2 in the Sahara, ~2.5 in the Amazon -> about -0.75 .. +0.75
+        double wet = Math.clamp((precip / pet - 0.75) / 1.0, -0.75, 0.75);
+        double river = EarthClimate.riverStrength(earth, sampler, wx, wz);
+        return Math.clamp(wet + 0.6 * river, -1.0, 1.0);
+    }
+
     private final class EarthSurfaceLevel implements DensityFunction {
         @Override
         public double compute(FunctionContext c) {
