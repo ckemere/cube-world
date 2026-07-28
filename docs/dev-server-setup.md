@@ -229,12 +229,22 @@ be rebuilt whenever `earth.dat` changes.
 Beyond `python3-numpy` / `python3-pil` from section 1:
 
 ```bash
-python3 -m pip install --user --break-system-packages netCDF4 tifffile
+python3 -m pip install --user --break-system-packages netCDF4 tifffile imagecodecs
 ```
 
 `netCDF4` reads the ETOPO `.nc`; `tifffile` reads the WorldClim GeoTIFFs.
+**`imagecodecs` is not optional** — the WorldClim TIFFs are LZW-compressed and
+`tifffile` cannot decode them without it, so the export dies partway through with
+`ValueError: <COMPRESSION.LZW: 5> requires the 'imagecodecs' package`.
 (`--break-system-packages` because this box's `python3 -m venv` ships without pip;
 a venv is cleaner if yours works.)
+
+If `python3 -m pip` reports "No module named pip", bootstrap it without root:
+
+```bash
+curl -sSL -o get-pip.py https://bootstrap.pypa.io/get-pip.py
+python3 get-pip.py --user --break-system-packages
+```
 
 ### Source data
 
