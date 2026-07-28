@@ -440,6 +440,89 @@ would also put real seams in the terrain.
 So the next step for the leaf hook is not more hooking; it is **making the axes
 smooth enough to be spline inputs**, starting with weirdness.
 
+## Round 2: leaf hook proven, depth rescaled, seabed given character
+
+### Real-chunk scoring
+
+`tools/realscore.py` wipes the region files, regenerates under a given set of
+flags, and reads the heightmaps back off disk. It exists because the in-game
+emulator can compare two runs of the SAME configuration but not two different
+ones -- under the leaf hook its agreement with real chunks falls from 89% to 31%
+within a block, so it could not be used to judge the leaf hook at all.
+
+    python3 tools/realscore.py --label baseline
+    python3 tools/realscore.py --label leafhook -- -Dcubeworld.leafHook=true
+
+### 1. The leaf hook is PROVEN, and is now the default
+
+Real chunks, same terrain, three areas:
+
+| | baseline | leaf hook |
+|---|---|---|
+| Everest rmse / bias | 40.38 / +34.9 | **21.89 / +18.8** |
+| Indonesia rmse | 1.38 | 1.80 |
+| Sahel rmse | 5.31 | 5.44 |
+| **overall rmse** | **22.57** | **12.57** |
+| drown | 2.7% | 2.5% |
+
+Vanilla's jaggedness spline is far more restrained than the `EarthJagged` it
+replaces, so peaks stop overshooting the elevation raster by 35 blocks.
+Everything else is unchanged, including biome accuracy at 98.7%. The value-range
+fingerprinting that used to REPLACE factor/jaggedness now only has to FIND them.
+
+### 2 and 3. Deep dark was too common, and it was the depth scale
+
+Deep dark measured 23-41% of deep columns. The cause was `EarthClimate.depth`
+using /70 while the terrain path already used vanilla's /128: every band in the
+biome table is authored in 128-block units, so /70 compresses the cave window
+toward the surface and stretches the deep-dark band to ~90 blocks where vanilla's
+is ~30.
+
+But /128 alone is wrong too, because our terrain is compressed. Vanilla land runs
+y64-128 and reaches depth 1.05 easily; ours mostly sits at y64-70, where
+`(65+64)/128 = 1.008` never gets there -- faithful units would delete deep dark
+from most of the world. Measured on a y103 column plus a global census:
+
+| mode | cave window starts | deep dark starts | deep dark 100 blk down |
+|---|---|---|---|
+| blocks70 (old) | 16 blk | 76 blk | 24.2% |
+| blocks128 (vanilla-faithful) | 28 blk | 136 blk | 0.0% -- unreachable under y70 land |
+| **proportional (adopted)** | 24 blk | 90 blk | **14.7%** |
+
+`proportional` measures depth as the fraction of the available column consumed,
+scaled so bedrock is always 1.5 -- the value vanilla's own gradient reaches at
+its world bottom. Every band is reachable under any terrain height, and it is
+scale-invariant, which matters because the vertical exaggeration is meant to
+change with the block scale. `-Dcubeworld.depthMode=blocks128` keeps the faithful
+option for when the vertical scale changes.
+
+### 4. Undersea ridges and trench walls
+
+`landGate` zeroed relief below sea level, so the Marianas and the mid-Atlantic
+ridge existed in the bathymetry (29 and 39 blocks of range) but generated as
+smooth ramps. That gate is replaced by a water-depth gate, and vanilla's
+jaggedness spline -- which is identically 0 for ocean continentalness, i.e. it
+structurally refuses jagged seafloor -- now has a seabed term added underneath.
+
+First attempt lifted the mid-Atlantic ridge clean out of the water: seabed RMSE
+2.4 -> 18.0 and **12.5% spurious land**. Jaggedness is added to DEPTH, so an
+amplitude of 0.6 displaces the surface by up to 0.6 * 128 = 77 blocks. Bounding
+the push to a fraction of the water actually overhead fixes it:
+
+| headroom | Marianas rmse | mid-Atlantic rmse | spurious land |
+|---|---|---|---|
+| unbounded | 20.0 | 18.0 | 12.5% |
+| 0.35 (adopted) | 7.9 | 4.6 | **0.0%** |
+| 0.20 | 7.0 | 3.4 | 0.0% |
+
+Seabed relief roughly doubles at zero cost.
+
+### Where round 2 landed
+
+`TOTAL 22.1 -> 18.5`, with spurious land 1.6% -> **0.0%**, shoreline step
+2.7 -> 1.9 blocks and 42% -> 37% unjumpable, biome accuracy unchanged at 98.7%,
+cave biomes at the surface still 0.00%. Real-chunk terrain RMSE 22.6 -> 12.6.
+
 ## Still open
 
 - **Everest 64.6%** -- best tile improvement so far but the weakest land tile.

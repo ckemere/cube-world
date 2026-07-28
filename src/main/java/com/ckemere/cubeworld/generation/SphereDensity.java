@@ -99,6 +99,24 @@ public final class SphereDensity {
     private static final double FACTOR_PINNED =
             Double.parseDouble(System.getProperty("cubeworld.factorPinned", "64.0"));
 
+    /**
+     * Water depth (blocks) at which the seabed may carry its full relief-driven
+     * character. Below this it is damped toward flat, because the failure the
+     * old landGate was written for is real: relief is max|dh| over a ~9 km
+     * baseline, so a shoal beside a deep drop reads as maximally rugged and
+     * punches rock spires through the sea surface.
+     */
+    private static final double SEABED_RELIEF_FULL =
+            Double.parseDouble(System.getProperty("cubeworld.seabedReliefFull", "28.0"));
+
+    /** Fraction of the overlying water a seabed feature may rise through. */
+    private static final double SEABED_JAG_HEADROOM =
+            Double.parseDouble(System.getProperty("cubeworld.seabedHeadroom", "0.35"));
+
+    /** Undersea ridges and trench walls ({@code -Dcubeworld.seabedJagged=}). */
+    private static final boolean SEABED_JAGGED =
+            !"false".equalsIgnoreCase(System.getProperty("cubeworld.seabedJagged", "true"));
+
     /** Ceiling for the underwater tightness guard. Lower than the land cap: the
      * seabed does not need pinning as hard, and a high factor is what collapses
      * vanilla's near-surface zone into cave territory. 24 leaves ~1.1 blocks of
@@ -134,13 +152,22 @@ public final class SphereDensity {
      * inside splines ({@code ridge} is visited 542 times, not once), and every
      * leaf resolves via {@code unwrapKey()}.
      *
+     * <p>PROVEN on real chunks (tools/realscore.py, which wipes the region and
+     * regenerates under each configuration, because the in-game emulator cannot
+     * compare configurations that change the density field's shape). Terrain
+     * RMSE against the Earth data 22.6 -> 12.6 blocks overall, driven by Everest
+     * 40.4 -> 21.9: vanilla's jaggedness spline is far more restrained than the
+     * EarthJagged it replaces, so peaks stop overshooting the raster by 35
+     * blocks. Coast and lowland unchanged, drowning 2.7% -> 2.5%, biome
+     * accuracy unchanged at 98.7%. Default ON.
+     *
      * <p>Height still comes from the raster: {@code depth} and
      * {@code preliminarySurfaceLevel} stay substituted, so vanilla's synthesised
      * {@code offset} is bypassed exactly as before. What changes is that the
      * SHAPE terms are vanilla's, driven by our axes.
      */
     private static final boolean LEAF_HOOK =
-            "true".equalsIgnoreCase(System.getProperty("cubeworld.leafHook", "false"));
+            "true".equalsIgnoreCase(System.getProperty("cubeworld.leafHook", "true"));
 
     /**
      * Decouple vanilla's cave-regime switch from {@code factor}
@@ -633,8 +660,12 @@ public final class SphereDensity {
                     return LEAF_HOOK ? new FreeboardGuard(node) : new EarthFactor();
                 }
                 if (isJaggednessSpline(node)) {
-                    // Leaf hook: vanilla's jaggedness spline over our axes.
-                    return LEAF_HOOK ? node : new EarthJagged();
+                    // Leaf hook: vanilla's jaggedness spline over our axes,
+                    // plus a seabed term vanilla structurally will not supply.
+                    if (LEAF_HOOK) {
+                        return SEABED_JAGGED ? new SeabedJagged(node) : node;
+                    }
+                    return new EarthJagged();
                 }
             }
             return node;
@@ -896,6 +927,74 @@ public final class SphereDensity {
      * waterline can survive. Deliberately only ever RAISES factor (tightens),
      * so vanilla's shape is preserved wherever there is room.
      */
+    /**
+     * Relief normalised for ANY column, land or sea.
+     *
+     * <p>{@link #reliefNorm} multiplies by {@link #landGate}, which is 0 below
+     * sea level -- that is why the seabed has no character anywhere: trenches
+     * and mid-ocean ridges exist in the bathymetry (measured 29 and 39 blocks of
+     * range) but are rendered as smooth ramps. The constraint was never
+     * "underwater", it was "not enough water overhead to hide the relief", so
+     * this gates on water depth instead.
+     */
+    private double reliefNormAny(int bx, int bz) {
+        fillColumn(bx, bz);
+        double clearance = reliefCache.get()[4] - EarthMapSpec.SEA_LEVEL;
+        double gate = clearance >= 0
+                ? Math.clamp(clearance / 8.0, 0.0, 1.0)
+                : Math.clamp(-clearance / SEABED_RELIEF_FULL, 0.0, 1.0);
+        return Math.clamp(reliefAt(bx, bz) / RELIEF_FULL, 0.0, 1.0) * gate;
+    }
+
+    /**
+     * Vanilla's jaggedness spline, with a seabed term added underneath.
+     *
+     * <p>Vanilla's spline is identically 0 for continentalness &lt;= -0.11
+     * (TerrainProvider.overworldJaggedness), i.e. it structurally refuses to
+     * make jagged seafloor -- reasonable for a synthesised world, wrong for one
+     * carrying real bathymetry. This only ever ADDS, so land is untouched.
+     */
+    private final class SeabedJagged implements DensityFunction {
+        private final DensityFunction spline;
+
+        SeabedJagged(DensityFunction spline) {
+            this.spline = spline;
+        }
+
+        @Override
+        public double compute(FunctionContext c) {
+            double v = spline.compute(c);
+            fillColumn(c.blockX(), c.blockZ());
+            if (reliefCache.get()[4] - EarthMapSpec.SEA_LEVEL >= 0) {
+                return v;
+            }
+            double n = reliefNormAny(c.blockX(), c.blockZ());
+            // Jaggedness is added to DEPTH, so an amplitude j displaces the
+            // surface by up to j * DEPTH_SLOPE blocks -- 0.6 is 77 blocks. Left
+            // unbounded it lifted the mid-Atlantic ridge clean out of the water
+            // (measured: seabed RMSE 2.4 -> 18.0 and 12.5% spurious land).
+            // Bound the push to a fraction of the water actually overhead.
+            double water = EarthMapSpec.SEA_LEVEL - reliefCache.get()[4];
+            double cap = (water * SEABED_JAG_HEADROOM) / DEPTH_SLOPE;
+            return Math.max(v, Math.min(JAGGED_MAX * n * n, cap));
+        }
+
+        @Override
+        public void fillArray(double[] out, ContextProvider p) {
+            for (int i = 0; i < out.length; i++) {
+                out[i] = compute(p.forIndex(i));
+            }
+        }
+
+        @Override public DensityFunction mapChildren(Visitor v) { return this; }
+        @Override public double minValue() { return spline.minValue(); }
+        @Override public double maxValue() { return Math.max(spline.maxValue(), JAGGED_MAX); }
+        @Override
+        public net.minecraft.util.KeyDispatchDataCodec<? extends DensityFunction> codec() {
+            return spline.codec();
+        }
+    }
+
     private final class FreeboardGuard implements DensityFunction {
         private final DensityFunction spline;
 

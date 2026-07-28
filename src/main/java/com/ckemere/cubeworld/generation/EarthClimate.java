@@ -384,13 +384,69 @@ public final class EarthClimate {
      * vanilla registers, where nearest-neighbour results get arbitrary. */
     public static final double DEEP_PLATEAU = 1.25;
 
+    /**
+     * Depth mode ({@code -Dcubeworld.depthMode=} {@code blocks70} |
+     * {@code blocks128} | {@code proportional}).
+     *
+     * <p>Vanilla's depth is {@code (surface - y) / 128} exactly, and the whole
+     * biome table is authored in those units: cave biomes at 0.2-0.9, surface
+     * biomes re-registered at 1.0, deep dark at 1.1. We used /70, which
+     * compresses every one of those bands toward the surface -- the cave window
+     * starts 14 blocks down instead of 26 -- and stretches the deep-dark band to
+     * ~90 blocks where vanilla's is ~30, which is why deep dark measured 23-41%
+     * of deep columns.
+     *
+     * <p>But /128 alone is not right either, because our terrain is vertically
+     * compressed. Vanilla land runs y64-128 and so reaches depth 1.05 (deep
+     * dark) comfortably; ours mostly sits at y64-70, where
+     * {@code (65+64)/128 = 1.008} never reaches it. Faithful units would delete
+     * deep dark from most of the world.
+     *
+     * <p>{@code proportional} resolves that without a magic constant: measure
+     * depth as the FRACTION of the available column consumed, scaled so bedrock
+     * is always 1.5 -- the value vanilla's own gradient reaches at its world
+     * bottom. Every band is then reachable under any terrain height, and it is
+     * scale-invariant, which matters because the whole point of the vertical
+     * exaggeration is that it changes with the block scale.
+     *
+     * <p>MEASURED, on a y103 column and a global census:
+     *
+     * <pre>
+     *              cave window     deep dark      deep dark share
+     *                 starts        starts        100 blocks down
+     *   blocks70      16 blk        76 blk            24.2%   band ~90 blk, too dominant
+     *   blocks128     28 blk       136 blk             0.0%   unreachable under y70 land
+     *   proportional  24 blk        90 blk            14.7%   reachable everywhere
+     * </pre>
+     *
+     * <p>{@code proportional} is the default. {@code blocks128} is the
+     * vanilla-faithful answer and would be right if the world were not
+     * compressed; it is kept so the comparison can be re-run if the vertical
+     * scale ever changes.
+     */
+    private static final String DEPTH_MODE =
+            System.getProperty("cubeworld.depthMode", "proportional");
+
+    /** Y of the world floor, for the proportional mode. */
+    private static final double WORLD_FLOOR = -64.0;
+
     public static double depth(double surfaceY, int y) {
-        // Cave biomes live at depth 0.2-0.9 (vanilla addUndergroundBiome), and
-        // bottom biomes at 1.1; run past that to DEEP_PLATEAU so both bands are
-        // reachable. 70 blocks per unit => caves 14-63 blocks down, deep dark
-        // from ~77 down. Ocean is naturally excluded: the deepest sea floor sits
-        // at y~2, so even at bedrock depth only reaches (2+64)/70 = 0.94.
-        return clamp((surfaceY - y) / 70.0, -0.1, DEEP_PLATEAU);
+        switch (DEPTH_MODE) {
+            case "blocks128" -> {
+                return clamp((surfaceY - y) / 128.0, -0.1, DEEP_PLATEAU);
+            }
+            case "proportional" -> {
+                double span = Math.max(8.0, surfaceY - WORLD_FLOOR);
+                return clamp(1.5 * (surfaceY - y) / span, -0.1, 1.5);
+            }
+            default -> {
+                // Cave biomes live at depth 0.2-0.9 (vanilla addUndergroundBiome),
+                // and bottom biomes at 1.1; run past that to DEEP_PLATEAU so both
+                // bands are reachable. 70 blocks per unit => caves 14-63 blocks
+                // down, deep dark from ~77 down.
+                return clamp((surfaceY - y) / 70.0, -0.1, DEEP_PLATEAU);
+            }
+        }
     }
 
     /**

@@ -614,8 +614,11 @@ public final class TerrainEval {
         for (int y = (int) Math.round(surf); y >= -64; y -= step) {
             String b = bp.getBiome(world, x, y, z).getKey().getKey();
             if (!b.equals(last)) {
-                sb.append(String.format(Locale.ROOT, "   y%5d  depth%6.2f  %s%n",
-                        y, (surf - y) / 70.0, b));
+                // Report blocks below the surface, not a hardcoded depth unit:
+                // the depth scale is now selectable and the old /70 display was
+                // simply wrong in the other modes.
+                sb.append(String.format(Locale.ROOT, "   y%5d  %4.0f blk down  %s%n",
+                        y, surf - y, b));
                 last = b;
             }
         }
