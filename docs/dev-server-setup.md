@@ -262,8 +262,21 @@ curl -O "https://geodata.ucdavis.edu/climate/worldclim/2_1/base/wc2.1_10m_bio.zi
 unzip -j wc2.1_10m_bio.zip 'wc2.1_10m_bio_1.tif' 'wc2.1_10m_bio_12.tif'
 ```
 
-Natural Earth coastline/river vectors auto-download into the same `data/` dir on
-first run, so nothing to do for those.
+**Natural Earth river and lake vectors must be fetched by hand.** The auto-download
+in `cubemap/earthdata.py` only fetches the coarse **110m** layers, which are used for
+preview renders. The `export` command reads the **10m** ones, and if they are absent
+it silently writes an ALL-ZERO river layer -- `earth.dat` looks fine, the header
+lists `river` and `river_y`, and the world simply has no rivers anywhere. That
+happened once and was only caught by probing the raster directly.
+
+```bash
+cd tools/cubemap/data
+BASE=https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson
+curl -O "$BASE/ne_10m_rivers_lake_centerlines.geojson"   # ~7 MB, 1455 features
+curl -O "$BASE/ne_10m_lakes.geojson"                     # ~5 MB, 1355 features
+```
+
+Coastline vectors for the preview renders do auto-download, so nothing to do there.
 
 ### Build
 
@@ -307,7 +320,11 @@ for path in ("run/earth.dat", "run/coast.dat"):
 PY
 ```
 
-Expect exactly the five layers above with `roll=-70.0`. Then regenerate the world
+Expect exactly the five layers above with `roll=-70.0`. **Also check the river layer
+is not empty** -- the header alone will not tell you. Read the raw arrays and count
+non-zeros: `height`/`temp`/`precip` come out ~99%, and **`river` should be about
+2-3%**. A `river` of 0.00% means the 10m Natural Earth vectors were missing when the
+export ran, and the world will have no rivers at all. Then regenerate the world
 (section 6) — the rasters are read at world-gen time, so existing chunks keep the
 old terrain.
 

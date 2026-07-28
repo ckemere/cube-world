@@ -418,6 +418,63 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                         c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8]), NamedTextColor.AQUA));
                 return true;
             }
+            case "riverscan" -> {
+                int cx = Integer.parseInt(args[1]);
+                int cz = Integer.parseInt(args[2]);
+                int side = args.length > 3 ? Integer.parseInt(args[3]) : 64;
+                int stride = args.length > 4 ? Integer.parseInt(args[4]) : 2;
+                com.ckemere.cubeworld.generation.EarthData ed = maps.earthData();
+                if (ed == null) {
+                    sender.sendMessage(Component.text("no Earth data", NamedTextColor.RED));
+                    return true;
+                }
+                int hits = 0;
+                double best = 0;
+                int bx = cx;
+                int bz = cz;
+                int half = side / 2;
+                for (int a = -half; a < half; a++) {
+                    for (int b = -half; b < half; b++) {
+                        int x = cx + a * stride;
+                        int z = cz + b * stride;
+                        double rs = com.ckemere.cubeworld.generation.EarthClimate
+                                .riverStrength(ed, sampler(), x + 0.5, z + 0.5);
+                        if (rs > best) {
+                            best = rs;
+                            bx = x;
+                            bz = z;
+                        }
+                        if (rs > 0.5) {
+                            hits++;
+                        }
+                    }
+                }
+                sender.sendMessage(Component.text(String.format(Locale.ROOT,
+                        "riverscan (%d,%d) %dx%d stride %d: max strength %.3f at (%d,%d); "
+                        + "%d columns > 0.5", cx, cz, side, side, stride, best, bx, bz, hits),
+                        NamedTextColor.AQUA));
+                return true;
+            }
+            case "riverat" -> {
+                int bx = Integer.parseInt(args[1]);
+                int bz = Integer.parseInt(args[2]);
+                com.ckemere.cubeworld.generation.EarthData ed = maps.earthData();
+                if (ed == null) {
+                    sender.sendMessage(Component.text("no Earth data", NamedTextColor.RED));
+                    return true;
+                }
+                double rs = com.ckemere.cubeworld.generation.EarthClimate.riverStrength(
+                        ed, sampler(), bx + 0.5, bz + 0.5);
+                double ry = com.ckemere.cubeworld.generation.EarthClimate.riverWaterY(
+                        ed, sampler(), bx + 0.5, bz + 0.5);
+                double h = sampler().heightAt(bx + 0.5, bz + 0.5);
+                sender.sendMessage(Component.text(String.format(Locale.ROOT,
+                        "river at (%d,%d): strength=%.3f  river_y=%s m  surface y=%.2f",
+                        bx, bz, rs,
+                        Double.isNaN(ry) ? "NaN" : String.format(Locale.ROOT, "%.0f", ry), h),
+                        NamedTextColor.AQUA));
+                return true;
+            }
             case "biomecolumn" -> {
                 String out = com.ckemere.cubeworld.generation.TerrainEval.biomeColumn(
                         org.bukkit.Bukkit.getWorlds().get(0), sampler(),

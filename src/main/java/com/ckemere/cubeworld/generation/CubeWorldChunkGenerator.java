@@ -221,6 +221,75 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
      *   river appearing to climb it.
      * </ul>
      */
+    /**
+     * Post-carver re-seal ({@code -Dcubeworld.resealWater=}).
+     *
+     * <p>Bukkit runs the stages in this order:
+     * {@code fillFromNoise -> generateSurface -> applyCarvers -> generateCaves}.
+     * Rivers and straits are cut in {@code generateSurface}, so vanilla's
+     * carvers -- which run afterwards -- can drive a tunnel straight through a
+     * riverbed or a strait floor. The result is the classic wart: a river that
+     * runs past a cave mouth and pours into it.
+     *
+     * <p>{@code generateCaves} is called immediately AFTER the carvers and is
+     * the only hook on that side of them, so the water beds are simply laid
+     * again here. Re-running the same carve is safe: it clears a channel to the
+     * water surface, refills source water and re-lays a solid bed, so a column
+     * the carvers left intact ends up byte-identical and one they breached is
+     * repaired.
+     *
+     * <p>Only the river and strait paths are repeated -- not the ocean gap-fill
+     * or the shoal clean-up, which reason about the column as a whole and are
+     * not what a carver damages.
+     */
+    @Override
+    public void generateCaves(@NotNull WorldInfo worldInfo, @NotNull Random random,
+                              int chunkX, int chunkZ, @NotNull ChunkData chunkData) {
+        if (!RESEAL_WATER || !vanillaTerrain()) {
+            return;
+        }
+        EarthData earth = maps.earthData();
+        if (earth == null || !earth.hasLayer("height")) {
+            return;
+        }
+        boolean hasRivers = earth.hasLayer("river");
+        MapSampler sampler = maps.mapFor(worldInfo.getSeed()).sampler();
+        int minY = chunkData.getMinHeight();
+        long t0 = System.nanoTime();
+        for (int lx = 0; lx < 16; lx++) {
+            for (int lz = 0; lz < 16; lz++) {
+                double wx = (chunkX << 4) + lx + 0.5;
+                double wz = (chunkZ << 4) + lz + 0.5;
+                com.ckemere.cubeworld.geometry.Vec3 p = sampler.cubePointAt(wx, wz);
+                if (p == null) {
+                    continue;
+                }
+                double[] ll = earth.toLonLat(p);
+                StraitField.Hit strait = StraitField.sample(ll[0], ll[1]);
+                if (strait != null) {
+                    carveStraitColumn(chunkData, lx, lz, minY, strait.depthBlocks(), earth, ll);
+                    continue;
+                }
+                if (!hasRivers) {
+                    continue;
+                }
+                double r = earth.sample("river", ll[0], ll[1]);
+                if (Double.isNaN(r) || r <= RIVER_RIM_THRESHOLD) {
+                    continue;
+                }
+                int predicted = (int) Math.round(sampler.heightAt(wx, wz));
+                if (predicted > SEA_LEVEL) {
+                    carveRiverColumn(earth, sampler, chunkData, lx, lz, wx, wz,
+                            minY, predicted, ll, r);
+                }
+            }
+        }
+        GenProfiler.add("resealWater", t0);
+    }
+
+    private static final boolean RESEAL_WATER =
+            !"false".equalsIgnoreCase(System.getProperty("cubeworld.resealWater", "true"));
+
     private void carveWater(WorldInfo worldInfo, int chunkX, int chunkZ, ChunkData chunkData) {
         EarthData earth = maps.earthData();
         if (earth == null || !earth.hasLayer("height")) {
@@ -274,9 +343,12 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
                     }
                 }
 
-                // 3. Ocean gap-fill: aquifers are disabled (SphereRouterHook), so
-                // placed water is stable source (no fluid ticks), but density caves
-                // in the seabed can leave air pockets right under the surface water.
+                // 3. Ocean gap-fill: density caves in the seabed can leave air
+                // pockets right under the surface water. (Aquifers are back ON
+                // now -- see SphereRouterHook -- and handle the water table below
+                // the seabed; this only closes voids inside the ocean column
+                // itself, which the aquifer deliberately leaves to the global
+                // fluid picker.)
                 // Fill any such gap down to the first solid seabed with source water.
                 if (surfWater) {
                     int y = SEA_LEVEL - 1;
