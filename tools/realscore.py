@@ -98,6 +98,32 @@ def start_server(flags):
     raise SystemExit("server did not come up")
 
 
+def station_regions():
+    """Regions containing a registered teleport station.
+
+    Wiping one of these destroys the physical pad while leaving the station in
+    stations.csv, which is the exact failure CLAUDE.md warns about: seedCities
+    then sees the city as already built, skips it, and the network points at
+    empty terrain. It happened once -- Pataliputra, region r.35.-6, which is
+    inside the Everest test area -- so it is now refused rather than remembered.
+    """
+    out = set()
+    csv = os.path.join(ROOT, "run/plugins/CubeWorld/stations.csv")
+    if not os.path.exists(csv):
+        return out
+    for line in open(csv):
+        if line.startswith("#"):
+            continue
+        p = line.split(",")
+        if len(p) < 4:
+            continue
+        try:
+            out.add((int(p[1]) >> 9, int(p[3]) >> 9))
+        except ValueError:
+            continue
+    return out
+
+
 def wipe_regions():
     """Remove the region files covering the test areas so chunks regenerate."""
     if not os.path.isdir(REGION):
@@ -107,6 +133,13 @@ def wipe_regions():
         for dx in (-HALF, HALF):
             for dz in (-HALF, HALF):
                 want.add(((cx + dx) >> 9, (cz + dz) >> 9))
+    protected = station_regions()
+    clash = want & protected
+    if clash:
+        raise SystemExit(
+            f"refusing to wipe region(s) {sorted(clash)}: they contain teleport "
+            f"stations, and regenerating would leave the registry pointing at "
+            f"empty terrain. Move the test area or clear the station first.")
     for rx, rz in want:
         for sub in ("region", "entities", "poi"):
             p = os.path.join(ROOT, "run/world/dimensions/minecraft/overworld",
