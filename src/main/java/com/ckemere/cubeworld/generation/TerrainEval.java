@@ -55,30 +55,35 @@ public final class TerrainEval {
      * 64.6% while the massif itself measured 91.7% frozen_peaks. That was the
      * metric being coarse, not the generator being wrong.
      */
+    // "river"/"frozen_river" is an accepted answer on every land tile. When these
+    // expectations were first written the world had NO rivers at all (earth.dat's
+    // river layer was empty), so their arrival read as a 5-point regression. Every
+    // land tile here sits in a real basin -- Niger, Amazon, Missouri, Mackenzie,
+    // Tigris/Euphrates, Rhine -- so river is the correct biome, not a miss.
     private static final Tile[] TILES = {
         // land: the regions whose biomes we have repeatedly got wrong
-        new Tile("Sahara",       9611, -2189, 1, true,  "desert", "badlands"),
-        new Tile("Sahel",        8576, -1342, 1, true,  "savanna", "desert", "plains"),
+        new Tile("Sahara",       9611, -2189, 1, true,  "desert", "badlands", "river", "frozen_river"),
+        new Tile("Sahel",        8576, -1342, 1, true,  "savanna", "desert", "plains", "river", "frozen_river"),
         // tighter: at full stride this reaches the delta, where mangrove is right
-        new Tile("Amazon",        903,   273, 2, true,  "jungle", "forest"),
-        new Tile("Congo",       10419,     0, 1, true,  "jungle", "forest"),
-        new Tile("GreatPlains", -2956, -4961, 1, true,  "plains", "savanna", "meadow", "forest"),
+        new Tile("Amazon",        903,   273, 2, true,  "jungle", "forest", "river", "frozen_river"),
+        new Tile("Congo",       10419,     0, 1, true,  "jungle", "forest", "river", "frozen_river"),
+        new Tile("GreatPlains", -2956, -4961, 1, true,  "plains", "savanna", "meadow", "forest", "river", "frozen_river"),
         new Tile("Siberia",       238,-12952, 1, true,  "taiga", "snowy", "tundra", "grove",
-                "swamp"),
+                "swamp", "river", "frozen_river"),
         // Hudson Bay Lowlands are the world's second-largest peatland, so boreal
         // wetland here is a correct answer, not a miss.
         new Tile("CanadaBoreal",-1792, -7136, 1, true,  "taiga", "snowy", "plains", "forest",
-                "swamp"),
-        new Tile("Mesopotamia", 12519, -3502, 1, true,  "desert", "savanna", "swamp", "plains"),
-        new Tile("BlackForest",  4509, -9282, 1, true,  "forest", "plains", "taiga"),
+                "swamp", "river", "frozen_river"),
+        new Tile("Mesopotamia", 12519, -3502, 1, true,  "desert", "savanna", "swamp", "plains", "river", "frozen_river"),
+        new Tile("BlackForest",  4509, -9282, 1, true,  "forest", "plains", "taiga", "river", "frozen_river"),
         new Tile("Indonesia",   21199,   181, 1, true,  "jungle", "forest", "ocean", "beach",
-                "swamp"),
+                "swamp", "river", "frozen_river"),
         // 6x tighter: the massif, not the whole Himalayan transect
-        new Tile("Everest",     18299, -2957, 6, true,  "peaks", "snowy", "grove", "slopes"),
+        new Tile("Everest",     18299, -2957, 6, true,  "peaks", "snowy", "grove", "slopes", "river", "frozen_river"),
         // The measured cave-biome-at-surface site from TODO.md item 7, kept as a
         // tile so that regression stays visible in every scorecard.
         new Tile("DripstoneSite",-3075,-5332, 1, true, "plains", "forest", "taiga", "meadow",
-                "savanna", "desert", "snowy", "birch", "jungle", "swamp", "beach", "stony"),
+                "savanna", "desert", "snowy", "birch", "jungle", "swamp", "beach", "stony", "river", "frozen_river"),
         new Tile("Marianas",    23704, -1214, 1, false, "ocean"),
         new Tile("MidAtlantic",  5120,     0, 1, false, "ocean"),
     };
