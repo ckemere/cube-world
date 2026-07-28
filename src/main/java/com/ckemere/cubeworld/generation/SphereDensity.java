@@ -125,6 +125,41 @@ public final class SphereDensity {
     private static final boolean HYDRO_AQUIFERS =
             !"false".equalsIgnoreCase(System.getProperty("cubeworld.hydroAquifers", "true"));
 
+    /**
+     * Carve river VALLEYS into the density field, early
+     * ({@code -Dcubeworld.riverValley=}).
+     *
+     * <p>Rivers are currently stamped late, in {@code generateSurface}, which
+     * runs AFTER vanilla's {@code buildSurface}. So a river is a slot cut into
+     * finished terrain: it has no valley, no banks, and its bed has to be chosen
+     * by hand ({@code riverBedBlock}) because the surface rules already ran on
+     * the pre-river height.
+     *
+     * <p>Lowering the target surface along the river course instead makes the
+     * valley part of the terrain itself -- everything downstream then sees it,
+     * so the banks are shaped by the same factor/jaggedness machinery as any
+     * other slope and the surface rules dress the valley floor for free.
+     *
+     * <p>Deliberately only the VALLEY, not the channel. Density is evaluated on
+     * a 4x8x4 cell lattice, so nothing narrower than a cell can exist in it at
+     * all; a river drawn this way could never be made narrow. The late stamp
+     * keeps doing the channel, which is sub-cell and precise. That is also how
+     * real ground looks -- a broad floodplain with a narrow river in it -- and
+     * it separates "the valley is wide because the raster is 3.7 km/px" from
+     * "the water should be a few blocks", which is currently one number doing
+     * both jobs.
+     */
+    private static final boolean RIVER_VALLEY =
+            "true".equalsIgnoreCase(System.getProperty("cubeworld.riverValley", "false"));
+
+    /** Blocks the valley floor sits above the river's own water surface. */
+    private static final double VALLEY_FLOOR_ABOVE =
+            Double.parseDouble(System.getProperty("cubeworld.valleyFloorAbove", "1.0"));
+
+    /** River-strength at which the valley reaches full depth. */
+    private static final double VALLEY_FULL_AT =
+            Double.parseDouble(System.getProperty("cubeworld.valleyFullAt", "0.55"));
+
     /** Undersea ridges and trench walls ({@code -Dcubeworld.seabedJagged=}). */
     private static final boolean SEABED_JAGGED =
             !"false".equalsIgnoreCase(System.getProperty("cubeworld.seabedJagged", "true"));
@@ -374,7 +409,36 @@ public final class SphereDensity {
                 }
             }
         }
-        return h;
+        return RIVER_VALLEY ? applyRiverValley(wx, wz, h) : h;
+    }
+
+    /**
+     * Pull the target surface down toward the river's own water level, by how
+     * strongly this column reads as river. Only ever LOWERS -- a river lies in a
+     * valley, it never stands on a ridge -- so terrain away from the course is
+     * untouched and the peak cones above are safe.
+     */
+    private double applyRiverValley(double wx, double wz, double h) {
+        if (earth == null || !earth.hasLayer("river")) {
+            return h;
+        }
+        double r = EarthClimate.riverStrength(earth, sampler, wx, wz);
+        if (r <= 0.0) {
+            return h;
+        }
+        double ry = EarthClimate.riverWaterY(earth, sampler, wx, wz);
+        if (Double.isNaN(ry)) {
+            return h;
+        }
+        double floor = EarthMapSpec.elevationToBlockY(ry) + VALLEY_FLOOR_ABOVE;
+        if (floor >= h) {
+            return h;                       // already at or below the water plane
+        }
+        // smoothstep on river strength: a gentle lip at the valley edge rather
+        // than a step, so the banks read as slopes the noise can shape.
+        double t = Math.clamp(r / VALLEY_FULL_AT, 0.0, 1.0);
+        double w = t * t * (3 - 2 * t);
+        return h + (floor - h) * w;
     }
 
     /** Debug dump of the terms that decide the surface at a column. */
@@ -1255,24 +1319,10 @@ public final class SphereDensity {
         }
 
         private double surfaceHeight(double wx, double wz) {
-            double h = sampler.heightAt(wx, wz);
-            // Restore real summits the coarse raster averaged down: lift the
-            // surface to the nearest >=6000 m (or prominent) peak's cone. Only
-            // where the cone rises above the base, so ranges keep their shape.
-            if (peaks != null) {
-                Vec3 p = sampler.cubePointAt(wx, wz);
-                if (p != null) {
-                    double[] ll = earth.toLonLat(p);
-                    double cone = peaks.coneElevation(ll[0], ll[1]);
-                    if (cone > 0) {
-                        double ph = EarthMapSpec.elevationToBlockY(cone);
-                        if (ph > h) {
-                            h = ph;
-                        }
-                    }
-                }
-            }
-            return h;
+            // One definition, shared with the harness's targetSurfaceY -- these
+            // were duplicated, which is how a 45-block disagreement at Everest
+            // went unnoticed once already.
+            return targetSurfaceY(wx, wz);
         }
 
         @Override
