@@ -418,6 +418,104 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                         c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8]), NamedTextColor.AQUA));
                 return true;
             }
+            case "biomecolumn" -> {
+                String out = com.ckemere.cubeworld.generation.TerrainEval.biomeColumn(
+                        org.bukkit.Bukkit.getWorlds().get(0), sampler(),
+                        Integer.parseInt(args[1]), Integer.parseInt(args[2]),
+                        args.length > 3 ? Integer.parseInt(args[3]) : 4);
+                for (String line : out.split("\n")) {
+                    sender.sendMessage(Component.text(line, NamedTextColor.AQUA));
+                }
+                return true;
+            }
+            case "undergroundcensus" -> {
+                String out = com.ckemere.cubeworld.generation.TerrainEval.undergroundCensus(
+                        org.bukkit.Bukkit.getWorlds().get(0), maps.earthData(), sampler(),
+                        Integer.parseInt(args[1]),
+                        args.length > 2 ? Integer.parseInt(args[2]) : 200,
+                        args.length > 3 ? Integer.parseInt(args[3]) : 300);
+                for (String line : out.split("\n")) {
+                    sender.sendMessage(Component.text(line, NamedTextColor.AQUA));
+                }
+                return true;
+            }
+            case "biomehist" -> {
+                String out = com.ckemere.cubeworld.generation.TerrainEval.biomeHist(
+                        org.bukkit.Bukkit.getWorlds().get(0),
+                        Integer.parseInt(args[1]), Integer.parseInt(args[2]),
+                        args.length > 3 ? Integer.parseInt(args[3]) : 16,
+                        args.length > 4 ? Integer.parseInt(args[4]) : 8);
+                for (String line : out.split("\n")) {
+                    sender.sendMessage(Component.text(line, NamedTextColor.AQUA));
+                }
+                return true;
+            }
+            case "surfacedump" -> {
+                String out = com.ckemere.cubeworld.generation.TerrainEval.surfaceDump(
+                        org.bukkit.Bukkit.getWorlds().get(0), sampler(),
+                        Integer.parseInt(args[1]), Integer.parseInt(args[2]),
+                        Integer.parseInt(args[3]), Integer.parseInt(args[4]));
+                for (String line : out.split("\n")) {
+                    sender.sendMessage(Component.text(line, NamedTextColor.WHITE));
+                }
+                return true;
+            }
+            case "drownprobe" -> {
+                String out = com.ckemere.cubeworld.generation.TerrainEval.drownProbe(
+                        org.bukkit.Bukkit.getWorlds().get(0), maps.earthData(), sampler(),
+                        Integer.parseInt(args[1]), Integer.parseInt(args[2]),
+                        args.length > 3 ? Integer.parseInt(args[3]) : 12,
+                        args.length > 4 ? Integer.parseInt(args[4]) : 24,
+                        args.length > 5 ? Integer.parseInt(args[5]) : 12);
+                for (String line : out.split("\n")) {
+                    sender.sendMessage(Component.text(line, NamedTextColor.AQUA));
+                }
+                return true;
+            }
+            case "evaluate" -> {
+                boolean withTerrain = !(args.length > 1 && args[1].equalsIgnoreCase("fast"));
+                int side = args.length > 2 ? Integer.parseInt(args[2]) : 12;
+                int stride = args.length > 3 ? Integer.parseInt(args[3]) : 24;
+                String out = com.ckemere.cubeworld.generation.TerrainEval.run(
+                        org.bukkit.Bukkit.getWorlds().get(0), maps.earthData(), sampler(),
+                        side, stride, withTerrain);
+                for (String line : out.split("\n")) {
+                    sender.sendMessage(Component.text(line, NamedTextColor.AQUA));
+                }
+                return true;
+            }
+            case "axisstats" -> {
+                String mode = args.length > 1 ? args[1].toLowerCase(Locale.ROOT) : "vanilla";
+                int side = args.length > 2 ? Integer.parseInt(args[2]) : 400;
+                int stride = args.length > 3 ? Integer.parseInt(args[3]) : 64;
+                String out;
+                if (mode.startsWith("v")) {
+                    out = com.ckemere.cubeworld.generation.AxisStats.vanilla(
+                            org.bukkit.Bukkit.getWorlds().get(0), side, stride);
+                } else {
+                    out = com.ckemere.cubeworld.generation.AxisStats.earth(
+                            maps.earthData(), sampler(),
+                            org.bukkit.Bukkit.getWorlds().get(0).getSeed(), side, stride);
+                }
+                for (String line : out.split("\n")) {
+                    sender.sendMessage(Component.text(line, NamedTextColor.AQUA));
+                }
+                return true;
+            }
+            case "routerprobe" -> {
+                org.bukkit.World w = args.length > 1
+                        ? org.bukkit.Bukkit.getWorld(args[1])
+                        : (sender instanceof org.bukkit.entity.Player pl
+                                ? pl.getWorld() : org.bukkit.Bukkit.getWorlds().get(0));
+                if (w == null) {
+                    sender.sendMessage(Component.text("no such world", NamedTextColor.RED));
+                    return true;
+                }
+                for (String line : com.ckemere.cubeworld.generation.RouterProbe.report(w).split("\n")) {
+                    sender.sendMessage(Component.text(line, NamedTextColor.AQUA));
+                }
+                return true;
+            }
             case "terrainprobe" -> {
                 if (args.length != 3) {
                     sender.sendMessage(Component.text("Usage: /cubeworld terrainprobe <x> <z>",
