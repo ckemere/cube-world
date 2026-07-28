@@ -18,6 +18,34 @@ public final class EarthClimate {
     }
 
     /**
+     * A/B switch for the three climate changes made during the calibration work
+     * (erosion quantile map, tropical-wetland coast rule, -8 C temperature
+     * knot). Set {@code -Dcubeworld.legacyClimate=true} to restore the previous
+     * behaviour exactly.
+     *
+     * <p>It exists so the improvement can be measured like-for-like. Several
+     * corrections were also made to the evaluation harness itself, and those
+     * move the score without moving the generator; without a way to run the OLD
+     * generator under the NEW metric there is no honest way to say how much of
+     * the gain was real.
+     *
+     * <p>Read once at class-init from a system property rather than being
+     * runtime-settable, because CubeWorldBiomeProvider memoises biomes per
+     * column per thread and a mid-run flip would serve stale answers.
+     */
+    public static final boolean LEGACY =
+            "true".equalsIgnoreCase(System.getProperty("cubeworld.legacyClimate", "false"));
+
+    // ---- pre-calibration values, kept only for the A/B ----
+    private static final double[] LEGACY_TT =
+            {-1.0, -0.45, -0.22, -0.05, 0.18, 0.45, 0.70, 1.0};
+    private static final double[] LEGACY_RM = {0, 48, 153, 382, 578, 1053, 2000};
+    private static final double[] LEGACY_RE =
+            {0.44, 0.30, 0.05, -0.2225, -0.375, -0.78, -1.0};
+    private static final double LEGACY_LOWLAND_EROSION = 0.40;
+    private static final double LEGACY_MOUNTAIN_FULL_BLOCKS = 45.0;
+
+    /**
      * Temperature param, with wetness folded in at the hot end. Vanilla's
      * hottest temperature row is desert regardless of humidity, and jungle
      * lives one row cooler — but real tropical desert and rainforest have
@@ -34,11 +62,23 @@ public final class EarthClimate {
     //   24+    -> hot row (0.45..1.0): jungle (if wet, folded below) / desert
     // The old curve pushed 12C up to 0.2, i.e. into the subtropical savanna/
     // jungle row, so temperate grassland (the Great Plains) came out jungle.
+    // MEASURED FIX: -8 C used to map to exactly -0.45, which is vanilla's edge
+    // between the frozen row (snowy_plains / ice_spikes) and the cold row
+    // (taiga). Siberian taiga has a mean annual temperature of about -8 C, so it
+    // landed a hair INSIDE the frozen row and came out `ice_spikes` across the
+    // whole evaluation tile. Worse, the boreal humidity correction below is
+    // guarded by `baseTemp >= -0.45`, so it never fired there either -- the one
+    // rule meant to make cold forests taiga was switched off precisely where
+    // taiga belongs.
+    //
+    // Moving the knot to -0.38 puts the frozen-row boundary at about -10 C,
+    // which is where real tundra actually starts, and lets Siberia fall in the
+    // cold row where the boreal correction floors humidity into the taiga column.
     private static final double[] TE = {-25, -8, 0, 8, 18, 24, 30, 40};
-    private static final double[] TT = {-1.0, -0.45, -0.22, -0.05, 0.18, 0.45, 0.70, 1.0};
+    private static final double[] TT = {-1.0, -0.38, -0.22, -0.05, 0.18, 0.45, 0.70, 1.0};
 
     public static double temperature(double tempC, double humidityParam, boolean land) {
-        double base = interp(tempC, TE, TT);
+        double base = interp(tempC, TE, LEGACY ? LEGACY_TT : TT);
         // Land only. Two corrections, because vanilla's hottest row is desert
         // regardless of moisture while jungle lives one row cooler:
         if (land && base > 0.55 && humidityParam >= -0.65) {
@@ -135,25 +175,76 @@ public final class EarthClimate {
      * erosion bands collapsed to about one. That is what made
      * {@code windswept_savanna} — whose box is exactly E [0.45, 0.55] — 17% of all
      * land, and left swamps to appear only as overspill from the +-0.16 noise. */
-    private static final double[] RM = {0, 48, 153, 382, 578, 1053, 2000};
-    private static final double[] RE = {0.44, 0.30, 0.05, -0.2225, -0.375, -0.78, -1.0};
+    /**
+     * Relief (m) -> erosion, as a QUANTILE MAP: our measured global relief
+     * distribution transported onto vanilla's measured erosion distribution, so
+     * that by construction our erosion has vanilla's spread while keeping
+     * Earth's arrangement.
+     *
+     * <p>Both sides were measured, not fitted by eye ({@code /cubeworld
+     * axisstats vanilla} and {@code ... earth}). Relief percentile q maps to
+     * vanilla's erosion percentile 100-q, because high relief means
+     * least-eroded means LOW erosion:
+     *
+     * <pre>
+     *   relief p01    2.18 m -> +0.70   (vanilla erosion p99)
+     *   relief p25   42.40 m -> +0.15   (vanilla p75)
+     *   relief p50  107.84 m -> -0.06   (vanilla p50)
+     *   relief p75  251.51 m -> -0.27   (vanilla p25)
+     *   relief p95  709.20 m -> -0.56   (vanilla p05)
+     *   relief p99 1306.20 m -> -0.76   (vanilla p01)
+     * </pre>
+     *
+     * <p>The previous table put 84% of the world in ONE erosion band and left
+     * vanilla's mountain/peak/deep-dark bands (E &lt; -0.2225) holding 1.0%
+     * against vanilla's 29.7% -- which is why peak biomes were absent, deep dark
+     * was unreachable and windswept_savanna over-fired. The cause was not the
+     * curve but the ALTITUDE GATE below, now removed; see the note there.
+     */
+    private static final double[] RM = {
+        0, 2.18, 7.75, 15.07, 42.40, 107.84, 251.51, 491.32, 709.20, 1306.20, 3000};
+    private static final double[] RE = {
+        1.00, 0.70, 0.45, 0.33, 0.15, -0.06, -0.27, -0.46, -0.56, -0.76, -1.00};
 
-    /** Erosion for genuinely low ground, before any relief is credited. Kept below
-     * vanilla's windswept band (0.45) so flat land does not pile into it. */
-    private static final double LOWLAND_EROSION = 0.40;
-
+    /**
+     * Erosion from local relief alone. The altitude gate this used to apply is
+     * GONE, for two measured reasons.
+     *
+     * <p>First, it was a units bug of the same species as {@code depth}'s
+     * divisor: the gate opened over {@code MOUNTAIN_FULL_BLOCKS = 45} BLOCKS
+     * above sea, but after the vertical compression in {@link EarthMapSpec} 45
+     * blocks is 2500 m of real elevation, so it only opened fully on the tiny
+     * fraction of Earth above 2500 m. A 1000 m plateau sits 8.6 blocks above sea
+     * and so kept 81% of the flat-lowland value. A constant that means a
+     * physical thing was expressed in blocks and silently rescaled with the
+     * vertical exaggeration.
+     *
+     * <p>Second, it pinned the whole ocean -- 70% of the world -- to a single
+     * value, because {@code blocksAboveSea} is negative at sea. That made
+     * bathymetric relief invisible, so trenches and mid-ocean ridges could not
+     * read as least-eroded, and no ocean column could ever qualify for deep
+     * dark (which needs E &lt; -0.375). Ocean erosion is safe to vary: vanilla
+     * registers every ocean biome with erosion {@code FULL_RANGE}
+     * (OverworldBiomeBuilder.addOffCoastBiomes), so it cannot change which
+     * ocean biome is chosen -- it only reaches the underground bands.
+     *
+     * <p>The gate's original purpose -- stopping a low coastal cell beside a
+     * mountain from inheriting mountain-grade relief -- is a RELIEF MEASUREMENT
+     * problem (max|dh| over a ~9 km baseline is blunt), and belongs there
+     * rather than in an altitude fudge.
+     */
     public static double erosion(double ruggedMeters, double blocksAboveSea) {
-        double fromRelief = interp(ruggedMeters, RM, RE);
-        // Altitude still gates how much the relief is believed: vanilla couples
-        // "jagged" to "tall", and relief is max|dh| to neighbours ~9 km out, so a
-        // low coastal cell beside a mountain would otherwise read as mountain.
-        double gate = clamp(blocksAboveSea / MOUNTAIN_FULL_BLOCKS, 0.0, 1.0);
-        return clamp(LOWLAND_EROSION * (1.0 - gate) + fromRelief * gate, -1, 1);
+        if (LEGACY) {
+            double fromRelief = interp(ruggedMeters, LEGACY_RM, LEGACY_RE);
+            double gate = clamp(blocksAboveSea / LEGACY_MOUNTAIN_FULL_BLOCKS, 0.0, 1.0);
+            return clamp(LEGACY_LOWLAND_EROSION * (1.0 - gate) + fromRelief * gate, -1, 1);
+        }
+        return erosion(ruggedMeters);
     }
 
-    /** Ungated form, for callers with no altitude to hand (map previews). */
+    /** Erosion from relief. */
     public static double erosion(double ruggedMeters) {
-        return erosion(ruggedMeters, MOUNTAIN_FULL_BLOCKS);
+        return clamp(interp(ruggedMeters, RM, RE), -1, 1);
     }
 
     /**
@@ -169,6 +260,31 @@ public final class EarthClimate {
      */
     public static double wetland(double elevM, double ruggedMeters, double precipMm,
                                 double tempC) {
+        return wetland(elevM, ruggedMeters, precipMm, tempC, Double.NaN);
+    }
+
+    /**
+     * Wetland score, with the coast distance that separates a tropical delta
+     * from a tropical rainforest.
+     *
+     * <p>MEASURED FAILURE this fixes: the Amazon came out {@code mangrove_swamp}
+     * over a whole tile (12.5% correct in the evaluation suite). The basin is
+     * flat, low (14-64 m) and very wet (2300 mm), so the flat/low/wet product
+     * saturates -- exactly the case the old comment claimed the elevation term
+     * guarded against, and it did not, because the lower Amazon really is that
+     * low.
+     *
+     * <p>Elevation cannot separate them, because the Amazon mouth and a real
+     * delta sit at the same height. What separates them is DISTANCE TO THE SEA,
+     * and the split is physical rather than a fudge: tropical wetlands on Earth
+     * are overwhelmingly coastal -- mangrove belts, deltas, tidal marsh -- while
+     * flat wet tropical INTERIOR is rainforest. Boreal wetlands are the
+     * opposite: Siberian and Canadian peatlands are inland, because what
+     * waterlogs them is frozen ground and absent evaporation, not the sea. So
+     * the coast requirement is applied only at the warm end.
+     */
+    public static double wetland(double elevM, double ruggedMeters, double precipMm,
+                                double tempC, double coastKm) {
         if (elevM < 0) {
             return 0.0;
         }
@@ -194,7 +310,16 @@ public final class EarthClimate {
         // it so genuine wetlands saturate: measured ~3% of land above 0.15.
         double s = flat * low * wet;
         double t = clamp((s - 0.10) / (0.35 - 0.10), 0.0, 1.0);
-        return t * t * (3 - 2 * t);
+        double score = t * t * (3 - 2 * t);
+        // Warm + far inland => rainforest, not swamp. Full strength within
+        // ~120 km of the sea, fading out by ~400 km; only applied above 10 C so
+        // boreal peatlands (which are inland by nature) are untouched.
+        if (!LEGACY && score > 0 && tempC > 10.0 && !Double.isNaN(coastKm)) {
+            double warm = clamp((tempC - 10.0) / 8.0, 0.0, 1.0);
+            double near = 1.0 - clamp((coastKm - 120.0) / 280.0, 0.0, 1.0);
+            score *= (1.0 - warm) + warm * near;
+        }
+        return score;
     }
 
     /** Erosion inside a wetland, i.e. within vanilla's swamp band [0.55, 1.0]. */
@@ -218,7 +343,13 @@ public final class EarthClimate {
                                    double ruggedMeters, double precipMm, double tempC,
                                    double blocksAboveSea) {
         double e = erosion(ruggedMeters, blocksAboveSea);
-        double w = wetland(elevM, ruggedMeters, precipMm, tempC);
+        // Coast distance is already loaded as a sidecar for continentalness;
+        // reuse it to keep tropical interiors (the Amazon) out of the swamp band.
+        double coastKm = Double.NaN;
+        if (elevM >= 0 && earth != null && earth.hasLayer("coast")) {
+            coastKm = earth.sample("coast", lon, lat);
+        }
+        double w = wetland(elevM, ruggedMeters, precipMm, tempC, coastKm);
         return w > 0 ? e * (1.0 - w) + WETLAND_EROSION * w : e;
     }
 
@@ -266,7 +397,7 @@ public final class EarthClimate {
      * The full 6-parameter vanilla climate at a world position, plus the raw
      * elev/temp/precip for debugging. Returns null off the net. Layout:
      * [temperature, humidity, continentalness, erosion, depth, weirdness,
-     *  elevM, tempC, precipMm].
+     *  elevM, tempC, precipMm, reliefM].
      */
     public static double[] params(EarthData earth, MapSampler sampler,
                                   double wx, double wz, int y, long seed) {
@@ -312,13 +443,13 @@ public final class EarthClimate {
         // outermost variant bands start at |W| = 0.78. A small deadband remains so
         // W never sits at 0, where vanilla selects valley/river variants that would
         // fight our dedicated river layer.
-        double weird = Math.signum(raw) * (0.05 + 0.98 * Math.abs(raw));
+        double weird = Math.signum(raw) * weirdMagnitude(Math.abs(raw));
 
         double tc = temp + nt;
         double h = clamp(humidity(precip) + nh, -1, 1);
         // Boreal correction (cold forests grow on modest rainfall): floor moisture
         // in the cold band so Siberia/Canada come out taiga, not cold steppe.
-        double baseTemp = interp(tc, TE, TT);
+        double baseTemp = interp(tc, TE, LEGACY ? LEGACY_TT : TT);
         if (land && baseTemp >= -0.45 && baseTemp < -0.05) {
             h = Math.max(h, 0.12);
         }
@@ -327,7 +458,33 @@ public final class EarthClimate {
                 clamp(erosionAt(earth, lon, lat, elev, rugged, precip, temp,
                         surfaceY - EarthMapSpec.SEA_LEVEL) + ne, -1, 1),
                 depth(surfaceY, y), weird,
-                elev, temp, precip};
+                elev, temp, precip,
+                // [9] local relief in metres -- the PHYSICAL quantity behind
+                // erosion. Exposed so the evaluation harness can build a
+                // quantile map from measured relief instead of a fitted guess.
+                rugged};
+    }
+
+    /**
+     * |weirdness| stretched to reach vanilla's outer bands.
+     *
+     * <p>MEASURED GAP: our weirdness spanned only p01 -0.67 .. p99 +0.64 against
+     * vanilla's -0.84 .. +0.86, because the linear form saturated at whatever
+     * the fbm happened to reach. Vanilla's extreme bands were therefore dead
+     * code for us -- most visibly {@code sulfur_caves}, whose box demands
+     * weirdness <= -0.85, so it could never be selected anywhere in the world.
+     *
+     * <p>Same remedy as erosion: transport our measured magnitudes onto
+     * vanilla's, quantile for quantile. The middle is left alone (our p25/p75
+     * already match vanilla's) and only the tail is stretched, which keeps the
+     * small deadband near 0 -- W must never sit at 0, where vanilla selects the
+     * valley/river variants that would fight our dedicated river layer.
+     */
+    private static final double[] WMAG_IN =  {0.00, 0.05, 0.25, 0.41, 0.50, 0.58, 0.67, 1.00};
+    private static final double[] WMAG_OUT = {0.05, 0.10, 0.25, 0.46, 0.59, 0.72, 0.86, 1.00};
+
+    private static double weirdMagnitude(double absRaw) {
+        return clamp(interp(absRaw, WMAG_IN, WMAG_OUT), 0.0, 1.0);
     }
 
     // Noise-blend constants — must match biomegen/biomegen.py exactly.
