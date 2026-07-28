@@ -481,13 +481,34 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
         return vanillaTerrain();
     }
 
+    /**
+     * Vanilla's carvers -- {@code CaveWorldCarver} and {@code CanyonWorldCarver},
+     * i.e. tunnel caves and ravines ({@code -Dcubeworld.carvers=}).
+     *
+     * <p>This used to return false, with a comment saying carvers "do not engage
+     * with custom generators on 26.x" and that {@link CaveCarver} handled caves
+     * instead. Both halves were wrong. CraftBukkit's
+     * {@code CustomChunkGenerator.applyCarvers} calls straight through to the
+     * delegate whenever this returns true, and {@code CaveCarver} has been dead
+     * code since {@code vanillaTerrain()} was hardcoded to true -- it only runs
+     * in the branch of {@code generateSurface} that is now unreachable. So the
+     * world had no ravines and no tunnel caves at all, only what the density
+     * field carves.
+     *
+     * <p>The remaining half of the objection is real but small: carvers are
+     * seeded per source chunk ({@code setLargeFeatureSeed(seed, chunkX, chunkZ)}),
+     * so a tunnel crossing a cube seam is cut on one side and not the other.
+     * That is a wart confined to the twelve seam lines, against having tunnels
+     * and ravines everywhere else -- and carvers share the chunk's aquifer, so
+     * with aquifers back on they inherit the hydrology too.
+     */
     @Override
     public boolean shouldGenerateCaves() {
-        // Vanilla carvers do not engage with custom generators on 26.x (and
-        // are chunk-seeded, so they could never match across seams anyway);
-        // CaveCarver handles caves seam-consistently instead.
-        return false;
+        return CARVERS;
     }
+
+    private static final boolean CARVERS =
+            !"false".equalsIgnoreCase(System.getProperty("cubeworld.carvers", "true"));
 
     @Override
     public boolean shouldGenerateDecorations() {
