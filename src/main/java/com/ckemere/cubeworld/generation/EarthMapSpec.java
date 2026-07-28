@@ -66,8 +66,37 @@ public final class EarthMapSpec implements MapSpec {
      * instead of 1 -- measured median shoreline step +3 on river edges, though
      * OCEAN coasts stay gentle at median +1 with half the shoreline at sea level.
      */
-    private static final double LAND_FREEBOARD_MIN = 3.0;
+    // 2, not 3, since the 3D noise is now attenuated near the waterline
+    // (SphereDensity.NOISE_ATTENUATION) rather than being out-run by a raised
+    // freeboard. Measured: shoreline wall 73% -> 41% unjumpable.
+    //
+    // 1 is IMPOSSIBLE, not merely risky. The target is where the density
+    // zero-crossing sits, so a target of y=63 puts the topmost SOLID block at
+    // y=62 -- the water surface itself. Every low-lying tile read 93-100%
+    // drowned at freeboard 1 regardless of what else was tuned.
+    //
+    // Sweepable so the coastline can be searched without a rebuild.
+    private static final double LAND_FREEBOARD_MIN =
+            Double.parseDouble(System.getProperty("cubeworld.landFreeboard", "2.0"));
 
+    // NOTE (measured, do not "fix" casually): these knots give 100 m only 0.5
+    // blocks and 300 m only 1.8, so with LAND_FREEBOARD_MIN = 3 every land
+    // column below ~450 m is floored to exactly y=65 -- the inhabited band of
+    // the world is one flat table (lowland slope 0.39 blocks per 6) behind a
+    // 3.8-block shoreline wall, 73% of it unjumpable.
+    //
+    // Steepening the low end was tried and measured: knots
+    // {0,60,150,400,800,1500,2500,4000} -> {0,1.2,3.2,8,15,26,50,114} improved
+    // the lowland slope to 0.55 (+41%) but moved the unjumpable shoreline
+    // fraction only 73% -> 71%, because the step is set by the FLOOR, not the
+    // curve. It also cost rmse(flat) 4.3 -> 5.0 and TOTAL 15.4 -> 15.8, and it
+    // changes every land height, which is the change TODO item 7 trap 4 warns
+    // deleted Antioch's village. Reverted as not worth it on its own.
+    //
+    // The shoreline wall cannot be fixed here. See FACTOR_PINNED in
+    // SphereDensity: lowering the floor needs a tighter surface, a tighter
+    // surface collapses vanilla's near-surface zone, and caves then eat the
+    // shore. The cave-regime threshold has to be decoupled from `factor` first.
     private static final double[] LOW_M = {0, 100, 300, 800, 1500, 2500, 4000};
     private static final double[] LOW_B = {0, 0.5, 1.8, 6.0, 15.0, 45.0, 114.0};
 

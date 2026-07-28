@@ -39,6 +39,7 @@ public final class SphereRouterHook {
                 return false;
             }
             NoiseRouter folded = SphereDensity.forSampler(sampler, faceSize, earthHeight, earth)
+                    .seed(world.getSeed())
                     .fold(rs.router());
             putFinalObject(rs, RandomState.class.getDeclaredField("router"), folded);
             if (earthHeight) {

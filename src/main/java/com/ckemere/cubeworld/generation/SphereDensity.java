@@ -66,14 +66,151 @@ public final class SphereDensity {
      * before this: 7 of 11 genuinely-land points generated as open sea, including
      * one at 502 m.
      */
-    private static final double FREEBOARD_TIGHTNESS = 128.0;
+    private static final double FREEBOARD_TIGHTNESS =
+            Double.parseDouble(System.getProperty("cubeworld.freeboardTightness", "128.0"));
 
-    /** Tightest the surface may be pinned, i.e. at least 0.5 blocks of wobble. */
-    private static final double FACTOR_PINNED = 64.0;
+    /**
+     * Tightest the surface may be pinned, i.e. at least 0.5 blocks of wobble.
+     *
+     * <p>DO NOT raise this to pin the shoreline harder. Tried and measured:
+     * 256 (with LAND_FREEBOARD_MIN dropped to 1) took drowning from 2.4% to
+     * 21.9% of intended-land columns -- confirmed in real generated chunks, not
+     * just the emulator.
+     *
+     * <p>The reason is a coupling that is easy to miss. {@code factor} does not
+     * only set surface tightness; it also decides WHERE vanilla switches from
+     * near-surface to full-cave treatment, because that switch is a threshold on
+     * {@code sloped_cheese} ({@code SURFACE_DENSITY_THRESHOLD = 1.5625}) and
+     * {@code sloped_cheese ~ 4 * depth * factor}. The surface-regime depth is
+     * therefore {@code 70 * 1.5625 / (4 * factor)} blocks:
+     *
+     * <pre>
+     *   factor   9  ->  3.04 blocks of near-surface zone
+     *   factor  98  ->  0.28
+     *   factor 256  ->  0.11
+     * </pre>
+     *
+     * <p>Past about factor 60 the near-surface zone is thinner than one block,
+     * so the full cave subtraction (cheese, spaghetti, entrances) applies
+     * immediately under the surface and carves voids straight through it. The
+     * measured drops were 3 to 44 blocks -- far too large for surface noise, and
+     * unmistakably caves.
+     */
+    private static final double FACTOR_PINNED =
+            Double.parseDouble(System.getProperty("cubeworld.factorPinned", "64.0"));
+
+    /** Ceiling for the underwater tightness guard. Lower than the land cap: the
+     * seabed does not need pinning as hard, and a high factor is what collapses
+     * vanilla's near-surface zone into cave territory. 24 leaves ~1.1 blocks of
+     * near-surface zone. */
+    private static final double FACTOR_SEABED_MAX = 24.0;
     /** Off switch for A/B: {@code -Dcubeworld.earthShape=false} restores vanilla's
      * own (geography-blind) factor/jaggedness. */
     private static final boolean EARTH_SHAPE =
             !"false".equalsIgnoreCase(System.getProperty("cubeworld.earthShape", "true"));
+
+    /**
+     * THE LEAF HOOK ({@code -Dcubeworld.leafHook=true}).
+     *
+     * <p>Two ways to put Earth into vanilla's terrain graph:
+     *
+     * <p><b>Today (off):</b> mid-graph surgery. We find the {@code factor} and
+     * {@code jaggedness} splines by FINGERPRINTING THEIR VALUE RANGES and swap
+     * them for our own, and swap {@code depth} too. Vanilla's splines never run.
+     * That leaves two independent derivations of the world -- EarthClimate makes
+     * the biome axes, SphereDensity makes the terrain -- with nothing forcing
+     * them to agree. It is also brittle: any Mojang retune of a spline's range
+     * silently un-hooks us.
+     *
+     * <p><b>Leaf hook (on):</b> replace the LEAVES instead --
+     * {@code continentalness}, {@code erosion} and {@code ridge} -- matched by
+     * REGISTRY KEY, not by value range. Vanilla's own offset/factor/jaggedness
+     * splines are splines over exactly those three leaves, so vanilla then
+     * computes the terrain shape itself, from our geography. That is where its
+     * axis correlations come from, and it is the thing we have been unable to
+     * reproduce by hand.
+     *
+     * <p>Verified on the live router before building this: a visitor DOES reach
+     * inside splines ({@code ridge} is visited 542 times, not once), and every
+     * leaf resolves via {@code unwrapKey()}.
+     *
+     * <p>Height still comes from the raster: {@code depth} and
+     * {@code preliminarySurfaceLevel} stay substituted, so vanilla's synthesised
+     * {@code offset} is bypassed exactly as before. What changes is that the
+     * SHAPE terms are vanilla's, driven by our axes.
+     */
+    private static final boolean LEAF_HOOK =
+            "true".equalsIgnoreCase(System.getProperty("cubeworld.leafHook", "false"));
+
+    /**
+     * Decouple vanilla's cave-regime switch from {@code factor}
+     * ({@code -Dcubeworld.caveDepthSwitch=true}).
+     *
+     * <p>Vanilla chooses between "near the surface, cut entrances only" and
+     * "deep, apply the full cave subtraction" with
+     * {@code rangeChoice(slopedCheese, -1e6, 1.5625, ...)}. Because
+     * {@code slopedCheese ~ 4 * depth * factor}, the depth at which that switch
+     * happens is {@code 1.5625 * DEPTH_SLOPE / (4 * factor)} -- i.e. it shrinks
+     * as the surface is pinned harder:
+     *
+     * <pre>
+     *   factor  9  ->  3.0 blocks of near-surface zone   (open country)
+     *   factor 43  ->  0.64                              (coastal, freeboard 3)
+     *   factor 64  ->  0.43                              (the pinned cap)
+     * </pre>
+     *
+     * <p>So the freeboard rule, whose entire job is to keep the shoreline dry,
+     * simultaneously deletes the protective zone there and lets full cave voids
+     * open one block under the beach. That is why the attempt to lower
+     * LAND_FREEBOARD_MIN drove drowning from 2.4% to 21.9% -- the drops were
+     * caves, not noise. It also means the CURRENT settings already run coasts
+     * with a 0.64-block zone.
+     *
+     * <p>This replaces the switch's INPUT with a plain depth-in-blocks proxy, so
+     * the near-surface zone is a fixed thickness everywhere regardless of how
+     * hard the surface is pinned. Vanilla's two branches are untouched.
+     */
+    private static final boolean CAVE_DEPTH_SWITCH =
+            "true".equalsIgnoreCase(System.getProperty("cubeworld.caveDepthSwitch", "false"));
+
+    /** Thickness of the near-surface (entrances-only) zone, in blocks. Vanilla's
+     * own value varies 3-7 blocks over open country; 6 sits in that range. */
+    /**
+     * Attenuate the 3D terrain noise near the waterline instead of raising
+     * {@code factor} ({@code -Dcubeworld.noiseAttenuation=true}).
+     *
+     * <p>THE KEY CONSTRAINT, measured the hard way. Vanilla's whole cave system
+     * is calibrated on {@code slopedCheese} being O(1) near the surface -- the
+     * near-surface branch is {@code min(slopedCheese, 5 * entrances)}, so the two
+     * terms are meant to be comparable. Our freeboard rule pushes {@code factor}
+     * to 40-250 where vanilla's own spline never exceeds 6.3, which makes
+     * {@code slopedCheese} enormous; the {@code min} then ALWAYS picks the
+     * entrances term and carves air straight through the ground. Measured drops
+     * of 8-22 blocks at 800-975 m Saharan columns, and 31.8% of land drowning.
+     *
+     * <p>Raising factor is therefore a dead end: it is the one knob that both
+     * tightens the surface and breaks the caves. Attenuating the noise achieves
+     * the first without the second -- surface displacement is
+     * {@code base3d * attenuation * DEPTH_SLOPE / (4 * factor)}, so scaling the
+     * noise shrinks the wobble while leaving {@code slopedCheese} in the range
+     * vanilla's caves expect.
+     */
+    private static final boolean NOISE_ATTENUATION =
+            "true".equalsIgnoreCase(System.getProperty("cubeworld.noiseAttenuation", "true"));
+
+    /** Freeboard (blocks above sea) at which the 3D noise runs at full strength. */
+    private static final double ATTEN_FULL_AT =
+            Double.parseDouble(System.getProperty("cubeworld.attenFull", "48.0"));
+
+    /** Floor on the attenuation, so the surface never becomes perfectly flat. */
+    private static final double ATTEN_MIN =
+            Double.parseDouble(System.getProperty("cubeworld.attenMin", "0.03"));
+
+    private static final double SURFACE_ZONE_BLOCKS =
+            Double.parseDouble(System.getProperty("cubeworld.surfaceZone", "6.0"));
+
+    /** Vanilla's cave-regime threshold, from NoiseRouterData. */
+    private static final double SURFACE_DENSITY_THRESHOLD = 1.5625;
 
     /** Vanilla's factor and jaggedness reach the density tree as Spline nodes, and
      * NoiseRouter exposes neither (they live inside finalDensity). RandomState
@@ -112,9 +249,17 @@ public final class SphereDensity {
      * 128 blocks, and 2*pi*R ~= face perimeter keeps horizontal features vanilla-sized.
      */
     private final boolean foldBlendedNoise;
+    /** World seed, so the leaf axes match EarthClimate's noise blend exactly. */
+    private volatile long seed;
 
     private SphereDensity(MapSampler sampler, int faceSize, boolean earthHeight, EarthData earth) {
         this(sampler, faceSize, earthHeight, earth, false);
+    }
+
+    /** Set by the hook; the axes must use the same seed the biome layer does. */
+    public SphereDensity seed(long s) {
+        this.seed = s;
+        return this;
     }
 
     private SphereDensity(MapSampler sampler, int faceSize, boolean earthHeight, EarthData earth,
@@ -167,6 +312,32 @@ public final class SphereDensity {
     /** Last overworld instance, for the terrainprobe debug command. */
     public static volatile SphereDensity LAST;
 
+    /**
+     * The surface height the density path is actually AIMING at, i.e. exactly
+     * what {@link EarthDepth} centres {@code depth} on. This is NOT
+     * {@code sampler.heightAt} -- named summits are restored on top of the cell
+     * grid, so at Everest the two differ by ~45 blocks. Scoring against the
+     * wrong one manufactures a huge RMSE that is purely an artefact (TODO.md
+     * item 7, trap 3: three different surface heights exist and they disagree).
+     */
+    public double targetSurfaceY(double wx, double wz) {
+        double h = sampler.heightAt(wx, wz);
+        if (peaks != null && earth != null) {
+            Vec3 p = sampler.cubePointAt(wx, wz);
+            if (p != null) {
+                double[] ll = earth.toLonLat(p);
+                double cone = peaks.coneElevation(ll[0], ll[1]);
+                if (cone > 0) {
+                    double ph = EarthMapSpec.elevationToBlockY(cone);
+                    if (ph > h) {
+                        h = ph;
+                    }
+                }
+            }
+        }
+        return h;
+    }
+
     /** Debug dump of the terms that decide the surface at a column. */
     public String probeTerms(double wx, double wz) {
         int bx = (int) Math.floor(wx);
@@ -175,10 +346,20 @@ public final class SphereDensity {
         double rel = reliefAt(bx, bz);
         double lg = landGate(bx, bz);
         double rn = reliefNorm(bx, bz);
-        double f = FACTOR_FLAT + (FACTOR_RUGGED - FACTOR_FLAT) * rn;
+        double fRelief = FACTOR_FLAT + (FACTOR_RUGGED - FACTOR_FLAT) * rn;
+        // Report the factor ACTUALLY used, not just the relief term -- the two
+        // differ by an order of magnitude wherever the freeboard rule bites, and
+        // printing the relief term alone once sent an investigation the wrong way.
+        double freeboard = natural - EarthMapSpec.SEA_LEVEL;
+        double f = freeboard < 0 ? fRelief
+                : Math.min(FACTOR_PINNED,
+                        Math.max(fRelief, FREEBOARD_TIGHTNESS / Math.max(freeboard, 1.0)));
         return String.format(java.util.Locale.ROOT,
-                "natural=%.2f | relief=%.0fm landGate=%.2f reliefNorm=%.2f factor=%.1f "
-                + "(noise ~%.1f blk)", natural, rel, lg, rn, f, 32.0 / Math.max(f, 0.01));
+                "natural=%.2f | relief=%.0fm landGate=%.2f reliefNorm=%.2f "
+                + "factor=%.1f (relief term %.1f, noise ~%.2f blk) "
+                + "surface-regime depth %.2f blk",
+                natural, rel, lg, rn, f, fRelief, 32.0 / Math.max(f, 0.01),
+                70.0 * 1.5625 / (4.0 * Math.max(f, 0.01)));
     }
 
     public NoiseRouter fold(NoiseRouter router) {
@@ -402,11 +583,32 @@ public final class SphereDensity {
             }
             switch (node.getClass().getSimpleName()) {
                 case "Noise", "Shift", "ShiftA", "ShiftB", "ShiftedNoise" -> {
+                    if (LEAF_HOOK && earthHeight && earth != null) {
+                        String key = RouterProbe.noiseKeyOf(node);
+                        if (key != null) {
+                            switch (key) {
+                                case "minecraft:continentalness" -> {
+                                    return new EarthAxis(node, 2);
+                                }
+                                case "minecraft:erosion" -> {
+                                    return new EarthAxis(node, 3);
+                                }
+                                case "minecraft:ridge" -> {
+                                    return new EarthAxis(node, 5);
+                                }
+                                default -> {
+                                }
+                            }
+                        }
+                    }
                     return new Remap(node);
                 }
                 case "BlendedNoise" -> {
                     if (foldBlendedNoise) {
                         return new Remap(node);
+                    }
+                    if (NOISE_ATTENUATION && earthHeight && earth != null) {
+                        return new AttenuatedNoise(node);
                     }
                 }
                 default -> {
@@ -419,12 +621,20 @@ public final class SphereDensity {
             // the right altitude but its steepness and spikiness come from vanilla
             // Perlin that is uncorrelated with Earth, so a real 8000 m peak can get
             // flat-plains treatment and a real plain can get spikes.
+            if (earthHeight && CAVE_DEPTH_SWITCH && isCaveRangeChoice(node)) {
+                return rebuildCaveChoice(node);
+            }
             if (earthHeight && EARTH_SHAPE && earth != null) {
                 if (isFactorSpline(node)) {
-                    return new EarthFactor();
+                    // Leaf hook: keep VANILLA's factor spline (now reading our
+                    // axes) and only apply the freeboard floor on top, so the
+                    // waterline stays pinned. Wrapping instead of replacing is
+                    // the whole point -- the spline's shape is the part we want.
+                    return LEAF_HOOK ? new FreeboardGuard(node) : new EarthFactor();
                 }
                 if (isJaggednessSpline(node)) {
-                    return new EarthJagged();
+                    // Leaf hook: vanilla's jaggedness spline over our axes.
+                    return LEAF_HOOK ? node : new EarthJagged();
                 }
             }
             return node;
@@ -489,7 +699,7 @@ public final class SphereDensity {
      * column), so caching them together keeps the 30-city distance scan and the
      * raster/peak lookups off the hot path. */
     private final ThreadLocal<double[]> reliefCache =
-            ThreadLocal.withInitial(() -> new double[] {Double.NaN, Double.NaN, 0.0, 0.0, 0.0});
+            ThreadLocal.withInitial(() -> new double[] {Double.NaN, Double.NaN, 0.0, 0.0, 0.0, 0.0});
 
     private void fillColumn(int bx, int bz) {
         double[] c = reliefCache.get();
@@ -512,6 +722,10 @@ public final class SphereDensity {
         c[1] = bz;
         c[2] = r;
         c[4] = sampler.heightAt(bx + 0.5, bz + 0.5);
+        // [5] is the SAME surface EarthDepth centres depth on, i.e. with named
+        // summits restored. The two differ by ~45 blocks at Everest, and using
+        // the cell grid here would put a whole summit in the deep-cave regime.
+        c[5] = targetSurfaceY(bx + 0.5, bz + 0.5);
     }
 
     private double reliefAt(int bx, int bz) {
@@ -545,14 +759,25 @@ public final class SphereDensity {
             double n = reliefNorm(c.blockX(), c.blockZ());   // also fills the column cache
             double relief = FACTOR_FLAT + (FACTOR_RUGGED - FACTOR_FLAT) * n;
             double freeboard = reliefCache.get()[4] - EarthMapSpec.SEA_LEVEL;
-            if (freeboard <= 0.0) {
+            if (freeboard < 0.0) {
                 return relief;                                // seabed: nothing to protect
             }
-            // Whichever rule wants the tighter surface wins, so this can only ever
-            // REMOVE noise: on a mountain the freeboard is large, the term goes to
-            // nothing and the relief rule is untouched.
+            // MEASURED FIX: the guard used to be `freeboard <= 0`, which sent
+            // every column sitting EXACTLY on the waterline down the seabed
+            // path and gave it no protection at all -- factor 9, i.e. ~3.6
+            // blocks of noise, straddling sea level. That is where essentially
+            // all of the measured drowning came from: 2.5% of land columns went
+            // under, and they were not marginal coastline -- most were ground
+            // the raster puts above 60 m, drowned only because the coarse cell
+            // grid had flattened them onto the waterline first.
+            //
+            // A column at freeboard 0 is the shoreline, not the sea floor, and
+            // it is the one place the surface most needs pinning. Flooring the
+            // divisor at 1 gives it FACTOR_PINNED (~0.5 blocks of wobble) and a
+            // crisp waterline; genuinely submerged columns still take the
+            // seabed path above.
             return Math.min(FACTOR_PINNED,
-                    Math.max(relief, FREEBOARD_TIGHTNESS / freeboard));
+                    Math.max(relief, FREEBOARD_TIGHTNESS / Math.max(freeboard, 1.0)));
         }
 
         @Override
@@ -593,6 +818,235 @@ public final class SphereDensity {
         @Override
         public net.minecraft.util.KeyDispatchDataCodec<? extends DensityFunction> codec() {
             return DensityFunctions.constant(0).codec();
+        }
+    }
+
+    /**
+     * A climate axis read from {@link EarthClimate}, standing in for one of
+     * vanilla's noise leaves. {@code slot} indexes {@code EarthClimate.params}:
+     * 2 continentalness, 3 erosion, 5 weirdness.
+     *
+     * <p>Reports the WRAPPED node's value range rather than its own, because
+     * {@code mapAll} maps children before parents, so by the time the visitor
+     * sees the factor/jaggedness splines their coordinates are already these --
+     * and those splines are still identified by their value range. Changing the
+     * reported range would silently un-hook the very splines we are trying to
+     * keep.
+     */
+    private final class EarthAxis implements DensityFunction {
+        private final DensityFunction inner;
+        private final int slot;
+
+        EarthAxis(DensityFunction inner, int slot) {
+            this.inner = inner;
+            this.slot = slot;
+        }
+
+        @Override
+        public double compute(FunctionContext c) {
+            double[] a = axisCache.get();
+            int bx = c.blockX();
+            int bz = c.blockZ();
+            if (a[0] != bx || a[1] != bz) {
+                double[] p = EarthClimate.params(earth, sampler, bx + 0.5, bz + 0.5,
+                        (int) Math.round(sampler.heightAt(bx + 0.5, bz + 0.5)), seed);
+                a[0] = bx;
+                a[1] = bz;
+                if (p == null) {
+                    a[2] = 0;
+                    a[3] = 0;
+                    a[4] = 0;
+                } else {
+                    a[2] = p[2];
+                    a[3] = p[3];
+                    a[4] = p[5];
+                }
+            }
+            return switch (slot) {
+                case 2 -> a[2];
+                case 3 -> a[3];
+                default -> a[4];
+            };
+        }
+
+        @Override
+        public void fillArray(double[] out, ContextProvider p) {
+            for (int i = 0; i < out.length; i++) {
+                out[i] = compute(p.forIndex(i));
+            }
+        }
+
+        @Override public DensityFunction mapAll(Visitor v) { return v.apply(this); }
+        @Override public DensityFunction mapChildren(Visitor v) { return this; }
+        @Override public double minValue() { return inner.minValue(); }
+        @Override public double maxValue() { return inner.maxValue(); }
+        @Override
+        public net.minecraft.util.KeyDispatchDataCodec<? extends DensityFunction> codec() {
+            return inner.codec();
+        }
+    }
+
+    /** Per-thread column cache for the three Earth axes: [bx, bz, C, E, W]. */
+    private final ThreadLocal<double[]> axisCache =
+            ThreadLocal.withInitial(() -> new double[] {Double.NaN, Double.NaN, 0, 0, 0});
+
+    /**
+     * Vanilla's factor spline with our freeboard floor applied on top: the
+     * surface may be looser than vanilla wants but never looser than the
+     * waterline can survive. Deliberately only ever RAISES factor (tightens),
+     * so vanilla's shape is preserved wherever there is room.
+     */
+    private final class FreeboardGuard implements DensityFunction {
+        private final DensityFunction spline;
+
+        FreeboardGuard(DensityFunction spline) {
+            this.spline = spline;
+        }
+
+        @Override
+        public double compute(FunctionContext c) {
+            double v = spline.compute(c);
+            fillColumn(c.blockX(), c.blockZ());
+            double freeboard = reliefCache.get()[4] - EarthMapSpec.SEA_LEVEL;
+            if (freeboard >= 0.0) {
+                return Math.min(FACTOR_PINNED,
+                        Math.max(v, FREEBOARD_TIGHTNESS / Math.max(freeboard, 1.0)));
+            }
+            // SYMMETRIC UNDERWATER CASE. The old landGate simply pinned the whole
+            // seabed, which is why there are no undersea ridges or escarpments
+            // anywhere. The real constraint was never "underwater" -- it was
+            // "not enough water overhead to hide the relief": a shoal beside a
+            // deep drop reads as maximally rugged and punches rock spires
+            // through the sea surface.
+            //
+            // So use the same rule with WATER DEPTH as the freeboard. A shoal
+            // 4 blocks down gets pinned; the abyssal plain 60 blocks down keeps
+            // vanilla's own factor and is free to have character. Capped lower
+            // than the land case because a high factor collapses vanilla's
+            // near-surface zone and lets caves eat the floor (see FACTOR_PINNED).
+            double water = -freeboard;
+            return Math.min(FACTOR_SEABED_MAX,
+                    Math.max(v, FREEBOARD_TIGHTNESS / Math.max(water, 1.0)));
+        }
+
+        @Override
+        public void fillArray(double[] out, ContextProvider p) {
+            for (int i = 0; i < out.length; i++) {
+                out[i] = compute(p.forIndex(i));
+            }
+        }
+
+        @Override public DensityFunction mapChildren(Visitor v) { return this; }
+        @Override public double minValue() { return spline.minValue(); }
+        @Override public double maxValue() { return FACTOR_PINNED; }
+        @Override
+        public net.minecraft.util.KeyDispatchDataCodec<? extends DensityFunction> codec() {
+            return spline.codec();
+        }
+    }
+
+    /**
+     * Stands in for {@code slopedCheese} in vanilla's cave-regime rangeChoice,
+     * scaled so the switch lands at exactly {@link #SURFACE_ZONE_BLOCKS} below
+     * the surface no matter what {@code factor} is doing.
+     */
+    /**
+     * The main 3D terrain noise, scaled down where there is little freeboard so
+     * the waterline survives without touching {@code factor}. Symmetric below
+     * sea level, using water depth, so shoals are damped too.
+     */
+    private final class AttenuatedNoise implements DensityFunction {
+        private final DensityFunction inner;
+
+        AttenuatedNoise(DensityFunction inner) {
+            this.inner = inner;
+        }
+
+        @Override
+        public double compute(FunctionContext c) {
+            double v = inner.compute(c);
+            fillColumn(c.blockX(), c.blockZ());
+            double clearance = Math.abs(reliefCache.get()[4] - EarthMapSpec.SEA_LEVEL);
+            double a = ATTEN_MIN
+                    + (1.0 - ATTEN_MIN) * Math.clamp(clearance / ATTEN_FULL_AT, 0.0, 1.0);
+            return v * a;
+        }
+
+        @Override
+        public void fillArray(double[] out, ContextProvider p) {
+            for (int i = 0; i < out.length; i++) {
+                out[i] = compute(p.forIndex(i));
+            }
+        }
+
+        @Override public DensityFunction mapAll(Visitor v) { return v.apply(this); }
+        @Override public DensityFunction mapChildren(Visitor v) { return this; }
+        @Override public double minValue() { return inner.minValue(); }
+        @Override public double maxValue() { return inner.maxValue(); }
+        @Override
+        public net.minecraft.util.KeyDispatchDataCodec<? extends DensityFunction> codec() {
+            return inner.codec();
+        }
+    }
+
+    private final class CaveDepthSwitch implements DensityFunction {
+        @Override
+        public double compute(FunctionContext c) {
+            fillColumn(c.blockX(), c.blockZ());
+            double below = reliefCache.get()[5] - c.blockY();
+            return SURFACE_DENSITY_THRESHOLD * (below / SURFACE_ZONE_BLOCKS);
+        }
+
+        @Override
+        public void fillArray(double[] out, ContextProvider p) {
+            for (int i = 0; i < out.length; i++) {
+                out[i] = compute(p.forIndex(i));
+            }
+        }
+
+        @Override public DensityFunction mapChildren(Visitor v) { return this; }
+        @Override public double minValue() { return -1000.0; }
+        @Override public double maxValue() { return 1000.0; }
+        @Override
+        public net.minecraft.util.KeyDispatchDataCodec<? extends DensityFunction> codec() {
+            return DensityFunctions.constant(0).codec();
+        }
+    }
+
+    /**
+     * Vanilla's cave-regime rangeChoice, identified by its exact CONSTANTS
+     * (-1e6 .. 1.5625) rather than by a value range -- there is only one node in
+     * the router with those bounds, and constants do not drift the way computed
+     * ranges do.
+     */
+    private static boolean isCaveRangeChoice(DensityFunction node) {
+        if (!"RangeChoice".equals(node.getClass().getSimpleName())) {
+            return false;
+        }
+        try {
+            java.lang.reflect.Method lo = node.getClass().getMethod("minInclusive");
+            java.lang.reflect.Method hi = node.getClass().getMethod("maxExclusive");
+            lo.setAccessible(true);
+            hi.setAccessible(true);
+            return near((Double) lo.invoke(node), -1000000.0, 1.0)
+                    && near((Double) hi.invoke(node), SURFACE_DENSITY_THRESHOLD, 1.0e-6);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** Rebuild that rangeChoice with a depth-based input, keeping both branches. */
+    private DensityFunction rebuildCaveChoice(DensityFunction node) {
+        try {
+            java.lang.reflect.Method in = node.getClass().getMethod("whenInRange");
+            java.lang.reflect.Method out = node.getClass().getMethod("whenOutOfRange");
+            in.setAccessible(true);
+            out.setAccessible(true);
+            return DensityFunctions.rangeChoice(new CaveDepthSwitch(),
+                    -1000000.0, SURFACE_DENSITY_THRESHOLD,
+                    (DensityFunction) in.invoke(node), (DensityFunction) out.invoke(node));
+        } catch (Throwable t) {
+            return node;
         }
     }
 
