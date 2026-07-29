@@ -96,6 +96,17 @@ public final class EarthClimate {
     private static final double[] SE = {-2.0, 0.0, 9.0, 18.0, 25.0, 31.0};
     private static final double[] SA = {-1.0, -0.45, -0.15, 0.20, 0.55, 1.00};
 
+    /** Least rainfall that can support boreal forest, mm/yr.
+     *
+     * <p>The correction below floors humidity into the taiga column for cold
+     * land, which is right for Siberia and wrong for a polar desert -- and
+     * Antarctica is a desert, at a measured median 55 mm. Without this gate it
+     * put snowy_taiga and taiga across 3.4% of the Antarctic zone, a continent
+     * with no trees on it at all. Measured separation is wide: real taiga runs
+     * 359 mm (Siberia), 496 (Canada), 497 (Finland), 657 (western Russia), with
+     * a p10 of 267 across the whole 55-68N band, against 115-174 mm on the ice. */
+    private static final double BOREAL_MIN_PRECIP = 250.0;
+
     /** Top of vanilla's coast continentalness band, span(-0.19, -0.11) -- the
      * band that hosts beach and stony_shore. */
     private static final double COAST_BAND_TOP = -0.11;
@@ -604,17 +615,27 @@ public final class EarthClimate {
             // west Pacific warm pool 4.3 C too cold. Warm ocean survived only as
             // a thin equatorial stripe. `sst` is WOA23, inpainted hole-free at
             // build time, so it is defined for every water cell.
-            if (SST) {
+            // WATER only. `sst` is inpainted to full global coverage, so it
+            // answers for land too -- and WorldClim has no data over 7.6% of
+            // Antarctic land, which then read about -1.8 C (a sea-surface
+            // temperature) instead of about -30 C. Mild and, with the flat
+            // precipitation default below, wet: the two together grew forests
+            // on the ice sheet.
+            if (SST && !land) {
                 temp = earth.sample("sst", lon, lat);
                 sea = !Double.isNaN(temp);
             }
             if (Double.isNaN(temp)) {
-                // Backstop only: an earth.dat built before the `sst` layer.
                 temp = 27.0 - Math.abs(lat) * 0.45;
             }
         }
         if (Double.isNaN(precip)) {
-            precip = 700.0;
+            // Not a flat 700 mm. Cold air holds very little water, so defaulting
+            // every gap to a temperate rainfall made the coldest places on Earth
+            // read as the wettest. Roughly Clausius-Clapeyron: 700 mm at 10 C,
+            // 133 mm at -10 C, 58 mm at -20 C -- against a MEASURED median of
+            // 55 mm over the Antarctic land WorldClim does cover.
+            precip = clamp(700.0 * Math.exp((temp - 10.0) / 12.0), 40.0, 900.0);
         }
         double rugged = ruggedness(earth, lon, lat, elev);
         double surfaceY = sampler.heightAt(wx, wz);
@@ -695,7 +716,7 @@ public final class EarthClimate {
         // Boreal correction (cold forests grow on modest rainfall): floor moisture
         // in the cold band so Siberia/Canada come out taiga, not cold steppe.
         double baseTemp = interp(tc, TE, LEGACY ? LEGACY_TT : TT);
-        if (land && baseTemp >= -0.45 && baseTemp < -0.05) {
+        if (land && baseTemp >= -0.45 && baseTemp < -0.05 && precip >= BOREAL_MIN_PRECIP) {
             h = Math.max(h, 0.12);
         }
         double cont = clamp(continentalnessAt(earth, lon, lat, elev) + nc, -1, 1);
