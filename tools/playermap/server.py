@@ -592,6 +592,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._send(b"<h1>No comparison built</h1><p>Run "
                                b"<code>python3 tools/compact/render_compare.py</code>.</p>",
                                "text/html; charset=utf-8")
+            elif self.path.startswith("/biomes"):
+                # The biomes the world ACTUALLY generates, read from
+                # overworld.cwbr (the plugin's own dump from the real biome
+                # provider). The spinning globe on /  is a climate
+                # classification computed from the raw rasters and does not move
+                # when the generator changes -- it showed the Amazon as
+                # rainforest while the server was generating mangrove swamp.
+                # Rebuild after a reseed with:
+                #     python3 tools/playermap/biomeglobe.py
+                p = os.path.join(os.path.dirname(__file__), "biomes.html")
+                if os.path.exists(p):
+                    with open(p, "rb") as f:
+                        self._send(f.read(), "text/html; charset=utf-8")
+                else:
+                    self._send(b"<h1>No biome map built</h1><p>Run "
+                               b"<code>python3 tools/playermap/biomeglobe.py</code>.</p>",
+                               "text/html; charset=utf-8")
             elif self.path.startswith("/players"):
                 self._send(json.dumps(get_players()).encode(), "application/json")
             elif self.path.startswith("/faces"):
