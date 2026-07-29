@@ -334,3 +334,20 @@ old terrain.
 sea-surface-temperature layer exists in `earth.dat`. It needs a WOA23 extract
 fetched by hand (the URL is in its header) and exists to study ocean-temperature
 coverage. Ignore it when rebuilding.
+
+## Sea-surface temperature (the `sst` layer)
+
+WorldClim is land-only, so every water column used to fall back to a latitude
+proxy (`27 - 0.45*|lat|`). Measured against WOA23 that proxy is 5.3 C cold on
+average, 6.4 C RMSE, and lands **64% of ocean area in the wrong vanilla
+temperature band** — warm ocean survived only as a thin equatorial stripe.
+Rebuild the layer with:
+
+    curl -s "$(python3 -c "import sys;sys.path.insert(0,'tools/compact');import sst;print(sst.WOA_URL)")" \
+         -o tools/compact/out/woa_sst.ascii     # ~680 KB, WOA23 1 deg annual mean
+    python3 tools/compact/sst.py                # -> out/sst_total.npy (hole-free)
+    python3 tools/compact/add_sst.py            # appends `sst` to run/earth.dat in place
+
+`add_sst.py` streams, so it does not need the full ETOPO/WorldClim rebuild.
+A full `export_earth` run picks `sst_total.npy` up automatically if present.
+Kill switch: `-Dcubeworld.sst=false` restores the latitude proxy.

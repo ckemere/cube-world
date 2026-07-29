@@ -220,6 +220,13 @@ public final class EarthMapSpec implements MapSpec {
         double temp = earth.sample("temp", ll[0], ll[1]);
         double precip = earth.sample("precip", ll[0], ll[1]);
         if (Double.isNaN(temp)) {
+            // Same story as EarthClimate: WorldClim is land-only, so water fell
+            // back to a latitude proxy -- and this one used a steeper 0.65 slope
+            // than the climate path's 0.45, so the two disagreed about how warm
+            // any given sea was. Both now read the real `sst` layer.
+            temp = earth.sample("sst", ll[0], ll[1]);
+        }
+        if (Double.isNaN(temp)) {
             temp = 27.0 - Math.abs(ll[1]) * 0.65;
         }
         if (Double.isNaN(precip)) {

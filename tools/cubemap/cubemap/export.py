@@ -17,6 +17,7 @@ CWE1 layout (little-endian):
   lon -180..180 across. raw == -32768 is nodata.
 """
 from __future__ import annotations
+import os
 import struct
 import numpy as np
 
@@ -216,6 +217,14 @@ def export_earth(out_path, etopo, temp_raster, precip_raster, roll,
         ry_enc = np.where(np.isnan(ry), NODATA,
                           np.clip(np.round(ry), -32767, 32767)).astype("<i2")
         layers.append(("river_y", ry_enc, 1.0, 0.0))            # metres, NODATA off-river
+    # Sea-surface temperature (WOA23, inpainted hole-free by tools/compact/sst.py).
+    # Optional: without it the plugin falls back to a latitude proxy that gets
+    # 64% of ocean area into the wrong vanilla temperature band.
+    sst_npy = os.path.join(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))), "compact", "out", "sst_total.npy")
+    if os.path.exists(sst_npy):
+        sst = np.load(sst_npy)
+        layers.append(("sst", np.round(sst / 0.01).astype("<i2"), 0.01, 0.0))
     with open(out_path, "wb") as f:
         f.write(b"CWE1")
         f.write(struct.pack("<f", float(roll)))

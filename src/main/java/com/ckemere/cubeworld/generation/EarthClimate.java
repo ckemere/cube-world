@@ -75,6 +75,34 @@ public final class EarthClimate {
     // which is where real tundra actually starts, and lets Siberia fall in the
     // cold row where the boreal correction floors humidity into the taiga column.
     private static final double[] TE = {-25, -8, 0, 8, 18, 24, 30, 40};
+
+    /**
+     * Sea-surface temperature to the climate temperature axis.
+     *
+     * <p>Oceans cannot reuse the land curve above. That curve is built for AIR
+     * temperature, which reaches -25 C; sea water floors at -1.8 C because it
+     * freezes. Pushed through {@link #TE}/{@link #TT}, the entire observed SST
+     * range (-1.8 .. 30.3 C) lands in the axis window -0.26 .. 0.70 -- so
+     * frozen_ocean (axis &lt; -0.45) would be unreachable everywhere on Earth,
+     * including the Arctic, and warm_ocean (&gt;= 0.55) would swallow the whole
+     * subtropics.
+     *
+     * <p>So the sea gets its own knots, placed directly on vanilla's ocean
+     * temperature-band edges [src: OverworldBiomeBuilder.temperatures =
+     * -1.0/-0.45/-0.15/0.2/0.55/1.0, and OCEANS[deep|shallow][0..4] =
+     * frozen/cold/ocean/lukewarm/warm]. The break points are oceanographic:
+     * 0 C is where sea ice forms, 25 C is roughly the reef-building threshold.
+     */
+    private static final double[] SE = {-2.0, 0.0, 9.0, 18.0, 25.0, 31.0};
+    private static final double[] SA = {-1.0, -0.45, -0.15, 0.20, 0.55, 1.00};
+
+    /** Off (-Dcubeworld.sst=false) falls back to the old latitude proxy. */
+    private static final boolean SST =
+            !"false".equalsIgnoreCase(System.getProperty("cubeworld.sst", "true"));
+
+    public static double seaTemperature(double sstC) {
+        return clamp(interp(sstC, SE, SA), -1, 1);
+    }
     private static final double[] TT = {-1.0, -0.38, -0.22, -0.05, 0.18, 0.45, 0.70, 1.0};
 
     public static double temperature(double tempC, double humidityParam, boolean land) {
@@ -476,10 +504,26 @@ public final class EarthClimate {
         double temp = earth.sample("temp", lon, lat);
         double precip = earth.sample("precip", lon, lat);
         boolean land = elev >= 0;
+        // True when temperature came from sea-surface data rather than air, which
+        // selects the sea curve onto the climate axis below.
+        boolean sea = false;
         if (Double.isNaN(temp)) {
-            // WorldClim is land-only; oceans use a gentle latitude proxy (water
-            // is thermally milder than the air-temp lapse, so a soft slope).
-            temp = 27.0 - Math.abs(lat) * 0.45;
+            // WorldClim is land-only. Water used to get a latitude proxy
+            // (27 - 0.45*|lat|), which ignores every ocean current there is:
+            // measured against WOA23 it runs 5.3 C cold on average, 6.4 C RMSE,
+            // and puts 64% of ocean area in the WRONG vanilla temperature band --
+            // the Norwegian Sea 11.6 C too cold (frozen instead of cold), the
+            // west Pacific warm pool 4.3 C too cold. Warm ocean survived only as
+            // a thin equatorial stripe. `sst` is WOA23, inpainted hole-free at
+            // build time, so it is defined for every water cell.
+            if (SST) {
+                temp = earth.sample("sst", lon, lat);
+                sea = !Double.isNaN(temp);
+            }
+            if (Double.isNaN(temp)) {
+                // Backstop only: an earth.dat built before the `sst` layer.
+                temp = 27.0 - Math.abs(lat) * 0.45;
+            }
         }
         if (Double.isNaN(precip)) {
             precip = 700.0;
@@ -530,7 +574,8 @@ public final class EarthClimate {
             h = Math.max(h, 0.12);
         }
         return new double[] {
-                temperature(tc, h, land), h, clamp(continentalnessAt(earth, lon, lat, elev) + nc, -1, 1),
+                sea ? seaTemperature(tc) : temperature(tc, h, land),
+                h, clamp(continentalnessAt(earth, lon, lat, elev) + nc, -1, 1),
                 clamp(erosionAt(earth, lon, lat, elev, rugged, precip, temp,
                         surfaceY - EarthMapSpec.SEA_LEVEL) + ne, -1, 1),
                 depth(surfaceY, y), weird,
