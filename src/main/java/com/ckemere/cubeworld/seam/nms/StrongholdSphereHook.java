@@ -67,11 +67,52 @@ public final class StrongholdSphereHook {
         }
     }
 
-    private static ConcentricRingsStructurePlacement findStrongholdPlacement(ServerLevel level) {
-        for (StructureSet set : level.registryAccess().lookupOrThrow(Registries.STRUCTURE_SET)) {
-            if (set.placement() instanceof ConcentricRingsStructurePlacement crp) {
-                return crp;
+    /**
+     * The stronghold chunk positions the world is ACTUALLY using, read back from
+     * the generator state rather than recomputed.
+     *
+     * <p>Read back, not recomputed, on purpose: the map used to carry a
+     * hand-generated strongholds_globe.json with face/u/v and no world
+     * coordinates, which could drift from the world without anything noticing.
+     * This is the same list eye-of-ender targeting consults, so a marker drawn
+     * from it is where the portal really is. Empty if the hook never installed
+     * (then vanilla's own rings apply and this returns those instead).
+     */
+    public static List<ChunkPos> currentPositions(World world) {
+        try {
+            ServerLevel level = ((CraftWorld) world).getHandle();
+            ConcentricRingsStructurePlacement placement = findStrongholdPlacement(level);
+            if (placement == null) {
+                return List.of();
             }
+            ChunkGeneratorStructureState state = level.getChunkSource().getGeneratorState();
+            List<ChunkPos> positions = state.getRingPositionsFor(placement);
+            return positions == null ? List.of() : positions;
+        } catch (Throwable t) {
+            return List.of();
+        }
+    }
+
+    /**
+     * The stronghold placement, looked up BY KEY.
+     *
+     * <p>This used to return the first structure set in the registry whose
+     * placement was concentric-rings, which was fine while strongholds were the
+     * only such set. The cities datapack then added 30 city anchor sets that are
+     * also concentric_rings (count 1 each) -- so whichever one the registry
+     * happened to yield first won, and the hook spent its work on a city anchor.
+     * The real 128-stronghold set was left un-hooked, meaning strongholds fell
+     * back to vanilla rings centred on (0, 0) -- the North Pole face centre, with
+     * the outer rings spiralling into the void cells of the cross, which is the
+     * exact failure this class exists to prevent.
+     */
+    private static ConcentricRingsStructurePlacement findStrongholdPlacement(ServerLevel level) {
+        StructureSet set = level.registryAccess()
+                .lookupOrThrow(Registries.STRUCTURE_SET)
+                .getValue(net.minecraft.world.level.levelgen.structure
+                        .BuiltinStructureSets.STRONGHOLDS);
+        if (set != null && set.placement() instanceof ConcentricRingsStructurePlacement crp) {
+            return crp;
         }
         return null;
     }

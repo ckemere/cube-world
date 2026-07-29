@@ -824,6 +824,9 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
             case "dumpbiomeparams" -> {
                 return handleDumpBiomeParams(sender);
             }
+            case "strongholds" -> {
+                return handleStrongholds(sender);
+            }
             case "genprof" -> {
                 if (args.length > 1 && args[1].equalsIgnoreCase("reset")) {
                     com.ckemere.cubeworld.generation.GenProfiler.reset();
@@ -920,6 +923,70 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
      * palette (writeUTF keys), then per face: name, minX, minZ, chunks^2 shorts
      * (palette index), row-major with the x-index outer and z-index inner.
      */
+    /**
+     * Dump the world's stronghold (= end portal) positions for the web map.
+     *
+     * <p>Every stronghold holds exactly one end portal, so this is the "where
+     * are the end portals" layer. Written from
+     * {@link com.ckemere.cubeworld.seam.nms.StrongholdSphereHook#currentPositions}
+     * -- the same list eye-of-ender targeting uses -- so the map cannot drift
+     * from the world the way a hand-maintained coordinate file can.
+     */
+    private boolean handleStrongholds(CommandSender sender) {
+        org.bukkit.World world = null;
+        for (org.bukkit.World w : org.bukkit.Bukkit.getWorlds()) {
+            if (w.getEnvironment() == org.bukkit.World.Environment.NORMAL) {
+                world = w;
+                break;
+            }
+        }
+        if (world == null) {
+            sender.sendMessage(Component.text("No overworld.", NamedTextColor.RED));
+            return true;
+        }
+        var positions = com.ckemere.cubeworld.seam.nms.StrongholdSphereHook.currentPositions(world);
+        if (positions.isEmpty()) {
+            sender.sendMessage(Component.text(
+                    "No stronghold ring positions available.", NamedTextColor.RED));
+            return true;
+        }
+        int size = geometry.faceSize();
+        double half = size / 2.0;
+        StringBuilder sb = new StringBuilder("[\n");
+        int written = 0;
+        for (var cp : positions) {
+            int bx = (cp.x() << 4) + 8;
+            int bz = (cp.z() << 4) + 8;
+            CubeFace f = geometry.faceAt(bx, bz);
+            if (f == null) {
+                continue;                      // fell in a void cell of the cross
+            }
+            double u = (bx - (geometry.faceMinX(f) + half)) / half;
+            double v = (bz - (geometry.faceMinZ(f) + half)) / half;
+            if (written > 0) {
+                sb.append(",\n");
+            }
+            sb.append(String.format(java.util.Locale.ROOT,
+                    "  {\"face\":\"%s\",\"u\":%.6f,\"v\":%.6f,\"x\":%d,\"z\":%d}",
+                    f.name(), u, v, bx, bz));
+            written++;
+        }
+        sb.append("\n]\n");
+        java.nio.file.Path out = org.bukkit.Bukkit.getPluginManager().getPlugin("CubeWorld")
+                .getDataFolder().toPath().resolve("strongholds.json");
+        try {
+            java.nio.file.Files.createDirectories(out.getParent());
+            java.nio.file.Files.writeString(out, sb.toString());
+        } catch (java.io.IOException e) {
+            sender.sendMessage(Component.text("Write failed: " + e, NamedTextColor.RED));
+            return true;
+        }
+        sender.sendMessage(Component.text(
+                "strongholds: " + written + " of " + positions.size()
+                        + " end portals -> " + out, NamedTextColor.AQUA));
+        return true;
+    }
+
     private boolean handleBiomeRaster(CommandSender sender, String dim) {
         boolean nether = dim.equalsIgnoreCase("nether");
         org.bukkit.World world = null;
@@ -1251,7 +1318,7 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
         List<String> out = new ArrayList<>();
         if (args.length == 1) {
             for (String sub : new String[] {"ping", "face", "tp", "simulate", "biomeat",
-                    "biomeraster", "tpcore", "tpstations"}) {
+                    "biomeraster", "strongholds", "tpcore", "tpstations"}) {
                 if (sub.startsWith(args[0].toLowerCase(Locale.ROOT))) {
                     out.add(sub);
                 }

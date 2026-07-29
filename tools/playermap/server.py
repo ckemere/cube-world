@@ -434,6 +434,7 @@ STRUCTURE_OVERLAY = r"""
     ruined_portals:'#f15bb5',pillager_outposts:'#ef476f',trail_ruins:'#c58c4f',
     trial_chambers:'#9b5de5',woodland_mansions:'#7161a8',buried_treasures:'#ffea00',
     swamp_huts:'#588157',ancient_cities:'#4361ee',
+    end_portals:'#b8f2e6',zombie_villages:'#6a994e',
     fortresses:'#8d0801',bastions:'#5a189a',nether_fossils:'#e9ecef'};
   // dense sets start hidden so the map isn't a wall of dots
   var OFF={ocean_ruins:1,shipwrecks:1,buried_treasures:1,ruined_portals:1,
