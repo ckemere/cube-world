@@ -1,11 +1,49 @@
 {
-  "_comment": "Vanilla village START template pools, extracted from the 26.2 dev bundle (net/minecraft/data/worldgen/*VillagePools.java). A StructureTemplatePool expands each (element, weight) pair into `weight` consecutive list entries in declaration order, and the zombie town centres are always declared LAST -- so the pick is a zombie village iff nextInt(total) >= zombie_from. Asserted contiguous at extraction time.",
-  "_biome_tags": "data/minecraft/tags/worldgen/biome/has_structure/village_*.json -- the five lists are disjoint, so the biome alone determines the variant.",
-  "variants": {
-    "plains":  {"total": 204, "zombie_from": 200, "biomes": ["minecraft:plains", "minecraft:meadow"]},
-    "desert":  {"total": 250, "zombie_from": 245, "biomes": ["minecraft:desert"]},
-    "savanna": {"total": 459, "zombie_from": 450, "biomes": ["minecraft:savanna"]},
-    "snowy":   {"total": 306, "zombie_from": 300, "biomes": ["minecraft:snowy_plains"]},
-    "taiga":   {"total": 100, "zombie_from": 98,  "biomes": ["minecraft:taiga"]}
+ "_comment": "Vanilla village START template pools, extracted from the 26.2 dev bundle (net/minecraft/data/worldgen/*VillagePools.java). A StructureTemplatePool expands each (element, weight) pair into `weight` consecutive list entries in declaration order, and the zombie town centres are always declared LAST -- so the pick is a zombie village iff nextInt(total) >= zombie_from. Asserted contiguous at extraction time.",
+ "_biome_tags": "data/minecraft/tags/worldgen/biome/has_structure/village_* -- the five lists are disjoint, so the biome alone determines the variant. NOTE: our cities datapack merges the deciduous forests into village_plains, so they roll the PLAINS pool; they must be listed here too or the map reports them as never-zombie.",
+ "variants": {
+  "plains": {
+   "total": 204,
+   "zombie_from": 200,
+   "biomes": [
+    "minecraft:plains",
+    "minecraft:meadow",
+    "minecraft:sunflower_plains",
+    "minecraft:flower_forest",
+    "minecraft:forest",
+    "minecraft:birch_forest",
+    "minecraft:old_growth_birch_forest",
+    "minecraft:dark_forest",
+    "minecraft:cherry_grove"
+   ]
+  },
+  "desert": {
+   "total": 250,
+   "zombie_from": 245,
+   "biomes": [
+    "minecraft:desert"
+   ]
+  },
+  "savanna": {
+   "total": 459,
+   "zombie_from": 450,
+   "biomes": [
+    "minecraft:savanna"
+   ]
+  },
+  "snowy": {
+   "total": 306,
+   "zombie_from": 300,
+   "biomes": [
+    "minecraft:snowy_plains"
+   ]
+  },
+  "taiga": {
+   "total": 100,
+   "zombie_from": 98,
+   "biomes": [
+    "minecraft:taiga"
+   ]
   }
+ }
 }

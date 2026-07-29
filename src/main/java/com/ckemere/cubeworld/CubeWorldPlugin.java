@@ -242,6 +242,13 @@ public final class CubeWorldPlugin extends JavaPlugin {
             java.util.List<String> files = new java.util.ArrayList<>();
             files.add("pack.mcmeta");
             files.add("data/cubeworld/tags/worldgen/biome/anchor.json");
+            // Merged (replace:false) into vanilla's village_plains biome tag, so
+            // the temperate forests can hold villages. Minecraft ships no forest
+            // village at all, which meant whole correctly-classified continents
+            // -- eastern North America, most of Europe -- were settlement-free:
+            // measured, the deciduous group plus sunflower_plains is 4.72% of the
+            // surface against 10.38% that was village-eligible in total.
+            files.add("data/minecraft/tags/worldgen/biome/has_structure/village_plains.json");
             for (String pool : new String[] {"plains", "desert", "savanna"}) {
                 for (String size : new String[] {"large", "huge"}) {
                     files.add("data/cubeworld/worldgen/structure/" + pool + "_" + size + ".json");
