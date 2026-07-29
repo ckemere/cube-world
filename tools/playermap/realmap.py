@@ -243,23 +243,12 @@ def _paint_cities(img, city_list, size):
                   outline=CITY_EDGE, width=max(1, int(1.2 * scale)))
 
 
-SH_RING = (170, 120, 255)      # violet hollow ring — distinct from amber city dots
-SH_EDGE = (24, 10, 44)
-
-
-def _paint_strongholds(img, sh_list, size):
-    """Draw small hollow violet rings for strongholds (fixed size — a location
-    marker, not a magnitude)."""
-    from PIL import ImageDraw
-    d = ImageDraw.Draw(img)
-    scale = size / 1024.0
-    r = 3.4 * scale
-    w = max(1, int(1.6 * scale))
-    for u, v in sh_list:
-        px = (u + 1) * 0.5 * (size - 1)
-        py = (v + 1) * 0.5 * (size - 1)
-        d.ellipse([px - r - w, py - r - w, px + r + w, py + r + w], outline=SH_EDGE, width=w)
-        d.ellipse([px - r, py - r, px + r, py + r], outline=SH_RING, width=w)
+# Strongholds are NOT painted here. They used to be violet rings baked into the
+# face textures from a hand-maintained strongholds_globe.json -- which meant they
+# could not be toggled, and nothing tied them to the world: they were still
+# showing 128 hand-made positions while the world's real strongholds had silently
+# reverted to vanilla rings around (0,0). They are now the `end_portals` overlay,
+# fed by `/cubeworld strongholds` straight from the generator state.
 
 
 TP_FILL = (54, 214, 205)       # teal diamond — teleport station
@@ -289,11 +278,11 @@ def face_uris_from_html(html):
     return uris if len(uris) == 6 else None
 
 
-def composite_uris(base_uris, world_region_dir, cities=None, strongholds=None, stations=None):
+def composite_uris(base_uris, world_region_dir, cities=None, stations=None):
     """Overpaint the six base face textures with real generated blocks, and
-    (optionally) paint historical-city dots, stronghold rings, and teleport
-    stations on top. `cities` {face:[(u,v,pop)]}, `strongholds`/`stations`
-    {face:[(u,v)]}. Returns (new_uris, painted_texels)."""
+    (optionally) paint historical-city dots and teleport stations on top.
+    `cities` {face:[(u,v,pop)]}, `stations` {face:[(u,v)]}.
+    Returns (new_uris, painted_texels)."""
     if not base_uris or len(base_uris) != 6:
         return base_uris, 0
     size = Image.open(io.BytesIO(base64.b64decode(base_uris[0].split(",", 1)[1]))).size[0]
@@ -312,8 +301,6 @@ def composite_uris(base_uris, world_region_dir, cities=None, strongholds=None, s
             base[mask] = real[mask]
             painted += int(mask.sum())
         img = Image.fromarray(base, "RGB")
-        if strongholds and strongholds.get(face):
-            _paint_strongholds(img, strongholds[face], size)
         if cities and cities.get(face):
             _paint_cities(img, cities[face], size)
         if stations and stations.get(face):

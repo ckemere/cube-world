@@ -100,13 +100,32 @@ def _placement(name):
     return RandomSpread(d["spacing"], d["separation"], d["salt"], d["spread"])
 
 
-def raster(dimension="overworld"):
-    if dimension not in _rasters:
-        fname = "nether.cwbr" if dimension == "nether" else "overworld.cwbr"
+# Structures whose biome test does NOT happen at the surface. Vanilla checks the
+# biome at the structure's own start height (Structure.isValidBiome samples
+# getNoiseBiome at QuartPos.fromBlock(startPos.getY())), and for these that is
+# deep underground -- where the only biomes that exist are the cave ones. Against
+# a surface raster deep_dark never appears at all, so the map reported zero
+# ancient cities for a world that has them.
+#
+# ACCURACY, measured against `locate structure` on seed 7120356480978639026:
+# recall 7/7 -- every real ancient city probed is in this set -- and precision
+# 21/30. The markers are a SUPERSET. deep_dark was confirmed present at all nine
+# misses, so the biome filter is not what fails: those chunks pass every check
+# computable offline and then the jigsaw assembly itself declines to build. That
+# cannot be reproduced without running worldgen, so it is a floor for any
+# seed-maths map, not a bug to fix here.
+DEEP_RASTERS = {"ancient_cities": -27}          # ancient_city start_height.absolute
+
+
+def raster(dimension="overworld", at_y=None):
+    key = (dimension, at_y)
+    if key not in _rasters:
+        base = "nether" if dimension == "nether" else "overworld"
+        fname = base + ("" if at_y is None else f"_y{at_y}") + ".cwbr"
         path = os.path.join(_DIR, "..", "..", "..", "run", "plugins", "CubeWorld",
                             "biomes", fname)
-        _rasters[dimension] = load_raster(path)
-    return _rasters[dimension]
+        _rasters[key] = load_raster(path)
+    return _rasters[key]
 
 
 def _net_chunk_box(face=cubegate.FACE):
@@ -196,6 +215,12 @@ def compute_overlays(seed, dimension="overworld", types=None):
         d = PLACEMENT_DATA[name]
         placement = _placement(name)
         allowed = set(STRUCTURE_BIOMES.get(name, []))
+        # biome-test raster: surface, unless this structure starts underground
+        try:
+            br = raster(dimension, DEEP_RASTERS[name]) if name in DEEP_RASTERS else r
+        except FileNotFoundError:
+            # deep raster not dumped yet -> skip rather than silently report zero
+            continue
         freq = d.get("frequency")
         excl = d.get("exclusion")
         excl_chunks = None
@@ -207,7 +232,7 @@ def compute_overlays(seed, dimension="overworld", types=None):
         # on beaches, nether fossils in soul-sand valleys).
         if placement.spacing <= 2 and allowed:
             sp = placement.spacing
-            candidates = ((cx, cz) for (cx, cz) in r.chunks_with_biomes(allowed)
+            candidates = ((cx, cz) for (cx, cz) in br.chunks_with_biomes(allowed)
                           if placement.target_chunk(seed, cx // sp, cz // sp) == (cx, cz))
             biome_prechecked = True
         else:
@@ -219,7 +244,7 @@ def compute_overlays(seed, dimension="overworld", types=None):
             if m is None:
                 continue
             if allowed and not biome_prechecked:
-                b = r.biome_at_chunk(cx, cz)
+                b = br.biome_at_chunk(cx, cz)
                 if b not in allowed:
                     continue
             if freq is not None and not frequency.keeps(seed, d["salt"], cx, cz,

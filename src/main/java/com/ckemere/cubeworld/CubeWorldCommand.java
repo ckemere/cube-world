@@ -819,7 +819,18 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                 return handleBiomeCensus(sender, args);
             }
             case "biomeraster" -> {
-                return handleBiomeRaster(sender, args.length >= 2 ? args[1] : "overworld");
+                Integer atY = null;
+                if (args.length >= 3) {
+                    try {
+                        atY = Integer.valueOf(args[2]);
+                    } catch (NumberFormatException e) {
+                        sender.sendMessage(Component.text(
+                                "Usage: /cubeworld biomeraster <overworld|nether> [y]",
+                                NamedTextColor.RED));
+                        return true;
+                    }
+                }
+                return handleBiomeRaster(sender, args.length >= 2 ? args[1] : "overworld", atY);
             }
             case "dumpbiomeparams" -> {
                 return handleDumpBiomeParams(sender);
@@ -987,7 +998,7 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
-    private boolean handleBiomeRaster(CommandSender sender, String dim) {
+    private boolean handleBiomeRaster(CommandSender sender, String dim, Integer atY) {
         boolean nether = dim.equalsIgnoreCase("nether");
         org.bukkit.World world = null;
         for (org.bukkit.World w : org.bukkit.Bukkit.getWorlds()) {
@@ -1028,7 +1039,28 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
             }
             org.bukkit.World ow = world;
             var bp = gen.biomeProvider();
-            sample = (x, z) -> bp.surfaceBiome(ow, x, z);
+            if (atY == null) {
+                sample = (x, z) -> bp.surfaceBiome(ow, x, z);
+            } else {
+                // A specific depth, for answering a STRUCTURE PLACEMENT question,
+                // so it must sample the way placement does -- which is not the
+                // Bukkit provider. CustomChunkGenerator.getBiomeSource() returns
+                // `delegate.getBiomeSource()`, i.e. vanilla's own source; the
+                // Bukkit BiomeProvider only paints biomes into chunks as they
+                // generate. Structure.isValidBiome therefore reads vanilla's
+                // MultiNoise source over our rebound router:
+                //   getNoiseBiome(QuartPos.fromBlock(startPos.getX()),
+                //                 QuartPos.fromBlock(startPos.getY()), ...)
+                net.minecraft.server.level.ServerLevel level =
+                        ((org.bukkit.craftbukkit.CraftWorld) world).getHandle();
+                net.minecraft.world.level.biome.Climate.Sampler climate =
+                        level.getChunkSource().randomState().sampler();
+                net.minecraft.world.level.biome.BiomeSource osrc =
+                        level.getChunkSource().getGenerator().getBiomeSource();
+                int qy = atY >> 2;
+                sample = (x, z) -> org.bukkit.craftbukkit.block.CraftBiome.minecraftHolderToBukkit(
+                        osrc.getNoiseBiome(x >> 2, qy, z >> 2, climate));
+            }
         }
         CubeGeometry geom = nether ? netherGeometry : geometry;   // nether cube is 1:8
         int size = geom.faceSize();
@@ -1040,10 +1072,20 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
             int minX = geom.faceMinX(f);
             int minZ = geom.faceMinZ(f);
             short[] grid = new short[chunks * chunks];
+            // Surface rasters sample the chunk CENTRE -- they are drawn as a map,
+            // and surface biomes are broad enough that +8 is representative.
+            // A depth raster exists to answer a structure placement question
+            // instead, so it samples the exact block vanilla tests: jigsaw
+            // structures start at `new BlockPos(chunkPos.getMinBlockX(), height,
+            // chunkPos.getMinBlockZ())`, the chunk CORNER. At depth that
+            // distinction decides the answer -- corner and centre are different
+            // quart cells, and cave biomes vary per quart, so sampling the centre
+            // made the ancient-city filter guess rather than agree.
+            int off = (atY == null) ? 8 : 0;
             for (int i = 0; i < chunks; i++) {
-                int x = minX + (i << 4) + 8;
+                int x = minX + (i << 4) + off;
                 for (int j = 0; j < chunks; j++) {
-                    int z = minZ + (j << 4) + 8;
+                    int z = minZ + (j << 4) + off;
                     String key = sample.apply(x, z).getKey().toString();
                     Integer idx = palette.get(key);
                     if (idx == null) {
@@ -1057,7 +1099,8 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
         }
         java.nio.file.Path out = org.bukkit.Bukkit.getPluginManager().getPlugin("CubeWorld")
                 .getDataFolder().toPath().resolve("biomes")
-                .resolve((nether ? "nether" : "overworld") + ".cwbr");
+                .resolve((nether ? "nether" : "overworld")
+                        + (atY == null ? "" : "_y" + atY) + ".cwbr");
         try {
             java.nio.file.Files.createDirectories(out.getParent());
             try (java.io.DataOutputStream o = new java.io.DataOutputStream(

@@ -76,27 +76,10 @@ def _cities_sig():
         return None
 
 
-STRONGHOLDS_JSON = os.environ.get("STRONGHOLDS_JSON",
-                                  os.path.join(os.path.dirname(__file__), "strongholds_globe.json"))
-
-
-def strongholds_by_face():
-    """Group strongholds into {face: [(u, v)]} for painting rings onto faces."""
-    d = {}
-    try:
-        with open(STRONGHOLDS_JSON, encoding="utf-8") as f:
-            for s in json.load(f):
-                d.setdefault(s["face"], []).append((s["u"], s["v"]))
-    except Exception:
-        return {}
-    return d
-
-
-def _strongholds_sig():
-    try:
-        return os.path.getmtime(STRONGHOLDS_JSON)
-    except OSError:
-        return None
+# Strongholds used to be baked into the face textures from a hand-maintained
+# strongholds_globe.json. They are now the selectable `end_portals` overlay,
+# computed from run/plugins/CubeWorld/strongholds.json which `/cubeworld
+# strongholds` writes straight out of the generator state.
 
 
 # Live teleport-station registry the plugin writes (world,x,y,z,city,name).
@@ -366,8 +349,7 @@ def composited_uris():
 def _recompute_faces():
     """Recompute the composite if any input changed (region blocks / overlays)."""
     _maybe_save()
-    sig = (realmap.region_signature(REGION_DIR), _cities_sig(), _strongholds_sig(),
-           _stations_sig())
+    sig = (realmap.region_signature(REGION_DIR), _cities_sig(), _stations_sig())
     with _faces_lock:
         if _cache["sig"] == sig and _cache["uris"] is not None:
             return
@@ -376,7 +358,7 @@ def _recompute_faces():
         return
     try:
         uris, painted = realmap.composite_uris(base, REGION_DIR, cities_by_face(),
-                                               strongholds_by_face(), stations_by_face())
+                                               stations_by_face())
     except Exception as e:
         print("faces composite error:", e)
         return
