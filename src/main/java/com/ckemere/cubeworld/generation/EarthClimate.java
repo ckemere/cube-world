@@ -96,6 +96,67 @@ public final class EarthClimate {
     private static final double[] SE = {-2.0, 0.0, 9.0, 18.0, 25.0, 31.0};
     private static final double[] SA = {-1.0, -0.45, -0.15, 0.20, 0.55, 1.00};
 
+    /** River clearings: off with -Dcubeworld.riverClearings=false. */
+    private static final boolean RIVER_CLEARINGS = !"false".equalsIgnoreCase(
+            System.getProperty("cubeworld.riverClearings", "true"));
+
+    /** Only clear in the temperate/boreal band. Above this the corridor would run
+     * down every Amazon tributary and turn rainforest into savanna. */
+    private static final double CLEARING_MAX_C = 18.0;
+
+    /** Target humidity: the middle of vanilla's humidities[1] = -0.35..-0.1, the
+     * column that reads PLAINS on the temperate row. Going drier still would hit
+     * humidities[0], which is FLOWER_FOREST there -- not a village biome. */
+    private static final double CLEARING_H = -0.25;
+
+    /** Leave the wettest column alone: humidities[4] is 0.3..1.0, which is
+     * DARK_FOREST on the temperate row -- the only home of woodland mansions,
+     * already the rarest overworld structure. Clearing it halved dark forest and
+     * took mansions from 3 to 2 worldwide, which is too much to pay for villages
+     * that the drier forest columns supply just as well. */
+    private static final double CLEARING_H_MAX = 0.30;
+
+    /** Widest offset used when looking for a river, in degrees (~0.12 deg is
+     * about 13 km, and 1 block is about 1 km at face size 10240). The raw raster
+     * ramp is only a few pixels across -- narrower than a chunk -- so a bare
+     * point sample would clear a strip too thin for the biome to survive
+     * quantisation to the 4-block biome lattice. */
+    private static final double CLEARING_DEG = 0.45;
+
+    /**
+     * River proximity in 0..1: the strongest river reading at this point or on
+     * two rings of taps around it, so the corridor is a valley floor rather than
+     * the raster's own hairline (the raw ramp is narrower than a chunk).
+     *
+     * <p>TWO rings, not one. A single ring only samples radius 0 and radius
+     * CLEARING_DEG, so a river falling between them is missed entirely and the
+     * clearing comes out patchy -- measured directly, a transect across a
+     * Pennsylvania river read forest on the bank and plains 120 blocks away,
+     * which is backwards. The inner ring closes that gap.
+     */
+    private static double riverNear(EarthData earth, double lon, double lat) {
+        if (earth == null || !earth.hasLayer("river")) {
+            return 0.0;
+        }
+        double best = earth.sample("river", lon, lat);
+        if (Double.isNaN(best)) {
+            best = 0.0;
+        }
+        double coslat = Math.max(0.2, Math.cos(Math.toRadians(lat)));
+        for (int ring = 1; ring <= 2; ring++) {
+            double rad = CLEARING_DEG * ring / 2.0;
+            for (int i = 0; i < 8; i++) {
+                double a = i * (Math.PI / 4.0);
+                double v = earth.sample("river", lon + Math.cos(a) * rad / coslat,
+                        lat + Math.sin(a) * rad);
+                if (!Double.isNaN(v) && v > best) {
+                    best = v;
+                }
+            }
+        }
+        return clamp(best, 0.0, 1.0);
+    }
+
     /** Off (-Dcubeworld.sst=false) falls back to the old latitude proxy. */
     private static final boolean SST =
             !"false".equalsIgnoreCase(System.getProperty("cubeworld.sst", "true"));
@@ -579,6 +640,43 @@ public final class EarthClimate {
 
         double tc = temp + nt;
         double h = clamp(humidity(precip) + nh, -1, 1);
+        // River clearings. Minecraft has no forest village -- village_plains and
+        // friends want plains/meadow/savanna/taiga/snowy_plains/desert -- so
+        // whole correctly-classified continents of temperate deciduous forest
+        // (all of eastern North America, most of Europe) can host no village at
+        // all. Real settlement in forested country follows the rivers, where
+        // floodplain meadow breaks the canopy, so break the canopy there too:
+        // along a river corridor, drop humidity into vanilla's plains column
+        // (humidities[1] = -0.35..-0.1, which reads PLAINS on the temperate row,
+        // SAVANNA on the warm one and SNOWY_PLAINS on the cold one).
+        //
+        // A village only biome-tests its START chunk, so a corridor a chunk or so
+        // wide is enough; the settlement then sprawls across the boundary into
+        // the trees, which is exactly the clearing-by-the-river look.
+        //
+        // Only ever DRIES a column, never wets one, and only in the temperate
+        // band: without the temperature gate this would run down every tributary
+        // of the Amazon and turn rainforest into savanna.
+        //
+        // MEASURED: a corridor converts to plains only where WEIRDNESS is
+        // negative. Three columns on one Pennsylvania transect all reached
+        // H=-0.25, and the one at W=-0.28 came out plains while W=+0.29 and
+        // W=+0.30 stayed birch forest -- vanilla gates the variant tables on the
+        // weirdness sign, so humidity alone cannot decide it. That halves the
+        // yield and is why corridors look patchy rather than continuous. Left
+        // alone deliberately: our weirdness is driven by elevation so that
+        // mountain biomes coincide with mountain terrain, and bending it along
+        // rivers would trade a real structural property for a cosmetic one.
+        if (RIVER_CLEARINGS && land && tc <= CLEARING_MAX_C && h > CLEARING_H && h < CLEARING_H_MAX) {
+            // Gain, because the tap pattern samples the ramp rather than
+            // measuring true distance: a partial reading still means "there is a
+            // river here". Without it the corridor lands on the -0.1 column edge
+            // and the nearest-neighbour biome pick keeps choosing birch forest.
+            double r = clamp(riverNear(earth, lon, lat) * 1.8, 0.0, 1.0);
+            if (r > 0.0) {
+                h = h + r * (CLEARING_H - h);
+            }
+        }
         // Boreal correction (cold forests grow on modest rainfall): floor moisture
         // in the cold band so Siberia/Canada come out taiga, not cold steppe.
         double baseTemp = interp(tc, TE, LEGACY ? LEGACY_TT : TT);
