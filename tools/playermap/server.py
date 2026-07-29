@@ -396,8 +396,18 @@ STRUCTURE_OVERLAY = r"""
   #psctl .mut{color:#8a97ab;font-size:11px;margin-top:8px}
   #pstog{display:flex;gap:6px;margin-bottom:6px}
   #pstog button{flex:1;padding:3px}
+  #bkey{position:fixed;top:16px;right:16px;z-index:11;max-height:88vh;overflow:auto;
+    display:none;font:12px/1.35 system-ui,sans-serif;color:#cdd6e4;
+    background:rgba(12,16,24,.72);padding:12px 14px;border-radius:12px;
+    border:1px solid rgba(120,150,190,.2);backdrop-filter:blur(8px);width:190px}
+  #bkey h3{margin:0 0 9px;font-size:13px;color:#eaf1fb;letter-spacing:.02em}
+  #bkey .row{display:flex;align-items:center;gap:7px;padding:2px 0}
+  #bkey .sw{width:11px;height:11px;border-radius:3px;flex:none;box-shadow:0 0 0 1px rgba(0,0,0,.4)}
+  #bkey .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #bkey .ct{margin-left:auto;color:#8a97ab;font-variant-numeric:tabular-nums;padding-left:6px}
 </style>
 <canvas id="psov"></canvas>
+<div id="bkey"><h3>Biomes</h3><div id="bkeylist"></div></div>
 <div id="psctl">
   <h3>Structures</h3>
   <div class="psrow"><select id="psdim"><option value="overworld">Overworld (terrain)</option>
@@ -454,8 +464,23 @@ STRUCTURE_OVERLAY = r"""
         statusEl.textContent=n.toLocaleString()+' placements  ·  seed '+seed;
       }).catch(function(e){statusEl.textContent='error: '+e;});
   }
+  function updateBiomeKey(dim){
+    var box=document.getElementById('bkey');
+    if(dim!=='biomes'){box.style.display='none';return;}
+    fetch('/biomelegend',{cache:'no-store'})
+      .then(function(r){return r.json();}).then(function(rows){
+        var h='';
+        for(var i=0;i<rows.length;i++)
+          h+='<div class="row"><span class="sw" style="background:'+rows[i].color+
+             '"></span><span class="nm">'+rows[i].name.replace(/_/g,' ')+
+             '</span><span class="ct">'+rows[i].pct.toFixed(1)+'%</span></div>';
+        document.getElementById('bkeylist').innerHTML=h;
+        box.style.display='block';
+      }).catch(function(){box.style.display='none';});
+  }
   function swapFaces(dim){
     window.pmDim=dim;
+    updateBiomeKey(dim);
     var seed=encodeURIComponent(document.getElementById('psseed').value.trim());
     var url=dim==='nether'?'/netherfaces':
             dim==='biomes'?('/biomefaces?seed='+seed):'/faces';
@@ -530,6 +555,40 @@ def structures_json(seed, dim):
         out[name] = [[round(m["p"][0], 4), round(m["p"][1], 4), round(m["p"][2], 4), m["face"]]
                      for m in ms]
     return out
+
+
+_biomelegend_cache = {"sig": None, "rows": None}
+
+
+def biome_legend_rows():
+    """[{name,color,pct}] for the biomes on the globe, area-weighted, sharing the
+    exact colours /biomefaces paints so the key matches the map. Cached on the
+    raster mtime."""
+    import biomeglobe
+    import numpy as np
+    path = scompute.raster_path("overworld")
+    sig = os.path.getmtime(path)
+    if _biomelegend_cache["sig"] == sig and _biomelegend_cache["rows"] is not None:
+        return _biomelegend_cache["rows"]
+    r = scompute.raster("overworld")
+    counts = {}
+    total = 0
+    for _n, _cmx, _cmz, grid in r.faces:
+        idx, cnt = np.unique(grid, return_counts=True)
+        for i, c in zip(idx.tolist(), cnt.tolist()):
+            counts[r.palette[i]] = counts.get(r.palette[i], 0) + c
+            total += c
+    rows = []
+    for b, c in sorted(counts.items(), key=lambda kv: -kv[1]):
+        pct = 100.0 * c / total
+        if pct < 0.05:                       # keep the key legible
+            continue
+        rgb = biomeglobe.colour_of(b)
+        rows.append({"name": b.split(":")[-1],
+                     "color": "rgb(%d,%d,%d)" % rgb, "pct": round(pct, 2)})
+    _biomelegend_cache["sig"] = sig
+    _biomelegend_cache["rows"] = rows
+    return rows
 
 
 _biomefaces_cache = {"sig": None, "uris": None}
@@ -679,6 +738,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             elif self.path.startswith("/netherfaces"):
                 uris = nether_face_uris() if nether_face_uris else []
                 self._send(json.dumps(uris).encode(), "application/json")
+            elif self.path.startswith("/biomelegend"):
+                try:
+                    rows = biome_legend_rows()
+                except Exception as e:
+                    print("biomelegend error:", e)
+                    rows = []
+                self._send(json.dumps(rows).encode(), "application/json")
             elif self.path.startswith("/biomefaces"):
                 # never let a missing/!broken input drop the connection -- the
                 # page just gets an empty list and keeps the terrain faces
