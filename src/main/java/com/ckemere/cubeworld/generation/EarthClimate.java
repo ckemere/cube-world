@@ -477,8 +477,23 @@ public final class EarthClimate {
             coastKm = earth.sample("coast", lon, lat);
         }
         double w = wetland(elevM, ruggedMeters, precipMm, tempC, coastKm);
-        return w > 0 ? e * (1.0 - w) + WETLAND_EROSION * w : e;
+        // Vanilla's erosion band 6 (>= 0.55) is the swamp/mangrove reserve, and it
+        // places MANGROVE_SWAMP there for any warm temperature regardless of
+        // humidity [src: OverworldBiomeBuilder, temperatures[3..4] x erosions[6],
+        // FULL_RANGE humidity]. In vanilla that is fine because flat terrain is
+        // scattered; in ours the erosion quantile map sends EVERY dead-flat
+        // surface to the top of the range, so the Sahara, Kalahari, Thar and
+        // Australian outback -- all flat, hot and bone dry -- came out mangrove.
+        // The design already earns the band through the wetland score; dry land
+        // must be held below it. Capped low enough that the +-0.16 erosion noise
+        // added in params() cannot push a genuine desert back into the band.
+        double dry = Math.min(e, EROSION_DRY_CAP);
+        return dry + (WETLAND_EROSION - dry) * clamp(w, 0.0, 1.0);
     }
+
+    /** Highest erosion dry land may take. 0.38 + the 0.16 noise in params() is
+     * 0.54, just under vanilla's swamp band at 0.55, so no desert lands in it. */
+    private static final double EROSION_DRY_CAP = 0.38;
 
     // weirdness is vanilla's peaks-and-valleys selector: |w| picks the terrain
     // "slice" (near 0 = valleys/rivers, ~0.35 mid, ~0.5 high, ~0.65 peaks).
@@ -626,7 +641,17 @@ public final class EarthClimate {
                 sea = !Double.isNaN(temp);
             }
             if (Double.isNaN(temp)) {
-                temp = 27.0 - Math.abs(lat) * 0.45;
+                // No WorldClim value. WorldClim covers all other land, so in
+                // practice this is the Antarctic ice sheet (and inland Greenland).
+                // The ocean latitude proxy gave only -8 C at 78 S -- the cold
+                // (taiga) row -- so the interior, 2500 m of ice that is really
+                // about -40 C, came out plains and taiga. Land gets a steeper
+                // polar slope AND an elevation lapse (6.5 C/km) so the high cold
+                // interior reaches the frozen row; open water keeps the gentler
+                // ocean slope.
+                temp = land
+                        ? 27.0 - Math.abs(lat) * 0.55 - 6.5 * Math.max(0.0, elev) / 1000.0
+                        : 27.0 - Math.abs(lat) * 0.45;
             }
         }
         if (Double.isNaN(precip)) {
