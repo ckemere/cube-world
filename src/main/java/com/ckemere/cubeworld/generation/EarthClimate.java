@@ -362,6 +362,7 @@ public final class EarthClimate {
     private static final double[] WE = {0, 300, 1500, 3000, 6000};
     private static final double[] WM = {0.20, 0.28, 0.42, 0.58, 0.70};
 
+    /** Elevation-driven |W|, now folded into {@link #params} as a floor. */
     public static double weirdness(Vec3 p, double elevMeters) {
         double mag = interp(elevMeters, WE, WM);
         double s = Math.sin(2.1 * p.x() + 1.3) * Math.cos(1.7 * p.z() - 0.4)
@@ -499,7 +500,26 @@ public final class EarthClimate {
         // outermost variant bands start at |W| = 0.78. A small deadband remains so
         // W never sits at 0, where vanilla selects valley/river variants that would
         // fight our dedicated river layer.
-        double weird = Math.signum(raw) * weirdMagnitude(Math.abs(raw));
+        // |W| = max(what the ELEVATION demands, what the noise rolled).
+        //
+        // Weirdness selects vanilla's terrain slice -- valley / low / mid / high
+        // / PEAK -- and it was pure seed noise, uncorrelated with elevation, so
+        // whether Everest landed in the peak slice was luck of the seed. A world
+        // regen exposed this immediately: on the previous seed Everest measured
+        // 91.7% frozen_peaks, on the next one 9.7% taiga and 0.7% frozen_peaks.
+        // The world's highest mountain became a forested plateau.
+        //
+        // That is precisely the coupling vanilla relies on and we had broken:
+        // there, the same axes that raise the ground also choose the slice, so a
+        // peak biome cannot land on flat terrain. EarthClimate.weirdness() has
+        // encoded the elevation curve all along -- it simply had no callers.
+        //
+        // A floor rather than a replacement, because the extreme tail must stay
+        // reachable on FLAT ground: sulfur_caves wants |W| >= 0.85 together with
+        // a high erosion band, i.e. flat, which an elevation-driven magnitude
+        // alone could never produce.
+        double magElev = interp(elev, WE, WM);
+        double weird = Math.signum(raw) * Math.max(magElev, weirdMagnitude(Math.abs(raw)));
 
         double tc = temp + nt;
         double h = clamp(humidity(precip) + nh, -1, 1);
