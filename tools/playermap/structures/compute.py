@@ -23,6 +23,22 @@ VILLAGE_POOLS = json.load(open(os.path.join(_DIR, "village_pools.json")))["varia
 # so the biome alone decides which pool (and so which pool SIZE) is rolled.
 _VILLAGE_VARIANT = {b: v for v, d in VILLAGE_POOLS.items() for b in d["biomes"]}
 
+# Layers that are deliberately a SUPERSET of what the world contains. Vanilla
+# runs terrain checks after the biome check that no seed-maths map can replay:
+#
+#   ancient_cities     the jigsaw assembly can decline to build (recall 7/7,
+#                      precision 21/30; deep_dark confirmed present at every miss)
+#   woodland_mansions  needs getLowestYIn5by5BoxOffset7Blocks >= y60, so a
+#                      candidate whose 5x5 footprint dips into a valley is
+#                      dropped -- measured: 3 predicted, 2 real, and the phantom
+#                      sat in jagged_peaks/grove with no water anywhere near it,
+#                      so proximity to water is NOT the predictor
+#
+# Both are left as supersets on purpose: a marker that might be there beats a
+# missing one you would never go looking for. Do not "fix" the counts by
+# tightening the biome filter -- the biome filter is not what fails.
+SUPERSET_LAYERS = {"ancient_cities", "woodland_mansions"}
+
 NETHER_SETS = {"nether_complexes", "nether_fossils"}
 SKIP_SETS = {"end_cities", "mineshafts"}          # End dimension / too dense to map
 
