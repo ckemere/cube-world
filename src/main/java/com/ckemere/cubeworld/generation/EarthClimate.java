@@ -96,6 +96,14 @@ public final class EarthClimate {
     private static final double[] SE = {-2.0, 0.0, 9.0, 18.0, 25.0, 31.0};
     private static final double[] SA = {-1.0, -0.45, -0.15, 0.20, 0.55, 1.00};
 
+    /** Top of vanilla's coast continentalness band, span(-0.19, -0.11) -- the
+     * band that hosts beach and stony_shore. */
+    private static final double COAST_BAND_TOP = -0.11;
+
+    /** Highest temperature axis value that still reads as vanilla's row 3. Row 4
+     * starts at 0.55 and turns beach into desert. */
+    private static final double BEACH_ROW_MAX = 0.50;
+
     /** River clearings: off with -Dcubeworld.riverClearings=false. */
     private static final boolean RIVER_CLEARINGS = !"false".equalsIgnoreCase(
             System.getProperty("cubeworld.riverClearings", "true"));
@@ -207,10 +215,17 @@ public final class EarthClimate {
     // result: beach covered 0.013% of the surface (~320 chunks on the whole
     // planet), which starved buried treasure to 4 worldwide against 2974
     // shipwrecks. Starting inside the band instead puts the crossing at about
-    // 15 km from the sea -- roughly one chunk at 1 block ~ 1 km, which is also
-    // all the coast raster can resolve at ~18 km/px.
-    private static final double[] DK = {0, 20, 60, 200, 600, 1400, 2600};
-    private static final double[] DC = {-0.17, -0.09, 0.06, 0.22, 0.42, 0.70, 1.00};
+    // 32 km from the sea -- about two chunks at 1 block ~ 1 km.
+    //
+    // Two chunks rather than one because the band has to survive noise. The
+    // continentalness wobble is +/-0.05 (AMP_CONT) and the band is only 0.08
+    // wide, so a one-chunk entry lets the noise kick half the shoreline straight
+    // back out: a fine transect across the Namibian shore measured C=-0.08 on the
+    // first land column, outside the band, so no temperature fix could have
+    // helped it. Only the first segment is stretched; the 60 km knot onwards is
+    // untouched so the inland bands keep their calibration.
+    private static final double[] DK = {0, 40, 60, 200, 600, 1400, 2600};
+    private static final double[] DC = {-0.19, -0.09, 0.06, 0.22, 0.42, 0.70, 1.00};
 
     /**
      * Continentalness for LAND from true distance to the ocean, which is what
@@ -683,9 +698,31 @@ public final class EarthClimate {
         if (land && baseTemp >= -0.45 && baseTemp < -0.05) {
             h = Math.max(h, 0.12);
         }
+        double cont = clamp(continentalnessAt(earth, lon, lat, elev) + nc, -1, 1);
+        double tParam = sea ? seaTemperature(tc) : temperature(tc, h, land);
+        // Arid coasts get a beach, not desert running straight into the sea.
+        //
+        // Vanilla's beach picker is pickBeachBiome(temperatureIndex, ...): row 0
+        // gives snowy_beach and row 4 -- the hottest -- gives DESERT rather than
+        // BEACH [src: OverworldBiomeBuilder]. Our own arid rule pins dry warm
+        // land to 0.72, i.e. squarely in row 4, and it fires on the FIRST land
+        // column: a fine transect across the Namibian shore showed T jump from
+        // 0.21 to 0.72 the moment elevation crossed zero, so the coast went ocean
+        // -> desert with no beach chunk anywhere between. Measured cost: 4 beach
+        // chunks on the whole Namibia/Angola coast and 29 on West Africa, against
+        // 214 for the US Atlantic.
+        //
+        // Capping the temperature row inside the coast band only -- about 0.3% of
+        // the world -- puts those shores back in the BEACH row while the desert
+        // resumes immediately inland, which is what the Namib and the Atlantic
+        // Sahara actually look like. Only ever LOWERS the row, so cold coasts
+        // keep snowy_beach.
+        if (land && cont <= COAST_BAND_TOP && tParam > BEACH_ROW_MAX) {
+            tParam = BEACH_ROW_MAX;
+        }
         return new double[] {
-                sea ? seaTemperature(tc) : temperature(tc, h, land),
-                h, clamp(continentalnessAt(earth, lon, lat, elev) + nc, -1, 1),
+                tParam,
+                h, cont,
                 clamp(erosionAt(earth, lon, lat, elev, rugged, precip, temp,
                         surfaceY - EarthMapSpec.SEA_LEVEL) + ne, -1, 1),
                 depth(surfaceY, y), weird,
