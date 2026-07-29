@@ -140,8 +140,16 @@ public final class EarthClimate {
      * coast -0.19..-0.11, near-inland -0.11..0.03, mid-inland 0.03..0.30,
      * far-inland 0.30..1.0. Fitted to the measured distribution of the coast
      * raster (land p50 594 km, p90 1687 km, max 2896 km). */
-    private static final double[] DK = {0, 15, 60, 200, 600, 1400, 2600};
-    private static final double[] DC = {-0.11, -0.02, 0.06, 0.22, 0.42, 0.70, 1.00};
+    // The first knot used to be -0.11, which is the TOP EDGE of vanilla's coast
+    // band span(-0.19, -0.11) -- so land never actually entered the band and the
+    // only beaches in the world were noise flutter across the boundary. Measured
+    // result: beach covered 0.013% of the surface (~320 chunks on the whole
+    // planet), which starved buried treasure to 4 worldwide against 2974
+    // shipwrecks. Starting inside the band instead puts the crossing at about
+    // 15 km from the sea -- roughly one chunk at 1 block ~ 1 km, which is also
+    // all the coast raster can resolve at ~18 km/px.
+    private static final double[] DK = {0, 20, 60, 200, 600, 1400, 2600};
+    private static final double[] DC = {-0.17, -0.09, 0.06, 0.22, 0.42, 0.70, 1.00};
 
     /**
      * Continentalness for LAND from true distance to the ocean, which is what
@@ -154,13 +162,17 @@ public final class EarthClimate {
         double c = interp(coastKm, DK, DC);
         double lift = clamp(elevM / 6000.0, 0.0, 1.0) * 0.25;
         c += lift;
-        // Vanilla's "coast" band (C <= -0.11) is where beach lives, and beaches are
-        // a few blocks wide. Our coast raster is ~18 km/px, so distance alone cannot
-        // resolve that and would paint every shoreline region as beach. Only
-        // genuinely low ground is allowed into the band; anything with real
-        // elevation is floored into near-inland.
-        if (elevM > 25.0) {
-            c = Math.max(c, -0.05);
+        // Keep genuinely high coastal ground out of the band, but as a RAMP, not a
+        // cliff. The old rule floored everything above 25 m straight to -0.05,
+        // which is most of the world's coastline -- and it was the wrong tool
+        // anyway: within the band vanilla already separates flat from rugged
+        // coasts by erosion, coast x erosion[0..2] -> stony_shore and the flatter
+        // bands -> beach [src: OverworldBiomeBuilder.addMidSlice]. So a cliffy
+        // coast belongs IN the band as stony shore, not evicted from it. Only
+        // ground that is high enough to read as interior gets pushed out.
+        if (elevM > 50.0) {
+            double t = clamp((elevM - 50.0) / 350.0, 0.0, 1.0);
+            c += t * (Math.max(c, -0.05) - c);
         }
         return clamp(c, -1, 1);
     }
