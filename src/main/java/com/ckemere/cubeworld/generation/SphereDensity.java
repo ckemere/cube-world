@@ -750,6 +750,54 @@ public final class SphereDensity {
         }
     }
 
+    /**
+     * How many times each version-sensitive fingerprint matched during the last
+     * fold. Every one of these identifies a vanilla node by a property that a
+     * Mojang retune could change -- a spline's value range, an exact threshold
+     * constant -- and every one FAILS SILENTLY: the node simply is not replaced
+     * and the world quietly generates with vanilla's own behaviour instead of
+     * ours. That is the worst possible failure mode for a version bump, so the
+     * counts are reported and a zero is logged as a warning.
+     */
+    public final java.util.Map<String, Integer> hookHits =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private void hit(String what) {
+        hookHits.merge(what, 1, Integer::sum);
+    }
+
+    /** Human-readable fold report; second element is true if anything is missing. */
+    public String hookReport() {
+        String[] expected = {"leaf:continentalness", "leaf:erosion", "leaf:ridge",
+                             "depthGradient", "factorSpline", "jaggednessSpline"};
+        StringBuilder sb = new StringBuilder();
+        for (String e : expected) {
+            sb.append(e).append('=').append(hookHits.getOrDefault(e, 0)).append(' ');
+        }
+        if (CAVE_DEPTH_SWITCH) {
+            sb.append("caveRangeChoice=").append(hookHits.getOrDefault("caveRangeChoice", 0));
+        }
+        return sb.toString().trim();
+    }
+
+    /** Fingerprints that matched nothing — a silent un-hook. */
+    public java.util.List<String> missedHooks() {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        String[] expected = LEAF_HOOK
+                ? new String[] {"leaf:continentalness", "leaf:erosion", "leaf:ridge",
+                                "depthGradient", "factorSpline", "jaggednessSpline"}
+                : new String[] {"depthGradient", "factorSpline", "jaggednessSpline"};
+        for (String e : expected) {
+            if (hookHits.getOrDefault(e, 0) == 0) {
+                out.add(e);
+            }
+        }
+        if (CAVE_DEPTH_SWITCH && hookHits.getOrDefault("caveRangeChoice", 0) == 0) {
+            out.add("caveRangeChoice");
+        }
+        return out;
+    }
+
     private final class SphereVisitor implements DensityFunction.Visitor {
         @Override
         public DensityFunction apply(DensityFunction node) {
@@ -763,12 +811,15 @@ public final class SphereDensity {
                         if (key != null) {
                             switch (key) {
                                 case "minecraft:continentalness" -> {
+                                    hit("leaf:continentalness");
                                     return new EarthAxis(node, 2);
                                 }
                                 case "minecraft:erosion" -> {
+                                    hit("leaf:erosion");
                                     return new EarthAxis(node, 3);
                                 }
                                 case "minecraft:ridge" -> {
+                                    hit("leaf:ridge");
                                     return new EarthAxis(node, 5);
                                 }
                                 default -> {
@@ -790,6 +841,7 @@ public final class SphereDensity {
                 }
             }
             if (earthHeight && isOffsetToDepth(node)) {
+                hit("depthGradient");
                 return new EarthDepth();
             }
             // Terrain CHARACTER from real relief. Without this the surface sits at
@@ -797,10 +849,12 @@ public final class SphereDensity {
             // Perlin that is uncorrelated with Earth, so a real 8000 m peak can get
             // flat-plains treatment and a real plain can get spikes.
             if (earthHeight && CAVE_DEPTH_SWITCH && isCaveRangeChoice(node)) {
+                hit("caveRangeChoice");
                 return rebuildCaveChoice(node);
             }
             if (earthHeight && EARTH_SHAPE && earth != null) {
                 if (isFactorSpline(node)) {
+                    hit("factorSpline");
                     // Leaf hook: keep VANILLA's factor spline (now reading our
                     // axes) and only apply the freeboard floor on top, so the
                     // waterline stays pinned. Wrapping instead of replacing is
@@ -808,6 +862,7 @@ public final class SphereDensity {
                     return LEAF_HOOK ? new FreeboardGuard(node) : new EarthFactor();
                 }
                 if (isJaggednessSpline(node)) {
+                    hit("jaggednessSpline");
                     // Leaf hook: vanilla's jaggedness spline over our axes,
                     // plus a seabed term vanilla structurally will not supply.
                     if (LEAF_HOOK) {

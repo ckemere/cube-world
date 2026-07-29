@@ -89,6 +89,11 @@ public final class CubeWorldBiomeProvider extends BiomeProvider {
      * The biome at the top of a column — the surface height's biome, used by
      * the biome-census command to tally the whole planet surface.
      */
+    /** The live vanilla parameter list behind this provider, for coverage checks. */
+    public VanillaBiomeMapper mapper() {
+        return vanilla();          // lazily built; the field may still be null
+    }
+
     public Biome surfaceBiome(WorldInfo worldInfo, int x, int z) {
         MapSampler sampler = maps.mapFor(worldInfo.getSeed()).sampler();
         int y = (int) Math.round(sampler.heightAt(x + 0.5, z + 0.5));

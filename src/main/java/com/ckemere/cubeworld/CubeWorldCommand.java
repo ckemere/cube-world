@@ -455,6 +455,17 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                         NamedTextColor.AQUA));
                 return true;
             }
+            case "biomecoverage" -> {
+                String out = com.ckemere.cubeworld.generation.TerrainEval.biomeCoverage(
+                        org.bukkit.Bukkit.getWorlds().get(0), maps.earthData(), sampler(),
+                        org.bukkit.Bukkit.getWorlds().get(0).getSeed(),
+                        args.length > 1 ? Integer.parseInt(args[1]) : 160,
+                        args.length > 2 ? Integer.parseInt(args[2]) : 340);
+                for (String line : out.split("\n")) {
+                    sender.sendMessage(Component.text(line, NamedTextColor.AQUA));
+                }
+                return true;
+            }
             case "riverat" -> {
                 int bx = Integer.parseInt(args[1]);
                 int bz = Integer.parseInt(args[2]);

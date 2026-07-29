@@ -675,6 +675,84 @@ public final class TerrainEval {
         return sb.toString();
     }
 
+    /**
+     * Which biomes in the LIVE parameter list our axes can actually produce.
+     *
+     * <p>We never fork vanilla's biome table -- {@link VanillaBiomeMapper} reads
+     * the overworld preset out of the registry -- so a biome Mojang adds in an
+     * update needs no code change from us. What it does need is for our
+     * synthetic axes to REACH the corner of parameter space it was given, and
+     * that is not automatic.
+     *
+     * <p>This is not hypothetical. {@code sulfur_caves} shipped in 26.2 and
+     * never appeared anywhere in the world, because its box wants weirdness
+     * &lt;= -0.85 and ours only reached -0.67. A biome can be perfectly
+     * integrated and still be silently absent, and the symptom is nothing at
+     * all. Run this after any version bump.
+     */
+    public static String biomeCoverage(World world, EarthData earth, MapSampler sampler,
+                                       long seed, int side, int stride) {
+        if (!(world.getGenerator() instanceof CubeWorldChunkGenerator gen)) {
+            return "biomecoverage: not a cube world";
+        }
+        CubeWorldBiomeProvider bp = gen.biomeProvider();
+        java.util.Map<String, Integer> seen = new java.util.HashMap<>();
+        int n = 0;
+        int half = side / 2;
+        for (int a = -half; a < half; a++) {
+            for (int b = -half; b < half; b++) {
+                int x = a * stride;
+                int z = b * stride;
+                double surf = sampler.heightAt(x + 0.5, z + 0.5);
+                // Surface plus a depth sweep: the underground bands are only
+                // reachable well below the surface, so a surface-only census
+                // would report every cave biome as missing.
+                for (double frac : new double[] {0.0, 0.25, 0.5, 0.75, 0.95}) {
+                    int y = (int) Math.round(surf - frac * (surf + 64.0));
+                    if (y < -64) {
+                        continue;
+                    }
+                    String b2 = bp.getBiome(world, x, y, z).getKey().getKey();
+                    if (!b2.equals("the_void")) {
+                        seen.merge(b2, 1, Integer::sum);
+                        n++;
+                    }
+                }
+            }
+        }
+        java.util.List<String> all = new java.util.ArrayList<>();
+        for (org.bukkit.block.Biome b2 : gen.biomeProvider().mapper().possibleBiomes()) {
+            all.add(b2.getKey().getKey());
+        }
+        java.util.List<String> missing = new java.util.ArrayList<>();
+        for (String b2 : all) {
+            if (!seen.containsKey(b2)) {
+                missing.add(b2);
+            }
+        }
+        java.util.Collections.sort(missing);
+        StringBuilder sb = new StringBuilder(String.format(Locale.ROOT,
+                "biomecoverage: %d samples, %d/%d biomes in the live parameter list reached%n",
+                n, all.size() - missing.size(), all.size()));
+        if (missing.isEmpty()) {
+            sb.append("  ALL REACHABLE\n");
+        } else {
+            sb.append("  UNREACHABLE (in vanilla's table, never produced by our axes):\n");
+            for (String b2 : missing) {
+                sb.append("     ").append(b2).append('\n');
+            }
+        }
+        java.util.List<java.util.Map.Entry<String, Integer>> rare =
+                new java.util.ArrayList<>(seen.entrySet());
+        rare.sort(java.util.Map.Entry.comparingByValue());
+        sb.append("  rarest reached: ");
+        for (int i = 0; i < Math.min(6, rare.size()); i++) {
+            sb.append(rare.get(i).getKey()).append(' ')
+              .append(String.format(Locale.ROOT, "%.3f%% ", 100.0 * rare.get(i).getValue() / n));
+        }
+        return sb.append('\n').toString();
+    }
+
     /** For the record, so a scorecard can be reproduced. */
     public static String tiles() {
         return Arrays.stream(TILES)

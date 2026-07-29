@@ -72,9 +72,24 @@ public final class SphereRouterHook {
                 log.warning("Sphere router hook: no RandomState yet for '" + world.getName() + "'.");
                 return false;
             }
-            NoiseRouter folded = SphereDensity.forSampler(sampler, faceSize, earthHeight, earth)
-                    .seed(world.getSeed())
-                    .fold(rs.router());
+            SphereDensity sd = SphereDensity.forSampler(sampler, faceSize, earthHeight, earth)
+                    .seed(world.getSeed());
+            NoiseRouter folded = sd.fold(rs.router());
+            if (earthHeight) {
+                java.util.List<String> missed = sd.missedHooks();
+                if (missed.isEmpty()) {
+                    log.info("Density hooks: " + sd.hookReport());
+                } else {
+                    // Every fingerprint here matches a vanilla node by a property
+                    // a Mojang retune can change, and a miss is SILENT -- the node
+                    // is simply left alone and the world generates with vanilla's
+                    // behaviour instead of ours. Shout about it.
+                    log.severe("DENSITY HOOK MISSED " + missed + " -- a vanilla node "
+                            + "fingerprint no longer matches, probably after a version "
+                            + "bump. Terrain will NOT be Earth-shaped for that node. "
+                            + "Hits: " + sd.hookReport());
+                }
+            }
             putFinalObject(rs, RandomState.class.getDeclaredField("router"), folded);
             if (earthHeight && !AQUIFERS) {
                 disableAquifers(level, log);
