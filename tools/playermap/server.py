@@ -532,6 +532,51 @@ def structures_json(seed, dim):
     return out
 
 
+_biomefaces_cache = {"sig": None, "uris": None}
+
+
+def biome_face_uris_from_raster():
+    """Globe face textures coloured by the biomes the world ACTUALLY generates.
+
+    This used to come from `biomegen`, which re-derives biomes in Python from
+    the raw climate rasters -- an approximation that does not move when the
+    generator changes, and which needed a worldblob.cwb build artefact that was
+    not present, so the route raised FileNotFoundError and the browser got a
+    dropped connection rather than an error. Same source as /biomes now: the
+    plugin's own dump of the real biome provider.
+
+    Faces are resized to a power of two because WebGL wants that for mipmaps,
+    with NEAREST so the per-chunk cells stay crisp, and are returned in
+    realmap.FACE_ORDER -- the raster stores them in the plugin's CubeFace order,
+    which is NOT the same, so they are matched by name.
+    """
+    import base64
+    import io
+    import biomeglobe
+    import numpy as np
+    from PIL import Image
+
+    path = scompute.raster_path("overworld")
+    sig = os.path.getmtime(path)
+    if _biomefaces_cache["sig"] == sig and _biomefaces_cache["uris"]:
+        return _biomefaces_cache["uris"]
+    r = scompute.raster("overworld")
+    lut = np.array([biomeglobe.colour_of(b) for b in r.palette], dtype=np.uint8)
+    by_name = {}
+    for name, _cmx, _cmz, grid in r.faces:
+        g = grid.reshape(r.chunks, r.chunks)
+        rgb = lut[np.clip(g, 0, len(r.palette) - 1)].transpose(1, 0, 2)
+        im = Image.fromarray(rgb, "RGB").resize((1024, 1024), Image.NEAREST)
+        buf = io.BytesIO()
+        im.save(buf, "PNG")
+        by_name[name] = ("data:image/png;base64,"
+                         + base64.b64encode(buf.getvalue()).decode())
+    uris = [by_name[f] for f in realmap.FACE_ORDER]
+    _biomefaces_cache["sig"] = sig
+    _biomefaces_cache["uris"] = uris
+    return uris
+
+
 _biomes_cache = {"sig": None, "html": None}
 
 
@@ -635,13 +680,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 uris = nether_face_uris() if nether_face_uris else []
                 self._send(json.dumps(uris).encode(), "application/json")
             elif self.path.startswith("/biomefaces"):
-                from urllib.parse import urlparse, parse_qs
-                q = parse_qs(urlparse(self.path).query)
+                # never let a missing/!broken input drop the connection -- the
+                # page just gets an empty list and keeps the terrain faces
                 try:
-                    seed = int(q.get("seed", [str(default_seed())])[0])
-                except ValueError:
-                    seed = default_seed()
-                uris = biome_face_uris(seed) if biome_face_uris else []
+                    uris = biome_face_uris_from_raster()
+                except Exception as e:
+                    print("biomefaces error:", e)
+                    uris = []
                 self._send(json.dumps(uris).encode(), "application/json")
             else:
                 self._send(load_page().encode("utf-8"), "text/html; charset=utf-8")
