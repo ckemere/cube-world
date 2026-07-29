@@ -190,6 +190,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
             command.setTabCompleter(executor);
         }
         getLogger().info("CubeWorld enabled (face size " + FACE_SIZE + " blocks)");
+        warnIfMapArtefactsStale();
     }
 
     /** Load the CWE1 Earth rasters (run dir, then plugin data folder). When
@@ -374,4 +375,48 @@ public final class CubeWorldPlugin extends JavaPlugin {
         }
         return new CubeWorldChunkGenerator(topology, maps, MARGIN_BLOCKS);
     }
+
+    /**
+     * Say so, loudly, when the web map's inputs are older than this plugin.
+     *
+     * <p>The rasters and the stronghold dump are produced by commands, so
+     * nothing tied them to the generator that produced them. After a rebuild
+     * they keep serving the previous world's answers and look completely
+     * normal: during one session the depth raster sat a build behind and the
+     * biome page four hours behind, and the only symptom was numbers quietly
+     * disagreeing. A map that is wrong without saying so is worse than one that
+     * is missing.
+     */
+    private void warnIfMapArtefactsStale() {
+        try {
+            java.io.File jar = new java.io.File(getClass().getProtectionDomain()
+                    .getCodeSource().getLocation().toURI());
+            long built = jar.lastModified();
+            java.nio.file.Path dir = getDataFolder().toPath();
+            java.util.List<String> names = new java.util.ArrayList<>();
+            names.add("biomes/overworld.cwbr");
+            for (int y : CubeWorldCommand.MAP_DEPTH_RASTERS) {
+                names.add("biomes/overworld_y" + y + ".cwbr");
+            }
+            names.add("strongholds.json");
+            java.util.List<String> stale = new java.util.ArrayList<>();
+            for (String n : names) {
+                java.io.File f = dir.resolve(n).toFile();
+                if (!f.exists()) {
+                    stale.add(n + " (missing)");
+                } else if (f.lastModified() < built) {
+                    stale.add(n + " (" + ((built - f.lastModified()) / 60000) + " min behind)");
+                }
+            }
+            if (!stale.isEmpty()) {
+                getLogger().warning("Web map inputs are older than this build: "
+                        + String.join(", ", stale)
+                        + " -- run `/cubeworld refreshmap` or the map will show the"
+                        + " PREVIOUS generator's world.");
+            }
+        } catch (Throwable t) {
+            // never let a freshness check stop startup
+        }
+    }
+
 }

@@ -117,15 +117,47 @@ def _placement(name):
 DEEP_RASTERS = {"ancient_cities": -27}          # ancient_city start_height.absolute
 
 
+def raster_path(dimension="overworld", at_y=None):
+    base = "nether" if dimension == "nether" else "overworld"
+    fname = base + ("" if at_y is None else f"_y{at_y}") + ".cwbr"
+    return os.path.join(_DIR, "..", "..", "..", "run", "plugins", "CubeWorld",
+                        "biomes", fname)
+
+
+def _mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return None
+
+
 def raster(dimension="overworld", at_y=None):
-    key = (dimension, at_y)
-    if key not in _rasters:
-        base = "nether" if dimension == "nether" else "overworld"
-        fname = base + ("" if at_y is None else f"_y{at_y}") + ".cwbr"
-        path = os.path.join(_DIR, "..", "..", "..", "run", "plugins", "CubeWorld",
-                            "biomes", fname)
-        _rasters[key] = load_raster(path)
-    return _rasters[key]
+    """Load a biome raster, RELOADING it if the file changed on disk.
+
+    These used to be cached for the life of the process. Regenerating a raster
+    then had no effect on a running map server, which is a silent wrong answer
+    rather than a visible failure -- it served 208 villages against the 205 the
+    world actually had, and the only clue was that the numbers disagreed with a
+    fresh interpreter. Keyed on mtime so a new dump is picked up on the next
+    request."""
+    path = raster_path(dimension, at_y)
+    mt = _mtime(path)
+    hit = _rasters.get((dimension, at_y))
+    if hit is None or hit[0] != mt:
+        hit = (mt, load_raster(path))
+        _rasters[(dimension, at_y)] = hit
+    return hit[1]
+
+
+def inputs_signature(dimension="overworld"):
+    """Everything the overlays are computed FROM, as a comparable tuple: the
+    surface raster, every depth raster, and the stronghold dump. Any of them
+    changing must invalidate the cached markers."""
+    sig = [_mtime(raster_path(dimension))]
+    for at_y in sorted(set(DEEP_RASTERS.values())):
+        sig.append(_mtime(raster_path(dimension, at_y)))
+    sig.append(_mtime(STRONGHOLDS_JSON))
+    return tuple(sig)
 
 
 def _net_chunk_box(face=cubegate.FACE):
@@ -184,7 +216,9 @@ def _nether_overlays(seed, r):
 
 
 def compute_overlays(seed, dimension="overworld", types=None):
-    key = (seed, dimension)
+    # The signature is part of the key, so a regenerated raster or stronghold
+    # dump produces a cache MISS rather than a stale hit.
+    key = (seed, dimension, inputs_signature(dimension))
     if key in _cache and types is None:
         return _cache[key]
     try:

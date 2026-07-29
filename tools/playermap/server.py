@@ -532,6 +532,35 @@ def structures_json(seed, dim):
     return out
 
 
+_biomes_cache = {"sig": None, "html": None}
+
+
+def biomes_page():
+    """The biome page, rebuilt whenever overworld.cwbr changes underneath it."""
+    import biomeglobe
+    here = os.path.dirname(__file__)
+    out = os.path.join(here, "biomes.html")
+    try:
+        sig = os.path.getmtime(scompute.raster_path("overworld"))
+    except Exception:
+        sig = None
+    if sig is None:
+        return (b"<h1>No biome raster</h1><p>Run <code>/cubeworld biomeraster "
+                b"overworld</code> on the server, then reload.</p>")
+    if _biomes_cache["sig"] == sig and _biomes_cache["html"] is not None:
+        return _biomes_cache["html"]
+    try:
+        r, written = biomeglobe.render(scompute.raster_path("overworld"))
+        biomeglobe.build_page(r, written, out)
+        with open(out, "rb") as f:
+            html = f.read()
+    except Exception as e:
+        return f"<h1>Biome page failed</h1><pre>{e}</pre>".encode()
+    _biomes_cache["sig"] = sig
+    _biomes_cache["html"] = html
+    return html
+
+
 def load_page():
     with open(_globe_path(), encoding="utf-8") as f:
         html = f.read()
@@ -582,16 +611,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # classification computed from the raw rasters and does not move
                 # when the generator changes -- it showed the Amazon as
                 # rainforest while the server was generating mangrove swamp.
-                # Rebuild after a reseed with:
-                #     python3 tools/playermap/biomeglobe.py
-                p = os.path.join(os.path.dirname(__file__), "biomes.html")
-                if os.path.exists(p):
-                    with open(p, "rb") as f:
-                        self._send(f.read(), "text/html; charset=utf-8")
-                else:
-                    self._send(b"<h1>No biome map built</h1><p>Run "
-                               b"<code>python3 tools/playermap/biomeglobe.py</code>.</p>",
-                               "text/html; charset=utf-8")
+                #
+                # Rebuilt HERE rather than by hand. It used to be a static file
+                # refreshed by running biomeglobe.py, which meant the one page
+                # whose whole purpose is "what does the generator do now" was the
+                # most likely thing on the map to be hours out of date -- and it
+                # said so nowhere.
+                self._send(biomes_page(), "text/html; charset=utf-8")
             elif self.path.startswith("/players"):
                 self._send(json.dumps(get_players()).encode(), "application/json")
             elif self.path.startswith("/faces"):

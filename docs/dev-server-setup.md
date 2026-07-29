@@ -351,3 +351,31 @@ Rebuild the layer with:
 `add_sst.py` streams, so it does not need the full ETOPO/WorldClim rebuild.
 A full `export_earth` run picks `sst_total.npy` up automatically if present.
 Kill switch: `-Dcubeworld.sst=false` restores the latitude proxy.
+
+## Keeping the web map from going stale
+
+The map reads four things the plugin produces: `biomes/overworld.cwbr` (surface
+biomes — drives the `/biomes` page AND the structure overlay's biome filter),
+`biomes/overworld_y-27.cwbr` (biomes at ancient_city's start height), and
+`strongholds.json` (end portals). None of them regenerate themselves, so after
+any generator change they keep serving the PREVIOUS world and look entirely
+normal doing it.
+
+Three things now make that visible and cheap to fix:
+
+- **`/cubeworld refreshmap`** rebuilds all of them in one command (~36 s).
+- **The server warns at startup** when any of them is older than the plugin jar,
+  naming the file and how far behind it is.
+- **The map server no longer needs restarting.** Rasters and computed overlays
+  are keyed on file mtime, so a fresh dump is picked up on the next request
+  (measured: a cached query is 0.08 s, the first query after a raster regen is
+  0.35 s — a real recompute). `/biomes` likewise rebuilds itself from the raster
+  rather than serving whatever `biomeglobe.py` last wrote.
+
+So the loop after a generator change is: stop server, `./gradlew build`,
+`./run-server.sh`, `/cubeworld refreshmap`. The map catches up on its own.
+
+Still NOT automatic: the globe's face textures show real generated blocks, so
+terrain that has never been generated cannot appear on them, and biomes are
+fixed at chunk generation — existing region files keep the biomes they were
+built with. A generator change is only fully visible after a world regen.

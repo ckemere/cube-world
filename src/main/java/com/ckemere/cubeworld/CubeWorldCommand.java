@@ -838,6 +838,9 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
             case "strongholds" -> {
                 return handleStrongholds(sender);
             }
+            case "refreshmap" -> {
+                return handleRefreshMap(sender);
+            }
             case "genprof" -> {
                 if (args.length > 1 && args[1].equalsIgnoreCase("reset")) {
                     com.ckemere.cubeworld.generation.GenProfiler.reset();
@@ -934,6 +937,34 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
      * palette (writeUTF keys), then per face: name, minX, minZ, chunks^2 shorts
      * (palette index), row-major with the x-index outer and z-index inner.
      */
+    /**
+     * Rebuild every artefact the web map reads out of the plugin, in one go.
+     *
+     * <p>These used to be three separate commands that had to be remembered in
+     * the right combination after any generator change. They were not: the
+     * depth raster sat a build behind and the biome page four hours behind,
+     * with nothing anywhere saying so. One command, and
+     * {@code CubeWorldPlugin} warns at startup when the files are older than
+     * the plugin itself.
+     */
+    private boolean handleRefreshMap(CommandSender sender) {
+        long t0 = System.currentTimeMillis();
+        handleBiomeRaster(sender, "overworld", null);
+        for (int y : MAP_DEPTH_RASTERS) {
+            handleBiomeRaster(sender, "overworld", y);
+        }
+        handleStrongholds(sender);
+        sender.sendMessage(Component.text(
+                "refreshmap: done in " + (System.currentTimeMillis() - t0) + " ms",
+                NamedTextColor.GREEN));
+        return true;
+    }
+
+    /** Depths the web map needs a biome raster at. -27 is ancient_city's
+     * start_height.absolute; structures that start underground are biome-tested
+     * there, not at the surface. */
+    public static final int[] MAP_DEPTH_RASTERS = {-27};
+
     /**
      * Dump the world's stronghold (= end portal) positions for the web map.
      *
@@ -1361,7 +1392,8 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
         List<String> out = new ArrayList<>();
         if (args.length == 1) {
             for (String sub : new String[] {"ping", "face", "tp", "simulate", "biomeat",
-                    "biomeraster", "strongholds", "tpcore", "tpstations"}) {
+                    "biomeraster", "refreshmap", "strongholds", "tpcore",
+                    "tpstations"}) {
                 if (sub.startsWith(args[0].toLowerCase(Locale.ROOT))) {
                     out.add(sub);
                 }
