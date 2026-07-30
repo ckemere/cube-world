@@ -495,6 +495,14 @@ public final class EarthClimate {
      * 0.54, just under vanilla's swamp band at 0.55, so no desert lands in it. */
     private static final double EROSION_DRY_CAP = 0.38;
 
+    /** Native range of flowering cherry: temperate East Asia (Japan, Korea, E
+     * China, into the E Himalaya). Cherry grove is allowed inside this lon/lat
+     * window; the same climate niche elsewhere reads as its meadow twin. */
+    private static final double CHERRY_LON_MIN = 95.0;
+    private static final double CHERRY_LON_MAX = 150.0;
+    private static final double CHERRY_LAT_MIN = 25.0;
+    private static final double CHERRY_LAT_MAX = 50.0;
+
     // weirdness is vanilla's peaks-and-valleys selector: |w| picks the terrain
     // "slice" (near 0 = valleys/rivers, ~0.35 mid, ~0.5 high, ~0.65 peaks).
     // We drive |w| from real elevation so mountainous biomes coincide with the
@@ -701,6 +709,26 @@ public final class EarthClimate {
 
         double tc = temp + nt;
         double h = clamp(humidity(precip) + nh, -1, 1);
+
+        // Cherry grove, restricted to its native range. Cherry grove is the
+        // POSITIVE-weirdness plateau variant of dry cool/temperate high country,
+        // and its negative-weirdness twin in the same cells is MEADOW [src:
+        // OverworldBiomeBuilder.PLATEAU_BIOMES_VARIANT rows 1-2, humidity 0-1].
+        // Minecraft themes it on Japanese hanami, but that climate niche is every
+        // dry mountain range on Earth, so it carpeted the Rockies, the Andes and
+        // Central Asia -- measured, only 8.5% of the world's cherry_grove was in
+        // East Asia where flowering cherries are actually native, and it was 7.5%
+        // of the Rockies alone. Flowering Prunus is a temperate East-Asian genus,
+        // so outside that window the weirdness SIGN is flipped negative in the
+        // niche, giving alpine meadow (the vanilla base) instead. Only the SIGN
+        // moves; the magnitude that drives peak/slice selection is untouched.
+        if (weird > 0 && !(lon >= CHERRY_LON_MIN && lon <= CHERRY_LON_MAX
+                && lat >= CHERRY_LAT_MIN && lat <= CHERRY_LAT_MAX)) {
+            double axisT = interp(tc, TE, LEGACY ? LEGACY_TT : TT);
+            if (axisT >= -0.45 && axisT < 0.20 && h < -0.10) {
+                weird = -weird;
+            }
+        }
         // River clearings. Minecraft has no forest village -- village_plains and
         // friends want plains/meadow/savanna/taiga/snowy_plains/desert -- so
         // whole correctly-classified continents of temperate deciduous forest
