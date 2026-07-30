@@ -495,6 +495,26 @@ public final class EarthClimate {
      * 0.54, just under vanilla's swamp band at 0.55, so no desert lands in it. */
     private static final double EROSION_DRY_CAP = 0.38;
 
+    /** South of this latitude the only land on Earth is the Antarctic ice cap,
+     * so a geographic rule there is unambiguous (South America ends at -56). */
+    private static final double ANTARCTIC_LAT = -62.0;
+
+    /** Extra cooling per degree of latitude south of ANTARCTIC_LAT, so the
+     * mild-reading peninsula edge still reaches the frozen (snowy) row. At -66
+     * that is 2.4 C; the deep interior is driven far colder, which is correct. */
+    private static final double ANTARCTIC_COOL_PER_DEG = 0.6;
+
+    /** Erosion ceiling for the cherry flip: only PLATEAU cells (cherry grove's
+     * home, measured E < ~0.03) are flipped, sparing the flatter middle-biome
+     * variants (sunflower_plains, old_growth_birch_forest) that share the niche. */
+    private static final double CHERRY_MAX_EROSION = 0.10;
+
+    /** A/B toggle for the native-range cherry restriction (-Dcubeworld.cherryNativeOnly=false
+     * restores vanilla's global cherry placement). Exists so the change can be
+     * measured against the other weirdness-selected biomes. */
+    private static final boolean CHERRY_NATIVE_ONLY = !"false".equalsIgnoreCase(
+            System.getProperty("cubeworld.cherryNativeOnly", "true"));
+
     /** Native range of flowering cherry: temperate East Asia (Japan, Korea, E
      * China, into the E Himalaya). Cherry grove is allowed inside this lon/lat
      * window; the same climate niche elsewhere reads as its meadow twin. */
@@ -709,6 +729,25 @@ public final class EarthClimate {
 
         double tc = temp + nt;
         double h = clamp(humidity(precip) + nh, -1, 1);
+        double axisT = interp(tc, TE, LEGACY ? LEGACY_TT : TT);
+
+        // Antarctic ice sheet. Small patches of snowy_taiga, taiga, plains and
+        // swamp kept appearing on the continent. The cause is bad data, not
+        // climate: WorldClim bilinear-bleeds mild, wet values across the ice edge
+        // (measured 640-794 mm at -74 C where the real interior is <100 mm), which
+        // reads as the wet tree/swamp variants. It cannot be fixed by a global
+        // temperature rule: a -10 C treeline also deletes genuine Siberian larch
+        // taiga (which tolerates -15 C), and doing so cost the Siberia eval tile
+        // 18%. Antarctica is instead handled geographically, which is honest --
+        // it is the ONLY land south of -60 (South America ends at -56), an
+        // isolated ice cap with no boreal forest. South of -62, dry the humidity
+        // so no wet variants survive, and cool with latitude so the mild-reading
+        // peninsula still lands in the frozen (snowy) row rather than plains.
+        if (land && lat < ANTARCTIC_LAT) {
+            h = Math.min(h, -0.35);
+            tc -= (ANTARCTIC_LAT - lat) * ANTARCTIC_COOL_PER_DEG;
+            axisT = interp(tc, TE, LEGACY ? LEGACY_TT : TT);
+        }
 
         // Cherry grove, restricted to its native range. Cherry grove is the
         // POSITIVE-weirdness plateau variant of dry cool/temperate high country,
@@ -722,10 +761,18 @@ public final class EarthClimate {
         // so outside that window the weirdness SIGN is flipped negative in the
         // niche, giving alpine meadow (the vanilla base) instead. Only the SIGN
         // moves; the magnitude that drives peak/slice selection is untouched.
-        if (weird > 0 && !(lon >= CHERRY_LON_MIN && lon <= CHERRY_LON_MAX
+        if (CHERRY_NATIVE_ONLY && weird > 0
+                && !(lon >= CHERRY_LON_MIN && lon <= CHERRY_LON_MAX
                 && lat >= CHERRY_LAT_MIN && lat <= CHERRY_LAT_MAX)) {
-            double axisT = interp(tc, TE, LEGACY ? LEGACY_TT : TT);
-            if (axisT >= -0.45 && axisT < 0.20 && h < -0.10) {
+            // Restricted to PLATEAU erosion. Cherry grove is a plateau variant, so
+            // it sits at negative erosion (measured median -0.19); the middle-biome
+            // variants that share the dry cool/temperate niche -- sunflower_plains
+            // (E ~ +0.31) and old_growth_birch_forest (E ~ +0.18) -- sit at flatter,
+            // positive erosion. The first cut of this flip had no erosion gate and
+            // took sunflower_plains 0.77% -> 0.11% and old_growth_birch 0.84% ->
+            // 0.48% as collateral. Gating on plateau erosion leaves them alone.
+            if (axisT >= -0.45 && axisT < 0.20 && h < -0.10
+                    && erosion(rugged) < CHERRY_MAX_EROSION) {
                 weird = -weird;
             }
         }
