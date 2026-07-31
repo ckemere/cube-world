@@ -841,6 +841,9 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
             case "refreshmap" -> {
                 return handleRefreshMap(sender);
             }
+            case "map" -> {
+                return handleMap(sender, args);
+            }
             case "genprof" -> {
                 if (args.length > 1 && args[1].equalsIgnoreCase("reset")) {
                     com.ckemere.cubeworld.generation.GenProfiler.reset();
@@ -947,6 +950,164 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
      * {@code CubeWorldPlugin} warns at startup when the files are older than
      * the plugin itself.
      */
+    /**
+     * Cube-aware map items: a seam-flattening {@link com.ckemere.cubeworld.map.CubeMapRenderer}.
+     *
+     * <p>{@code map dump <cx> <cz> <blocksPerPixel>} renders offline to a PNG so
+     * the result can be eyeballed without a client. {@code map axumchest} builds a
+     * few demo maps (a local Axum view and two that straddle face seams) and drops
+     * a chest of them beside the Axum teleporter.
+     */
+    private boolean handleMap(CommandSender sender, String[] args) {
+        org.bukkit.World world = null;
+        for (org.bukkit.World w : org.bukkit.Bukkit.getWorlds()) {
+            if (w.getEnvironment() == org.bukkit.World.Environment.NORMAL) {
+                world = w;
+                break;
+            }
+        }
+        if (world == null) {
+            sender.sendMessage(Component.text("No overworld.", NamedTextColor.RED));
+            return true;
+        }
+        com.ckemere.cubeworld.geometry.CubeTopology topo =
+                new com.ckemere.cubeworld.geometry.CubeTopology(geometry);
+        String sub = args.length >= 2 ? args[1].toLowerCase(Locale.ROOT) : "";
+
+        if (sub.equals("dump") && args.length >= 5) {
+            int cx = Integer.parseInt(args[2]);
+            int cz = Integer.parseInt(args[3]);
+            int bpp = Integer.parseInt(args[4]);
+            java.util.Set<Long> chunks =
+                    com.ckemere.cubeworld.map.CubeMapImage.sourceChunks(geometry, topo, cx, cz, bpp);
+            if (chunks.size() > MAX_MAP_DUMP_CHUNKS) {
+                sender.sendMessage(Component.text("Refusing: " + chunks.size()
+                        + " chunks would need loading (cap " + MAX_MAP_DUMP_CHUNKS
+                        + "). Use a smaller blocksPerPixel.", NamedTextColor.RED));
+                return true;
+            }
+            setChunksLoaded(world, chunks, true);
+            var r = com.ckemere.cubeworld.map.CubeMapImage.render(world, geometry, topo, cx, cz, bpp);
+            setChunksLoaded(world, chunks, false);
+            java.awt.image.BufferedImage img =
+                    new java.awt.image.BufferedImage(r.size(), r.size(), java.awt.image.BufferedImage.TYPE_INT_RGB);
+            for (int py = 0; py < r.size(); py++) {
+                for (int px = 0; px < r.size(); px++) {
+                    img.setRGB(px, py, r.argb()[py * r.size() + px]);
+                }
+            }
+            java.nio.file.Path out = org.bukkit.Bukkit.getPluginManager().getPlugin("CubeWorld")
+                    .getDataFolder().toPath().resolve("mapdump_" + cx + "_" + cz + "_" + bpp + ".png");
+            try {
+                javax.imageio.ImageIO.write(img, "png", out.toFile());
+            } catch (java.io.IOException e) {
+                sender.sendMessage(Component.text("PNG write failed: " + e, NamedTextColor.RED));
+                return true;
+            }
+            sender.sendMessage(Component.text("map dump -> " + out, NamedTextColor.AQUA));
+            return true;
+        }
+
+        if (sub.equals("axumchest")) {
+            int ax = 11974, az = -1360;                       // Axum teleporter (EQ_EAST)
+            // (label, centreX, centreZ, blocksPerPixel). The EQ_EAST face spans
+            // x 5120..15360, z -5120..5120; the last two straddle its east and
+            // north edges to exercise the seam fold.
+            Object[][] specs = {
+                {"Axum (local)", ax, az, 4},
+                {"East seam (EQ_EAST|EQ_BACK)", 15360, az, 4},
+                {"North seam (EQ_EAST|NORTH_POLE)", ax, -5120, 4},
+            };
+            java.util.List<org.bukkit.inventory.ItemStack> items = new java.util.ArrayList<>();
+            for (Object[] s : specs) {
+                String label = (String) s[0];
+                int cx = (int) s[1], cz = (int) s[2], bpp = (int) s[3];
+                // Warm the render cache now, while we can bound-load the footprint,
+                // so the map has content the first time it is opened.
+                java.util.Set<Long> chunks =
+                        com.ckemere.cubeworld.map.CubeMapImage.sourceChunks(geometry, topo, cx, cz, bpp);
+                setChunksLoaded(world, chunks, true);
+                org.bukkit.map.MapView view = org.bukkit.Bukkit.createMap(world);
+                for (org.bukkit.map.MapRenderer old : new java.util.ArrayList<>(view.getRenderers())) {
+                    view.removeRenderer(old);
+                }
+                view.setCenterX(cx);
+                view.setCenterZ(cz);
+                view.setScale(scaleForBpp(bpp));
+                view.setTrackingPosition(true);
+                view.setUnlimitedTracking(true);              // keep drawing our pixels off-center
+                com.ckemere.cubeworld.map.CubeMapRenderer rend =
+                        new com.ckemere.cubeworld.map.CubeMapRenderer(geometry, topo, teleport, cx, cz, bpp);
+                rend.prime(world);                            // fill cache while footprint is loaded
+                view.addRenderer(rend);
+                setChunksLoaded(world, chunks, false);
+                org.bukkit.inventory.ItemStack item =
+                        new org.bukkit.inventory.ItemStack(org.bukkit.Material.FILLED_MAP);
+                org.bukkit.inventory.meta.MapMeta mm =
+                        (org.bukkit.inventory.meta.MapMeta) item.getItemMeta();
+                mm.setMapView(view);
+                mm.displayName(Component.text(label, NamedTextColor.AQUA));
+                item.setItemMeta(mm);
+                items.add(item);
+            }
+            // Chest on the surface a couple of blocks from the teleporter.
+            forceloadBox(world, ax - 16, az - 16, ax + 16, az + 16, true);
+            int chx = ax + 2, chz = az;
+            int chy = world.getHighestBlockYAt(chx, chz) + 1;
+            org.bukkit.block.Block b = world.getBlockAt(chx, chy, chz);
+            b.setType(org.bukkit.Material.CHEST, false);
+            // On a placed TileState, getInventory() is the LIVE inventory and
+            // writes through immediately -- no update() (which, forced, re-places
+            // the block and wipes the tile entity). getBlockInventory() is the
+            // snapshot half and does NOT persist; that was the empty-chest bug.
+            int added = 0;
+            if (b.getState() instanceof org.bukkit.block.Container c) {
+                for (org.bukkit.inventory.ItemStack it : items) {
+                    c.getInventory().addItem(it);
+                    added++;
+                }
+            }
+            forceloadBox(world, ax - 16, az - 16, ax + 16, az + 16, false);
+            sender.sendMessage(Component.text(
+                    "map axumchest: " + added + " maps -> chest at "
+                            + chx + "," + chy + "," + chz, NamedTextColor.GREEN));
+            return true;
+        }
+
+        sender.sendMessage(Component.text(
+                "Usage: /cubeworld map dump <cx> <cz> <blocksPerPixel> | map axumchest",
+                NamedTextColor.RED));
+        return true;
+    }
+
+    private static org.bukkit.map.MapView.Scale scaleForBpp(int bpp) {
+        return switch (bpp) {
+            case 1 -> org.bukkit.map.MapView.Scale.CLOSEST;
+            case 2 -> org.bukkit.map.MapView.Scale.CLOSE;
+            case 4 -> org.bukkit.map.MapView.Scale.NORMAL;
+            case 8 -> org.bukkit.map.MapView.Scale.FAR;
+            default -> org.bukkit.map.MapView.Scale.FARTHEST;
+        };
+    }
+
+    private static void forceloadBox(org.bukkit.World w, int x1, int z1, int x2, int z2, boolean on) {
+        for (int cx = x1 >> 4; cx <= (x2 >> 4); cx++) {
+            for (int cz = z1 >> 4; cz <= (z2 >> 4); cz++) {
+                w.setChunkForceLoaded(cx, cz, on);
+            }
+        }
+    }
+
+    /** Cap on chunks a single map render may force-load on this 2.6 GB-heap box.
+     * A blocksPerPixel of 4 is ~1024 chunks; 8+ blows past this and OOMs. */
+    private static final int MAX_MAP_DUMP_CHUNKS = 1400;
+
+    private static void setChunksLoaded(org.bukkit.World w, java.util.Set<Long> chunks, boolean on) {
+        for (long key : chunks) {
+            w.setChunkForceLoaded((int) (key >> 32), (int) key, on);
+        }
+    }
+
     private boolean handleRefreshMap(CommandSender sender) {
         long t0 = System.currentTimeMillis();
         handleBiomeRaster(sender, "overworld", null);
@@ -1392,7 +1553,7 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
         List<String> out = new ArrayList<>();
         if (args.length == 1) {
             for (String sub : new String[] {"ping", "face", "tp", "simulate", "biomeat",
-                    "biomeraster", "refreshmap", "strongholds", "tpcore",
+                    "biomeraster", "refreshmap", "map", "strongholds", "tpcore",
                     "tpstations"}) {
                 if (sub.startsWith(args[0].toLowerCase(Locale.ROOT))) {
                     out.add(sub);
