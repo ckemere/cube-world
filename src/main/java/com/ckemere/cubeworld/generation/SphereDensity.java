@@ -125,6 +125,11 @@ public final class SphereDensity {
     private static final boolean HYDRO_AQUIFERS =
             !"false".equalsIgnoreCase(System.getProperty("cubeworld.hydroAquifers", "true"));
 
+    /** Blocks of low coastal land above sea level that keep a sea-fed (flooded)
+     * water table, so the aquifer's coarse-grid floodedness sampling can't dry
+     * out the shallow shelf next door. One aquifer cell width. */
+    private static final double HYDRO_COAST_BUFFER = 16.0;
+
     /**
      * Carve river VALLEYS into the density field, early
      * ({@code -Dcubeworld.riverValley=}).
@@ -574,9 +579,8 @@ public final class SphereDensity {
         // seabed and left the shelf as DRY LAND: grass surface, air up to sea
         // level, ocean biome (so seagrass), the real sea spilling in as a
         // trickle. Measured 48% of coastal columns, 100% of the Persian Gulf.
-        // Climate wetness is only meaningful ABOVE sea level, for perched and
-        // underground water tables; below it, ocean is ocean.
-        if (targetSurfaceY(wx, wz) < EarthMapSpec.SEA_LEVEL) {
+        double surfaceY = targetSurfaceY(wx, wz);
+        if (surfaceY < EarthMapSpec.SEA_LEVEL) {
             return 1.0;
         }
         double[] ll = earth.toLonLat(p);
@@ -592,7 +596,21 @@ public final class SphereDensity {
         // ratio ~0.2 in the Sahara, ~2.5 in the Amazon -> about -0.75 .. +0.75
         double wet = Math.clamp((precip / pet - 0.75) / 1.0, -0.75, 0.75);
         double river = EarthClimate.riverStrength(earth, sampler, wx, wz);
-        return Math.clamp(wet + 0.6 * river, -1.0, 1.0);
+        double climate = Math.clamp(wet + 0.6 * river, -1.0, 1.0);
+        // Coastal buffer. The aquifer samples floodedness on a coarse, jittered
+        // 16-wide grid, so a cell centred on arid LAND right at the shore dries
+        // out the adjacent shallow shelf -- 70% of the post-fix residual was
+        // still dry shelf, all of it hugging coasts. Low land within a cell-width
+        // of sea level keeps a sea-fed (flooded) water table, blending to the
+        // climate value above; the fluid level stays at sea level so the land
+        // surface is untouched, only its below-sea interior is wet (which is what
+        // coastal groundwater is).
+        double above = surfaceY - EarthMapSpec.SEA_LEVEL;
+        if (above < HYDRO_COAST_BUFFER) {
+            double t = above / HYDRO_COAST_BUFFER;
+            return 1.0 * (1.0 - t) + climate * t;
+        }
+        return climate;
     }
 
     private final class EarthSurfaceLevel implements DensityFunction {
