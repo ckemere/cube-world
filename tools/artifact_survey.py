@@ -114,11 +114,12 @@ def scan_box(cx, cz, half):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--points", type=int, default=len(POINTS))
+    ap.add_argument("--start", type=int, default=0)
     ap.add_argument("--half", type=int, default=96)   # 6-chunk radius box (~144 chunks)
     a = ap.parse_args()
     print(f"{'point':20}{'world xz':>16}{'cols':>8}{'drysea%':>9}{'airhole':>8}")
     tot_c = tot_d = 0
-    for name, lat, lon in POINTS[:a.points]:
+    for name, lat, lon in POINTS[a.start:a.points]:
         wc = find_world(lat, lon)
         if wc is None:
             print(f"{name:20}{'(no coord)':>16}")

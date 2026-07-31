@@ -567,6 +567,18 @@ public final class SphereDensity {
         if (p == null || earth == null) {
             return 0.0;
         }
+        // Submerged columns must flood to sea level, whatever the climate. This
+        // value otherwise carries climate wetness (precip vs PET), which is
+        // negative in arid coastal regions -- and the aquifer, seeing a dry
+        // reading over a below-sea shelf, dropped its water table below the
+        // seabed and left the shelf as DRY LAND: grass surface, air up to sea
+        // level, ocean biome (so seagrass), the real sea spilling in as a
+        // trickle. Measured 48% of coastal columns, 100% of the Persian Gulf.
+        // Climate wetness is only meaningful ABOVE sea level, for perched and
+        // underground water tables; below it, ocean is ocean.
+        if (targetSurfaceY(wx, wz) < EarthMapSpec.SEA_LEVEL) {
+            return 1.0;
+        }
         double[] ll = earth.toLonLat(p);
         double precip = earth.sample("precip", ll[0], ll[1]);
         double tempC = earth.sample("temp", ll[0], ll[1]);
