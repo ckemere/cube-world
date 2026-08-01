@@ -151,7 +151,8 @@ public final class VillageGroundFixer implements Listener {
         for (StructureStart start : starts) {
             for (StructurePiece piece : start.getPieces()) {
                 int margin = marginFor(piece);
-                if (margin == SKIP) {
+                boolean tree = margin == SKIP && isTreePiece(piece);
+                if (margin == SKIP && !tree) {
                     continue;
                 }
                 BoundingBox bb = piece.getBoundingBox();
@@ -159,11 +160,15 @@ public final class VillageGroundFixer implements Listener {
                 if (done.contains(id)) {
                     continue;
                 }
-                if (!boxLoaded(bw, bb, margin)) {
+                if (!boxLoaded(bw, bb, Math.max(margin, 0))) {
                     continue;       // retry when the rest of it loads
                 }
                 done.add(id);
-                floorPiece(bw, bb, margin, margin == 0);
+                if (tree) {
+                    floorTree(bw, bb);
+                } else {
+                    floorPiece(bw, bb, margin, margin == 0);
+                }
                 pieces++;
                 if (pieces % 100 == 0) {
                     plugin.getLogger().info("VillageGroundFixer: " + pieces
@@ -199,6 +204,51 @@ public final class VillageGroundFixer implements Listener {
             }
         }
         return SKIP;
+    }
+
+    /** Village tree pieces (village/&lt;style&gt;/trees/*). Skipped by {@link #marginFor}
+     * because they must not be floor-filled like a building, but on a slope the
+     * jigsaw drops them at a fixed Y and their trunk is left hanging in the air --
+     * a floating tree. {@link #floorTree} supports just the trunk. */
+    private static final String[] TREE_POOLS = {"/trees/"};
+
+    private static boolean isTreePiece(StructurePiece piece) {
+        if (!(piece instanceof PoolElementStructurePiece pe)) {
+            return false;
+        }
+        String tpl;
+        try {
+            tpl = String.valueOf(ELEMENT_FIELD.get(pe));
+        } catch (Exception e) {
+            return false;
+        }
+        for (String p : TREE_POOLS) {
+            if (tpl.contains(p)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Support a tree without burying it. Fills the gap under ONLY the columns whose
+     * lowest solid block is a trunk (a log/wood), so a floating tree gets a plinth
+     * under its trunk while the air under its canopy is left as air. fillColumn
+     * itself is a no-op where the trunk already meets the ground.
+     */
+    private void floorTree(World w, BoundingBox bb) {
+        for (int x = bb.minX(); x <= bb.maxX(); x++) {
+            for (int z = bb.minZ(); z <= bb.maxZ(); z++) {
+                int floor = lowestSolid(w, x, z, bb.minY(), bb.maxY());
+                if (floor == Integer.MAX_VALUE) {
+                    continue;
+                }
+                String base = w.getBlockAt(x, floor, z).getType().name();
+                if (base.endsWith("_LOG") || base.endsWith("_WOOD") || base.endsWith("_STEM")) {
+                    fillColumn(w, x, z, floor);
+                }
+            }
+        }
     }
 
     private static boolean boxLoaded(World w, BoundingBox bb, int margin) {
@@ -305,9 +355,21 @@ public final class VillageGroundFixer implements Listener {
             return;                 // already supported
         }
         Material fill = substrate(w.getBlockAt(x, Math.max(y, w.getMinHeight()), z).getType());
+        Material cap = surfaceCap(fill);
         for (int fy = y + 1; fy <= floor - 1; fy++) {
-            w.getBlockAt(x, fy, z).setType(fill, false);
+            // Cap the exposed top of the plinth with the natural surface block, so
+            // a fill over grassy ground reads as a grass-topped bank instead of a
+            // raw dirt wall. The top block under a house is hidden anyway; it is
+            // the skirt ring and the downhill lip where this actually shows.
+            w.getBlockAt(x, fy, z).setType(fy == floor - 1 ? cap : fill, false);
             filled++;
         }
+    }
+
+    /** Natural surface version of a fill block. Dirt -- the default for grass and
+     * temperate ground -- becomes grass; sand/gravel/stone are already their own
+     * surface, so a desert or stony shore stays as it is. */
+    private static Material surfaceCap(Material sub) {
+        return sub == Material.DIRT ? Material.GRASS_BLOCK : sub;
     }
 }
