@@ -13,6 +13,7 @@ import net.minecraft.world.level.levelgen.structure.StructureStart;
 import org.bukkit.Chunk;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.block.Block;
 import org.bukkit.craftbukkit.CraftWorld;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -91,6 +92,15 @@ public final class VillageGroundFixer implements Listener {
     private final boolean enabled =
             !"false".equalsIgnoreCase(System.getProperty("cubeworld.villageFix", "true"));
 
+    /** Also CARVE away terrain that rises above a piece and buries it (uphill burial
+     * on steep city sites -- "dirt walls around the walls"). -Dcubeworld.villageCarve=false
+     * disables just the carve while keeping the fill. */
+    private final boolean carve =
+            !"false".equalsIgnoreCase(System.getProperty("cubeworld.villageCarve", "true"));
+
+    /** How far up a buried column to clear terrain before giving up (steep sites). */
+    private static final int CARVE_MAX = 48;
+
     public VillageGroundFixer(CubeWorldPlugin plugin) {
         this.plugin = plugin;
         if (!enabled) {
@@ -166,8 +176,14 @@ public final class VillageGroundFixer implements Listener {
                 done.add(id);
                 if (tree) {
                     floorTree(bw, bb);
+                    if (carve) {
+                        deburyTree(bw, bb);
+                    }
                 } else {
                     floorPiece(bw, bb, margin, margin == 0);
+                    if (carve && margin > 0) {           // buildings only; streets step down slopes
+                        deburyBuilding(bw, bb, margin);
+                    }
                 }
                 pieces++;
                 if (pieces % 100 == 0) {
@@ -249,6 +265,109 @@ public final class VillageGroundFixer implements Listener {
                 }
             }
         }
+    }
+
+    /** Whole-piece minimum solid Y (the piece's base/floor level), or MAX_VALUE. */
+    private static int pieceFloor(World w, BoundingBox bb) {
+        for (int y = bb.minY(); y <= bb.maxY(); y++) {
+            for (int x = bb.minX(); x <= bb.maxX(); x++) {
+                for (int z = bb.minZ(); z <= bb.maxZ(); z++) {
+                    if (w.getBlockAt(x, y, z).getType().isSolid()) {
+                        return y;
+                    }
+                }
+            }
+        }
+        return Integer.MAX_VALUE;
+    }
+
+    /**
+     * The carve half of a custom "beard": free a building from terrain that buries it on
+     * the uphill side by levelling the pad to the piece's base. {@link #floorPiece} has
+     * already filled columns BELOW the floor (the support half); this clears natural
+     * ground ABOVE it across the whole footprint plus a one-block skirt.
+     *
+     * <p>Unlike vanilla's Beardifier this has no radius/soft-falloff limit, so it reaches
+     * arbitrarily steep ground. It is safe inside the footprint because {@link
+     * #deburyColumn} only removes a <em>contiguous run of natural terrain</em> starting
+     * just above the base and stops at the first structure block or air -- so a wall, a
+     * plank floor, or the open interior halts the carve immediately; only dirt/stone
+     * heaped against the build is removed.
+     */
+    private void deburyBuilding(World w, BoundingBox bb, int margin) {
+        int floor = pieceFloor(w, bb);
+        if (floor == Integer.MAX_VALUE) {
+            return;
+        }
+        int m = margin + 1;                  // footprint plus a one-block blend skirt
+        for (int x = bb.minX() - m; x <= bb.maxX() + m; x++) {
+            for (int z = bb.minZ() - m; z <= bb.maxZ() + m; z++) {
+                deburyColumn(w, x, z, floor + 1);
+            }
+        }
+    }
+
+    /**
+     * Free a tree trunk from terrain heaped against it on a slope. For each trunk
+     * column, clears natural ground from the trunk base upward in the eight neighbouring
+     * columns (logs/leaves are never terrain, so an adjacent trunk is untouched).
+     */
+    private void deburyTree(World w, BoundingBox bb) {
+        for (int x = bb.minX(); x <= bb.maxX(); x++) {
+            for (int z = bb.minZ(); z <= bb.maxZ(); z++) {
+                int floor = lowestSolid(w, x, z, bb.minY(), bb.maxY());
+                if (floor == Integer.MAX_VALUE) {
+                    continue;
+                }
+                String base = w.getBlockAt(x, floor, z).getType().name();
+                if (!(base.endsWith("_LOG") || base.endsWith("_WOOD") || base.endsWith("_STEM"))) {
+                    continue;
+                }
+                for (int dx = -1; dx <= 1; dx++) {
+                    for (int dz = -1; dz <= 1; dz++) {
+                        if (dx == 0 && dz == 0) {
+                            continue;
+                        }
+                        deburyColumn(w, x + dx, z + dz, floor + 1);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Clear the contiguous column of natural terrain starting at {@code fromY}, stopping
+     * at the first air or non-terrain (structure) block so nothing is left floating and
+     * no structure block is touched. Re-caps the block just below with grass if it is
+     * bare dirt, so the cleared apron reads as ground.
+     */
+    private void deburyColumn(World w, int x, int z, int fromY) {
+        boolean carved = false;
+        for (int n = 0, y = fromY; n < CARVE_MAX; n++, y++) {
+            Material m = w.getBlockAt(x, y, z).getType();
+            if (!isTerrain(m)) {
+                break;                       // air or structure: top of the buried column
+            }
+            w.getBlockAt(x, y, z).setType(Material.AIR, false);
+            carved = true;
+        }
+        if (carved) {
+            Block below = w.getBlockAt(x, fromY - 1, z);
+            if (below.getType() == Material.DIRT || below.getType() == Material.COARSE_DIRT) {
+                below.setType(Material.GRASS_BLOCK, false);
+            }
+        }
+    }
+
+    /** Natural ground materials safe to carve away (whitelist: never structure blocks). */
+    private static boolean isTerrain(Material m) {
+        return switch (m) {
+            case DIRT, COARSE_DIRT, ROOTED_DIRT, GRASS_BLOCK, PODZOL, MYCELIUM,
+                 DIRT_PATH, MUD, MUDDY_MANGROVE_ROOTS, CLAY,
+                 SAND, RED_SAND, GRAVEL, SNOW, SNOW_BLOCK, POWDER_SNOW,
+                 STONE, DEEPSLATE, ANDESITE, DIORITE, GRANITE, TUFF, CALCITE -> true;
+            default -> false;
+        };
     }
 
     private static boolean boxLoaded(World w, BoundingBox bb, int margin) {

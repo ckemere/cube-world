@@ -416,6 +416,18 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
         if (!Double.isNaN(rym)) {
             waterTop = (int) Math.round(EarthMapSpec.elevationToBlockY(rym));
             waterTop = Math.min(waterTop, predicted - 1);   // always a channel
+            // river_y carries the upstream running-minimum downstream, so where the
+            // river crosses a lower basin it would otherwise perch ABOVE the local
+            // land (water at y66 beside y64 savanna) and get a stone levee built up
+            // to contain it. Clamp to the local terrain-neighbourhood minimum -- the
+            // same level the NaN fallback uses -- so the channel never sits above the
+            // ground it cuts through. Only lowers a perched river; a river already in
+            // a valley (river_y <= local ground) is unaffected.
+            double hmin = sampler.heightAt(wx, wz);
+            for (double[] o : RIVER_KERNEL) {
+                hmin = Math.min(hmin, sampler.heightAt(wx + o[0], wz + o[1]));
+            }
+            waterTop = Math.min(waterTop, (int) Math.round(hmin) - 1);
         } else {
             double hmin = sampler.heightAt(wx, wz);
             for (double[] o : RIVER_KERNEL) {
@@ -441,10 +453,13 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
 
         if (rstr < RIVER_WATER_THRESHOLD) {
             // Rim: raise/patch a solid wall through the waterline so the adjacent
-            // water can't leak past it, but keep any natural terrain above.
+            // water can't leak past it, but keep any natural terrain above. Build it
+            // as a grassy dirt bank (grass crest at the waterline over dirt) rather
+            // than bare stone, so the shoreline reads as natural ground.
             for (int y = bedBottom; y <= waterTop; y++) {
                 if (!chunkData.getType(lx, y, lz).isSolid()) {
-                    chunkData.setBlock(lx, y, lz, Material.STONE);
+                    Material bank = (y == waterTop) ? Material.GRASS_BLOCK : Material.DIRT;
+                    chunkData.setBlock(lx, y, lz, bank);
                 }
             }
             return;
