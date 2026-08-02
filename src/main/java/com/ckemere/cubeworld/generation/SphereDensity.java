@@ -15,8 +15,8 @@ import net.minecraft.world.level.levelgen.NoiseRouter;
  * <p>Because the sampled position is a continuous function of (cube direction,
  * y), and two blocks on opposite sides of a stitched seam fold to the same cube
  * point, vanilla's own generator produces terrain, caves, aquifers and ore
- * veins that line up across every seam automatically — the sphere fold does for
- * the real density graph what {@link CaveCarver} did by hand
+ * veins that line up across every seam automatically — the sphere fold does in
+ * the real density graph what a hand-written carver would otherwise do
  * ([[hook-real-code-not-bukkit]]). Swap the folded router into the world's
  * {@code RandomState} and vanilla places every block.
  *

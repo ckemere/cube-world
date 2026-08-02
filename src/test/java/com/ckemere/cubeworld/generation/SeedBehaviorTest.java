@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ckemere.cubeworld.geometry.CubeGeometry;
-import com.ckemere.cubeworld.geometry.CubeSurface;
 import com.ckemere.cubeworld.geometry.CubeTopology;
 import com.ckemere.cubeworld.geometry.EdgeLink;
 import com.ckemere.cubeworld.geometry.Vec2;
@@ -23,7 +22,6 @@ class SeedBehaviorTest {
 
     private final CubeGeometry geo = new CubeGeometry(S);
     private final CubeTopology topo = new CubeTopology(geo);
-    private final CubeSurface surface = new CubeSurface(geo);
 
     @Test
     void sameSeedReproducesIdentically() {
@@ -60,23 +58,8 @@ class SeedBehaviorTest {
         for (long seed : SEEDS) {
             WorldSeeds seeds = WorldSeeds.from(seed);
             MapSampler sampler = new MapSampler(topo, new SphericalDemoSpec(geo, seeds));
-            CaveCarver carver = new CaveCarver(seeds);
-            CaveBiomes caveBiomes = new CaveBiomes(seeds);
             for (EdgeLink l : topo.links()) {
                 for (double t = 0.2; t <= 0.8; t += 0.2) {
-                    double ax = l.a0().x() + t * (l.a1().x() - l.a0().x());
-                    double az = l.a0().z() + t * (l.a1().z() - l.a0().z());
-                    double bx = l.b0().x() + t * (l.b1().x() - l.b0().x());
-                    double bz = l.b0().z() + t * (l.b1().z() - l.b0().z());
-                    // Caves and cave biomes: exact agreement at identified edge points.
-                    for (int y = -40; y <= 30; y += 14) {
-                        assertEquals(carver.carved(surface.point(l.faceA(), ax, az), y, 70),
-                                carver.carved(surface.point(l.faceB(), bx, bz), y, 70),
-                                "seed " + seed + " carver " + l.faceA() + "/" + l.sideA());
-                        assertEquals(caveBiomes.at(surface.point(l.faceA(), ax, az), y),
-                                caveBiomes.at(surface.point(l.faceB(), bx, bz), y),
-                                "seed " + seed + " caveBiome " + l.faceA() + "/" + l.sideA());
-                    }
                     // Heights: margin point equals its source exactly.
                     Vec2 outside = outwardOf(l, t);
                     Vec2 sourcePt = l.aToB().applyPoint(outside.x(), outside.z());

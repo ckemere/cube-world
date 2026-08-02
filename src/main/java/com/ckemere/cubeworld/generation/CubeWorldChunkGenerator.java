@@ -36,129 +36,17 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
         this.biomeProvider = new CubeWorldBiomeProvider(topology, maps, marginBlocks);
     }
 
-    /**
-     * Vanilla places every block on both worlds: the world's noise router is
-     * folded onto the sphere ({@link com.ckemere.cubeworld.generation.SphereDensity}),
-     * so terrain, caves, aquifers, lava and ores come from vanilla's own
-     * generator but seam-consistently. On the Earth world the fold also pins the
-     * surface to real elevation (the hybrid); the demo world uses vanilla noise.
-     * Our {@code generateSurface} then only masks off-net gaps and pillars.
-     */
-    private boolean vanillaTerrain() {
-        return true;
-    }
-
     @Override
     public void generateSurface(@NotNull WorldInfo worldInfo, @NotNull Random random,
                                 int chunkX, int chunkZ, @NotNull ChunkData chunkData) {
-        if (vanillaTerrain()) {
-            long tm = System.nanoTime();
-            maskVanillaColumns(chunkX, chunkZ, chunkData);
-            GenProfiler.add("maskColumns", tm);
-            long tw = System.nanoTime();
-            carveWater(worldInfo, chunkX, chunkZ, chunkData);
-            GenProfiler.add("carveWater", tw);
-            return;
-        }
-        MapService.CubeWorldMap map = maps.mapFor(worldInfo.getSeed());
-        MapSampler sampler = map.sampler();
-        int minY = chunkData.getMinHeight();
-        int maxY = chunkData.getMaxHeight();
-        boolean nearPillar = chunkNearPillar(chunkX, chunkZ);
-        for (int lx = 0; lx < 16; lx++) {
-            for (int lz = 0; lz < 16; lz++) {
-                double wx = (chunkX << 4) + lx + 0.5;
-                double wz = (chunkZ << 4) + lz + 0.5;
-                if (nearPillar && topology.inPillar(wx, wz, marginBlocks)) {
-                    chunkData.setRegion(lx, minY, lz, lx + 1, maxY, lz + 1, Material.BEDROCK);
-                    continue;
-                }
-                boolean onFace = geometry.faceAt((int) Math.floor(wx), (int) Math.floor(wz)) != null;
-                boolean inMargin = !onFace && topology.marginSource(wx, wz, marginBlocks) != null;
-                if (!onFace && !inMargin) {
-                    continue; // deep void
-                }
-                double exactHeight = sampler.heightAt(wx, wz) + ridgeDetail(sampler, wx, wz);
-                int height = (int) Math.round(exactHeight);
-                TerrainTheme theme = sampler.themeAt(wx, wz);
-                chunkData.setRegion(lx, minY, lz, lx + 1, minY + 1, lz + 1, Material.BEDROCK);
-                chunkData.setRegion(lx, minY + 1, lz, lx + 1, 0, lz + 1, Material.DEEPSLATE);
-                chunkData.setRegion(lx, 0, lz, lx + 1, height - 3, lz + 1, Material.STONE);
-                chunkData.setRegion(lx, height - 3, lz, lx + 1, height, lz + 1,
-                        ThemeBlocks.fillerBlock(theme));
-                chunkData.setRegion(lx, height, lz, lx + 1, height + 1, lz + 1,
-                        ThemeBlocks.topBlock(theme));
-                if (height < SEA_LEVEL) {
-                    chunkData.setRegion(lx, height + 1, lz, lx + 1, SEA_LEVEL + 1, lz + 1,
-                            Material.WATER);
-                } else if (isRiver(sampler, wx, wz)) {
-                    // incise a shallow channel and fill with water (real river path)
-                    chunkData.setBlock(lx, height, lz, Material.AIR);
-                    chunkData.setRegion(lx, height - 3, lz, lx + 1, height, lz + 1, Material.WATER);
-                    chunkData.setBlock(lx, height - 4, lz, Material.GRAVEL);
-                } else if (ThemeBlocks.snowCovered(theme)) {
-                    chunkData.setRegion(lx, height + 1, lz, lx + 1, height + 2, lz + 1,
-                            Material.SNOW);
-                }
-                carveCaves(map, chunkData, lx, lz, wx, wz, minY, exactHeight);
-            }
-        }
-    }
-
-    /**
-     * Per-block ridge roughness for mountains: the elevation raster is coarse
-     * (2 arc-min), so peaks come out smooth. Add high-frequency noise of the
-     * cube point (seam-safe), scaled by local ruggedness so lowlands stay flat
-     * and only real mountains get jagged — recovering some peak sharpness the
-     * data resolution can't provide.
-     */
-    private double ridgeDetail(MapSampler sampler, double wx, double wz) {
-        EarthData earth = maps.earthData();
-        if (earth == null) {
-            return 0.0;
-        }
-        com.ckemere.cubeworld.geometry.Vec3 p = sampler.cubePointAt(wx, wz);
-        if (p == null) {
-            return 0.0;
-        }
-        double[] ll = earth.toLonLat(p);
-        double elev = earth.sample("height", ll[0], ll[1]);
-        if (elev < 350) {
-            return 0.0;                        // lowlands stay smooth
-        }
-        double rugged = EarthClimate.ruggedness(earth, ll[0], ll[1], elev);
-        double amp = Math.min((rugged - 150.0) / 700.0, 1.0) * 16.0;
-        if (amp <= 0) {
-            return 0.0;
-        }
-        double n = Math.sin(430 * p.x() + 0.3) * Math.cos(410 * p.z() - 0.7)
-                + 0.6 * Math.sin(770 * p.y() + 1.1) * Math.cos(690 * p.x())
-                + 0.3 * Math.sin(1500 * p.z() + 0.5) * Math.cos(1400 * p.x());
-        return amp * Math.max(-1.0, Math.min(1.0, n / 1.7));
-    }
-
-    /** True where the Earth river/lake mask marks a watercourse (above sea).
-     * Shares {@link EarthClimate#riverStrength} with the biome layer so water
-     * and the river biome coincide. */
-    private boolean isRiver(MapSampler sampler, double wx, double wz) {
-        return EarthClimate.riverStrength(maps.earthData(), sampler, wx, wz)
-                > EarthClimate.RIVER_THRESHOLD;
-    }
-
-    /** Carve seam-consistent caves into a finished column (air, lava at the bottom). */
-    private void carveCaves(MapService.CubeWorldMap map, ChunkData chunkData, int lx, int lz,
-                            double wx, double wz, int minY, double surfaceHeight) {
-        com.ckemere.cubeworld.geometry.Vec3 p = map.sampler().cubePointAt(wx, wz);
-        if (p == null) {
-            return;
-        }
-        int top = (int) Math.floor(surfaceHeight - CaveCarver.ROOF);
-        for (int y = minY + 6; y <= top; y++) {
-            if (map.carver().carved(p, y, surfaceHeight)) {
-                chunkData.setBlock(lx, y, lz,
-                        y <= CaveCarver.LAVA_LEVEL ? Material.LAVA : Material.AIR);
-            }
-        }
+        // Vanilla drives block placement (folded onto the sphere by the router);
+        // we only mask off-net gaps/pillars and carve rivers/straits.
+        long tm = System.nanoTime();
+        maskVanillaColumns(chunkX, chunkZ, chunkData);
+        GenProfiler.add("maskColumns", tm);
+        long tw = System.nanoTime();
+        carveWater(worldInfo, chunkX, chunkZ, chunkData);
+        GenProfiler.add("carveWater", tw);
     }
 
     /**
@@ -245,7 +133,7 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
     @Override
     public void generateCaves(@NotNull WorldInfo worldInfo, @NotNull Random random,
                               int chunkX, int chunkZ, @NotNull ChunkData chunkData) {
-        if (!RESEAL_WATER || !vanillaTerrain()) {
+        if (!RESEAL_WATER) {
             return;
         }
         EarthData earth = maps.earthData();
@@ -559,28 +447,24 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
     public boolean shouldGenerateNoise() {
         // Demo world: vanilla fills terrain/caves/aquifers/ores from the folded
         // router. Earth world: our real-elevation column fill in generateSurface.
-        return vanillaTerrain();
+        return true;
     }
 
     @Override
     public boolean shouldGenerateSurface() {
         // Demo world: vanilla surface rules (grass/sand/gravel by biome).
-        return vanillaTerrain();
+        return true;
     }
 
     /**
      * Vanilla's carvers -- {@code CaveWorldCarver} and {@code CanyonWorldCarver},
      * i.e. tunnel caves and ravines ({@code -Dcubeworld.carvers=}).
      *
-     * <p>This used to return false, with a comment saying carvers "do not engage
-     * with custom generators on 26.x" and that {@link CaveCarver} handled caves
-     * instead. Both halves were wrong. CraftBukkit's
+     * <p>This used to return false, on the belief that carvers "do not engage
+     * with custom generators on 26.x". That was wrong: CraftBukkit's
      * {@code CustomChunkGenerator.applyCarvers} calls straight through to the
-     * delegate whenever this returns true, and {@code CaveCarver} has been dead
-     * code since {@code vanillaTerrain()} was hardcoded to true -- it only runs
-     * in the branch of {@code generateSurface} that is now unreachable. So the
-     * world had no ravines and no tunnel caves at all, only what the density
-     * field carves.
+     * delegate whenever this returns true. With it false the world had no
+     * ravines and no tunnel caves at all, only what the density field carves.
      *
      * <p>The remaining half of the objection is real but small: carvers are
      * seeded per source chunk ({@code setLargeFeatureSeed(seed, chunkX, chunkZ)}),

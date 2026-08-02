@@ -2,7 +2,6 @@ package com.ckemere.cubeworld.generation;
 
 import com.ckemere.cubeworld.geometry.CubeGeometry;
 import com.ckemere.cubeworld.geometry.CubeTopology;
-import com.ckemere.cubeworld.geometry.Vec3;
 import java.util.ArrayList;
 import java.util.List;
 import org.bukkit.block.Biome;
@@ -63,25 +62,7 @@ public final class CubeWorldBiomeProvider extends BiomeProvider {
             return earthBiome(earth, sampler, wx, wz, y, worldInfo.getSeed());
         }
 
-        // demo fallback: theme + noise cave biomes
-        if (y < sampler.heightAt(wx, wz) - CaveBiomes.SURFACE_BUFFER) {
-            Vec3 p = sampler.cubePointAt(wx, wz);
-            if (p != null) {
-                switch (map.caveBiomes().at(p, y)) {
-                    case LUSH -> {
-                        return Biome.LUSH_CAVES;
-                    }
-                    case DRIPSTONE -> {
-                        return Biome.DRIPSTONE_CAVES;
-                    }
-                    case DEEP_DARK -> {
-                        return Biome.DEEP_DARK;
-                    }
-                    case NONE -> {
-                    }
-                }
-            }
-        }
+        // no Earth data (demo/test worlds): theme-based surface biome only
         return ThemeBlocks.biome(sampler.themeAt(wx, wz));
     }
 

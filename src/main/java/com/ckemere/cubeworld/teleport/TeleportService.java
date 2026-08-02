@@ -243,10 +243,6 @@ public final class TeleportService {
         return wear.getOrDefault(key, 0L);
     }
 
-    public void clearWear(String key) {
-        wear.remove(key);
-    }
-
     /** Station keys that currently carry wear (a snapshot, safe to iterate). */
     public java.util.Set<String> wornKeys() {
         return new java.util.HashSet<>(wear.keySet());
@@ -357,22 +353,6 @@ public final class TeleportService {
                     .plainText().serialize(page)).append(' ');
         }
         return stationByCode(Ticketing.parse(sb.toString()));
-    }
-
-    /** Stations within {@code radius} blocks of {@code from} (excluding itself), nearest first. */
-    public List<Station> near(Location from, double radius) {
-        List<Station> out = new ArrayList<>();
-        for (Station s : stations.values()) {
-            if (!s.world().equals(from.getWorld().getName())) {
-                continue;
-            }
-            double d = dist(from, s);
-            if (d > 0 && d <= radius) {
-                out.add(s);
-            }
-        }
-        out.sort((a, b) -> Double.compare(dist(from, a), dist(from, b)));
-        return out;
     }
 
     public double dist(Location from, Station s) {
