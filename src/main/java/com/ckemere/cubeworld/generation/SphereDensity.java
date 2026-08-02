@@ -130,41 +130,6 @@ public final class SphereDensity {
      * out the shallow shelf next door. One aquifer cell width. */
     private static final double HYDRO_COAST_BUFFER = 16.0;
 
-    /**
-     * Carve river VALLEYS into the density field, early
-     * ({@code -Dcubeworld.riverValley=}).
-     *
-     * <p>Rivers are currently stamped late, in {@code generateSurface}, which
-     * runs AFTER vanilla's {@code buildSurface}. So a river is a slot cut into
-     * finished terrain: it has no valley, no banks, and its bed has to be chosen
-     * by hand ({@code riverBedBlock}) because the surface rules already ran on
-     * the pre-river height.
-     *
-     * <p>Lowering the target surface along the river course instead makes the
-     * valley part of the terrain itself -- everything downstream then sees it,
-     * so the banks are shaped by the same factor/jaggedness machinery as any
-     * other slope and the surface rules dress the valley floor for free.
-     *
-     * <p>Deliberately only the VALLEY, not the channel. Density is evaluated on
-     * a 4x8x4 cell lattice, so nothing narrower than a cell can exist in it at
-     * all; a river drawn this way could never be made narrow. The late stamp
-     * keeps doing the channel, which is sub-cell and precise. That is also how
-     * real ground looks -- a broad floodplain with a narrow river in it -- and
-     * it separates "the valley is wide because the raster is 3.7 km/px" from
-     * "the water should be a few blocks", which is currently one number doing
-     * both jobs.
-     */
-    private static final boolean RIVER_VALLEY =
-            "true".equalsIgnoreCase(System.getProperty("cubeworld.riverValley", "false"));
-
-    /** Blocks the valley floor sits above the river's own water surface. */
-    private static final double VALLEY_FLOOR_ABOVE =
-            Double.parseDouble(System.getProperty("cubeworld.valleyFloorAbove", "1.0"));
-
-    /** River-strength at which the valley reaches full depth. */
-    private static final double VALLEY_FULL_AT =
-            Double.parseDouble(System.getProperty("cubeworld.valleyFullAt", "0.55"));
-
     /** Undersea ridges and trench walls ({@code -Dcubeworld.seabedJagged=}). */
     private static final boolean SEABED_JAGGED =
             !"false".equalsIgnoreCase(System.getProperty("cubeworld.seabedJagged", "true"));
@@ -222,39 +187,6 @@ public final class SphereDensity {
             "true".equalsIgnoreCase(System.getProperty("cubeworld.leafHook", "true"));
 
     /**
-     * Decouple vanilla's cave-regime switch from {@code factor}
-     * ({@code -Dcubeworld.caveDepthSwitch=true}).
-     *
-     * <p>Vanilla chooses between "near the surface, cut entrances only" and
-     * "deep, apply the full cave subtraction" with
-     * {@code rangeChoice(slopedCheese, -1e6, 1.5625, ...)}. Because
-     * {@code slopedCheese ~ 4 * depth * factor}, the depth at which that switch
-     * happens is {@code 1.5625 * DEPTH_SLOPE / (4 * factor)} -- i.e. it shrinks
-     * as the surface is pinned harder:
-     *
-     * <pre>
-     *   factor  9  ->  3.0 blocks of near-surface zone   (open country)
-     *   factor 43  ->  0.64                              (coastal, freeboard 3)
-     *   factor 64  ->  0.43                              (the pinned cap)
-     * </pre>
-     *
-     * <p>So the freeboard rule, whose entire job is to keep the shoreline dry,
-     * simultaneously deletes the protective zone there and lets full cave voids
-     * open one block under the beach. That is why the attempt to lower
-     * LAND_FREEBOARD_MIN drove drowning from 2.4% to 21.9% -- the drops were
-     * caves, not noise. It also means the CURRENT settings already run coasts
-     * with a 0.64-block zone.
-     *
-     * <p>This replaces the switch's INPUT with a plain depth-in-blocks proxy, so
-     * the near-surface zone is a fixed thickness everywhere regardless of how
-     * hard the surface is pinned. Vanilla's two branches are untouched.
-     */
-    private static final boolean CAVE_DEPTH_SWITCH =
-            "true".equalsIgnoreCase(System.getProperty("cubeworld.caveDepthSwitch", "false"));
-
-    /** Thickness of the near-surface (entrances-only) zone, in blocks. Vanilla's
-     * own value varies 3-7 blocks over open country; 6 sits in that range. */
-    /**
      * Attenuate the 3D terrain noise near the waterline instead of raising
      * {@code factor} ({@code -Dcubeworld.noiseAttenuation=true}).
      *
@@ -284,12 +216,6 @@ public final class SphereDensity {
     /** Floor on the attenuation, so the surface never becomes perfectly flat. */
     private static final double ATTEN_MIN =
             Double.parseDouble(System.getProperty("cubeworld.attenMin", "0.03"));
-
-    private static final double SURFACE_ZONE_BLOCKS =
-            Double.parseDouble(System.getProperty("cubeworld.surfaceZone", "6.0"));
-
-    /** Vanilla's cave-regime threshold, from NoiseRouterData. */
-    private static final double SURFACE_DENSITY_THRESHOLD = 1.5625;
 
     /** Vanilla's factor and jaggedness reach the density tree as Spline nodes, and
      * NoiseRouter exposes neither (they live inside finalDensity). RandomState
@@ -414,36 +340,7 @@ public final class SphereDensity {
                 }
             }
         }
-        return RIVER_VALLEY ? applyRiverValley(wx, wz, h) : h;
-    }
-
-    /**
-     * Pull the target surface down toward the river's own water level, by how
-     * strongly this column reads as river. Only ever LOWERS -- a river lies in a
-     * valley, it never stands on a ridge -- so terrain away from the course is
-     * untouched and the peak cones above are safe.
-     */
-    private double applyRiverValley(double wx, double wz, double h) {
-        if (earth == null || !earth.hasLayer("river")) {
-            return h;
-        }
-        double r = EarthClimate.riverStrength(earth, sampler, wx, wz);
-        if (r <= 0.0) {
-            return h;
-        }
-        double ry = EarthClimate.riverWaterY(earth, sampler, wx, wz);
-        if (Double.isNaN(ry)) {
-            return h;
-        }
-        double floor = EarthMapSpec.elevationToBlockY(ry) + VALLEY_FLOOR_ABOVE;
-        if (floor >= h) {
-            return h;                       // already at or below the water plane
-        }
-        // smoothstep on river strength: a gentle lip at the valley edge rather
-        // than a step, so the banks read as slopes the noise can shape.
-        double t = Math.clamp(r / VALLEY_FULL_AT, 0.0, 1.0);
-        double w = t * t * (3 - 2 * t);
-        return h + (floor - h) * w;
+        return h;
     }
 
     /** Debug dump of the terms that decide the surface at a column. */
@@ -804,9 +701,6 @@ public final class SphereDensity {
         for (String e : expected) {
             sb.append(e).append('=').append(hookHits.getOrDefault(e, 0)).append(' ');
         }
-        if (CAVE_DEPTH_SWITCH) {
-            sb.append("caveRangeChoice=").append(hookHits.getOrDefault("caveRangeChoice", 0));
-        }
         return sb.toString().trim();
     }
 
@@ -821,9 +715,6 @@ public final class SphereDensity {
             if (hookHits.getOrDefault(e, 0) == 0) {
                 out.add(e);
             }
-        }
-        if (CAVE_DEPTH_SWITCH && hookHits.getOrDefault("caveRangeChoice", 0) == 0) {
-            out.add("caveRangeChoice");
         }
         return out;
     }
@@ -878,10 +769,6 @@ public final class SphereDensity {
             // the right altitude but its steepness and spikiness come from vanilla
             // Perlin that is uncorrelated with Earth, so a real 8000 m peak can get
             // flat-plains treatment and a real plain can get spikes.
-            if (earthHeight && CAVE_DEPTH_SWITCH && isCaveRangeChoice(node)) {
-                hit("caveRangeChoice");
-                return rebuildCaveChoice(node);
-            }
             if (earthHeight && EARTH_SHAPE && earth != null) {
                 if (isFactorSpline(node)) {
                     hit("factorSpline");
@@ -1278,11 +1165,6 @@ public final class SphereDensity {
     }
 
     /**
-     * Stands in for {@code slopedCheese} in vanilla's cave-regime rangeChoice,
-     * scaled so the switch lands at exactly {@link #SURFACE_ZONE_BLOCKS} below
-     * the surface no matter what {@code factor} is doing.
-     */
-    /**
      * The main 3D terrain noise, scaled down where there is little freeboard so
      * the waterline survives without touching {@code factor}. Symmetric below
      * sea level, using water depth, so shoals are damped too.
@@ -1318,67 +1200,6 @@ public final class SphereDensity {
         @Override
         public net.minecraft.util.KeyDispatchDataCodec<? extends DensityFunction> codec() {
             return inner.codec();
-        }
-    }
-
-    private final class CaveDepthSwitch implements DensityFunction {
-        @Override
-        public double compute(FunctionContext c) {
-            fillColumn(c.blockX(), c.blockZ());
-            double below = reliefCache.get()[5] - c.blockY();
-            return SURFACE_DENSITY_THRESHOLD * (below / SURFACE_ZONE_BLOCKS);
-        }
-
-        @Override
-        public void fillArray(double[] out, ContextProvider p) {
-            for (int i = 0; i < out.length; i++) {
-                out[i] = compute(p.forIndex(i));
-            }
-        }
-
-        @Override public DensityFunction mapChildren(Visitor v) { return this; }
-        @Override public double minValue() { return -1000.0; }
-        @Override public double maxValue() { return 1000.0; }
-        @Override
-        public net.minecraft.util.KeyDispatchDataCodec<? extends DensityFunction> codec() {
-            return DensityFunctions.constant(0).codec();
-        }
-    }
-
-    /**
-     * Vanilla's cave-regime rangeChoice, identified by its exact CONSTANTS
-     * (-1e6 .. 1.5625) rather than by a value range -- there is only one node in
-     * the router with those bounds, and constants do not drift the way computed
-     * ranges do.
-     */
-    private static boolean isCaveRangeChoice(DensityFunction node) {
-        if (!"RangeChoice".equals(node.getClass().getSimpleName())) {
-            return false;
-        }
-        try {
-            java.lang.reflect.Method lo = node.getClass().getMethod("minInclusive");
-            java.lang.reflect.Method hi = node.getClass().getMethod("maxExclusive");
-            lo.setAccessible(true);
-            hi.setAccessible(true);
-            return near((Double) lo.invoke(node), -1000000.0, 1.0)
-                    && near((Double) hi.invoke(node), SURFACE_DENSITY_THRESHOLD, 1.0e-6);
-        } catch (Throwable t) {
-            return false;
-        }
-    }
-
-    /** Rebuild that rangeChoice with a depth-based input, keeping both branches. */
-    private DensityFunction rebuildCaveChoice(DensityFunction node) {
-        try {
-            java.lang.reflect.Method in = node.getClass().getMethod("whenInRange");
-            java.lang.reflect.Method out = node.getClass().getMethod("whenOutOfRange");
-            in.setAccessible(true);
-            out.setAccessible(true);
-            return DensityFunctions.rangeChoice(new CaveDepthSwitch(),
-                    -1000000.0, SURFACE_DENSITY_THRESHOLD,
-                    (DensityFunction) in.invoke(node), (DensityFunction) out.invoke(node));
-        } catch (Throwable t) {
-            return node;
         }
     }
 

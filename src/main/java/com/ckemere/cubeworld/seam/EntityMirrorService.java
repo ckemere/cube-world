@@ -33,7 +33,6 @@ import org.bukkit.util.Vector;
  */
 public final class EntityMirrorService {
 
-    private final Plugin plugin;
     private final CubeTopology topology;
     private final int marginBlocks;
     private final NamespacedKey cloneKey;
@@ -47,7 +46,6 @@ public final class EntityMirrorService {
     }
 
     public EntityMirrorService(Plugin plugin, CubeTopology topology, int marginBlocks) {
-        this.plugin = plugin;
         this.topology = topology;
         this.marginBlocks = marginBlocks;
         this.cloneKey = new NamespacedKey(plugin, "clone-of");

@@ -1,7 +1,19 @@
 plugins {
     java
+    pmd
     id("xyz.jpenilla.run-paper") version "3.0.2"
     id("io.papermc.paperweight.userdev") version "2.0.0-beta.21"
+}
+
+// Static analysis for dead/unused code (semantic, not grep). Report-only for now
+// (isIgnoreFailures) so it surfaces findings without breaking the build; flip to
+// false to enforce. Rules live in config/pmd/dead-code.xml.
+pmd {
+    toolVersion = "7.19.0"
+    isConsoleOutput = true
+    isIgnoreFailures = true
+    ruleSets = emptyList()   // ignore PMD's noisy default set; use only ours
+    ruleSetFiles = files("config/pmd/dead-code.xml")
 }
 
 group = "com.ckemere"

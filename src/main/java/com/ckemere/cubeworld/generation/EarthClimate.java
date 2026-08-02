@@ -17,33 +17,6 @@ public final class EarthClimate {
     private EarthClimate() {
     }
 
-    /**
-     * A/B switch for the three climate changes made during the calibration work
-     * (erosion quantile map, tropical-wetland coast rule, -8 C temperature
-     * knot). Set {@code -Dcubeworld.legacyClimate=true} to restore the previous
-     * behaviour exactly.
-     *
-     * <p>It exists so the improvement can be measured like-for-like. Several
-     * corrections were also made to the evaluation harness itself, and those
-     * move the score without moving the generator; without a way to run the OLD
-     * generator under the NEW metric there is no honest way to say how much of
-     * the gain was real.
-     *
-     * <p>Read once at class-init from a system property rather than being
-     * runtime-settable, because CubeWorldBiomeProvider memoises biomes per
-     * column per thread and a mid-run flip would serve stale answers.
-     */
-    public static final boolean LEGACY =
-            "true".equalsIgnoreCase(System.getProperty("cubeworld.legacyClimate", "false"));
-
-    // ---- pre-calibration values, kept only for the A/B ----
-    private static final double[] LEGACY_TT =
-            {-1.0, -0.45, -0.22, -0.05, 0.18, 0.45, 0.70, 1.0};
-    private static final double[] LEGACY_RM = {0, 48, 153, 382, 578, 1053, 2000};
-    private static final double[] LEGACY_RE =
-            {0.44, 0.30, 0.05, -0.2225, -0.375, -0.78, -1.0};
-    private static final double LEGACY_LOWLAND_EROSION = 0.40;
-    private static final double LEGACY_MOUNTAIN_FULL_BLOCKS = 45.0;
 
     /**
      * Temperature param, with wetness folded in at the hot end. Vanilla's
@@ -186,7 +159,7 @@ public final class EarthClimate {
     private static final double[] TT = {-1.0, -0.38, -0.22, -0.05, 0.18, 0.45, 0.70, 1.0};
 
     public static double temperature(double tempC, double humidityParam, boolean land) {
-        double base = interp(tempC, TE, LEGACY ? LEGACY_TT : TT);
+        double base = interp(tempC, TE, TT);
         // Land only. Two corrections, because vanilla's hottest row is desert
         // regardless of moisture while jungle lives one row cooler:
         if (land && base > 0.55 && humidityParam >= -0.65) {
@@ -264,16 +237,6 @@ public final class EarthClimate {
         return clamp(c, -1, 1);
     }
 
-    /** Metres of relief that map to one unit of erosion depression. Fitted to the
-     * measured global distribution (tools/compact/relief_stats.py): land relief is
-     * p50 48 m, p90 382 m, p95 578 m, p99 1053 m. The old divisor of 500 saturated
-     * at 725 m, i.e. at about p95, which clamped 3% of ALL land to the -1.00 floor
-     * and made K2 indistinguishable from ordinary hill country. 750 puts
-     * saturation near p99 so mountains actually differentiate. */
-    private static final double RELIEF_PER_EROSION = 750.0;
-
-    /** Blocks above sea level at which terrain counts as fully mountainous. */
-    private static final double MOUNTAIN_FULL_BLOCKS = 45.0;
 
     /**
      * ruggedness (m of local relief) + in-game altitude -> erosion. Flat land sits
@@ -361,11 +324,6 @@ public final class EarthClimate {
      * rather than in an altitude fudge.
      */
     public static double erosion(double ruggedMeters, double blocksAboveSea) {
-        if (LEGACY) {
-            double fromRelief = interp(ruggedMeters, LEGACY_RM, LEGACY_RE);
-            double gate = clamp(blocksAboveSea / LEGACY_MOUNTAIN_FULL_BLOCKS, 0.0, 1.0);
-            return clamp(LEGACY_LOWLAND_EROSION * (1.0 - gate) + fromRelief * gate, -1, 1);
-        }
         return erosion(ruggedMeters);
     }
 
@@ -441,7 +399,7 @@ public final class EarthClimate {
         // Warm + far inland => rainforest, not swamp. Full strength within
         // ~120 km of the sea, fading out by ~400 km; only applied above 10 C so
         // boreal peatlands (which are inland by nature) are untouched.
-        if (!LEGACY && score > 0 && tempC > 10.0 && !Double.isNaN(coastKm)) {
+        if (score > 0 && tempC > 10.0 && !Double.isNaN(coastKm)) {
             double warm = clamp((tempC - 10.0) / 8.0, 0.0, 1.0);
             double near = 1.0 - clamp((coastKm - 120.0) / 280.0, 0.0, 1.0);
             score *= (1.0 - warm) + warm * near;
@@ -729,7 +687,7 @@ public final class EarthClimate {
 
         double tc = temp + nt;
         double h = clamp(humidity(precip) + nh, -1, 1);
-        double axisT = interp(tc, TE, LEGACY ? LEGACY_TT : TT);
+        double axisT = interp(tc, TE, TT);
 
         // Antarctic ice sheet. Small patches of snowy_taiga, taiga, plains and
         // swamp kept appearing on the continent. The cause is bad data, not
@@ -746,7 +704,7 @@ public final class EarthClimate {
         if (land && lat < ANTARCTIC_LAT) {
             h = Math.min(h, -0.35);
             tc -= (ANTARCTIC_LAT - lat) * ANTARCTIC_COOL_PER_DEG;
-            axisT = interp(tc, TE, LEGACY ? LEGACY_TT : TT);
+            axisT = interp(tc, TE, TT);
         }
 
         // Cherry grove, restricted to its native range. Cherry grove is the
@@ -815,7 +773,7 @@ public final class EarthClimate {
         }
         // Boreal correction (cold forests grow on modest rainfall): floor moisture
         // in the cold band so Siberia/Canada come out taiga, not cold steppe.
-        double baseTemp = interp(tc, TE, LEGACY ? LEGACY_TT : TT);
+        double baseTemp = interp(tc, TE, TT);
         if (land && baseTemp >= -0.45 && baseTemp < -0.05 && precip >= BOREAL_MIN_PRECIP) {
             h = Math.max(h, 0.12);
         }
@@ -883,7 +841,6 @@ public final class EarthClimate {
     private static final double AMP_TEMP_C = 3.2;
     private static final double AMP_CONT = 0.05;
     private static final double AMP_EROS = 0.16;
-    private static final double AMP_WEIRD = 0.62;
 
     /**
      * River-mask strength at a column (0..1), the SAME value the biome layer and

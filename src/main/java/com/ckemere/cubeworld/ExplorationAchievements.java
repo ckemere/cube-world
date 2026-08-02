@@ -50,13 +50,11 @@ public final class ExplorationAchievements {
     private static final int NORTH_X = 0, NORTH_Z = 0;
     private static final int SOUTH_X = 0, SOUTH_Z = 20480;
 
-    private final Plugin plugin;
     private final MapService maps;
     private final NamespacedKey lastLonKey;
     private final NamespacedKey cumLonKey;
 
     public ExplorationAchievements(Plugin plugin, MapService maps) {
-        this.plugin = plugin;
         this.maps = maps;
         this.lastLonKey = new NamespacedKey(plugin, "circ_last_lon");
         this.cumLonKey = new NamespacedKey(plugin, "circ_cum_lon");
