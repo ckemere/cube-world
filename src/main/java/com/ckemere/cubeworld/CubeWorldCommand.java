@@ -28,11 +28,13 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
     private final MapService maps;
     private final com.ckemere.cubeworld.teleport.TeleportService teleport;
     private final com.ckemere.cubeworld.trades.MasterTraderService masterTraders;
+    private final com.ckemere.cubeworld.generation.OreEnrichment oreEnrichment;
 
     public CubeWorldCommand(CubeGeometry geometry, CubeGeometry netherGeometry, SeamService seams,
                             MirrorService mirrors, MapService maps,
                             com.ckemere.cubeworld.teleport.TeleportService teleport,
-                            com.ckemere.cubeworld.trades.MasterTraderService masterTraders) {
+                            com.ckemere.cubeworld.trades.MasterTraderService masterTraders,
+                            com.ckemere.cubeworld.generation.OreEnrichment oreEnrichment) {
         this.geometry = geometry;
         this.netherGeometry = netherGeometry;
         this.seams = seams;
@@ -40,6 +42,7 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
         this.maps = maps;
         this.teleport = teleport;
         this.masterTraders = masterTraders;
+        this.oreEnrichment = oreEnrichment;
     }
 
     /** Angular error (deg) between the lon/lat at world (x,z) and a target, or a
@@ -707,6 +710,48 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                         "lat %.4f lon %.4f -> world (%d, %d) on %s  [err %.3f deg]",
                         tLat, tLon, rx, rz, f == null ? "margin" : f.displayName(), best),
                         NamedTextColor.AQUA));
+                return true;
+            }
+            case "oreprobe" -> {
+                double px;
+                double pz;
+                if (args.length == 3) {
+                    px = Double.parseDouble(args[1]);
+                    pz = Double.parseDouble(args[2]);
+                } else if (sender instanceof Player pl) {
+                    px = pl.getLocation().getX();
+                    pz = pl.getLocation().getZ();
+                } else {
+                    sender.sendMessage(Component.text("Usage: /cubeworld oreprobe [<x> <z>]",
+                            NamedTextColor.RED));
+                    return true;
+                }
+                if (oreEnrichment == null) {
+                    sender.sendMessage(Component.text("Ore enrichment is not active.",
+                            NamedTextColor.YELLOW));
+                    return true;
+                }
+                // Report only local *strength*, never the province centre: this is the
+                // research tool -- sample several spots to triangulate a deposit.
+                java.util.List<String> hits = new java.util.ArrayList<>();
+                for (com.ckemere.cubeworld.generation.OreDeposits.Ore ore
+                        : com.ckemere.cubeworld.generation.OreDeposits.Ore.values()) {
+                    double s = oreEnrichment.strengthAt(ore, px, pz);
+                    if (s > 0) {
+                        String band = s > 0.66 ? "strong" : s > 0.33 ? "moderate" : "faint";
+                        hits.add(String.format(Locale.ROOT, "%s: %s (%.0f%%)",
+                                ore.name().toLowerCase(Locale.ROOT), band, s * 100));
+                    }
+                }
+                if (hits.isEmpty()) {
+                    sender.sendMessage(Component.text(
+                            "No ore enrichment detected here. Keep prospecting.",
+                            NamedTextColor.GRAY));
+                } else {
+                    hits.sort(java.util.Collections.reverseOrder());
+                    sender.sendMessage(Component.text("Ore survey: "
+                            + String.join(", ", hits), NamedTextColor.GOLD));
+                }
                 return true;
             }
             case "biomeat" -> {

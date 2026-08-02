@@ -56,6 +56,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
     private final Map<UUID, WorldServices> perWorld = new LinkedHashMap<>();
     private com.ckemere.cubeworld.teleport.TeleportService teleport;
     private com.ckemere.cubeworld.trades.MasterTraderService masterTraders;
+    private com.ckemere.cubeworld.generation.OreEnrichment oreEnrichment;
 
     /** Per-world seam machinery. Both cube worlds share geometry and topology. */
     public record WorldServices(World world, LiquidSeamService liquids,
@@ -122,6 +123,9 @@ public final class CubeWorldPlugin extends JavaPlugin {
         // floats and no villager can walk into deep water.
         getServer().getPluginManager().registerEvents(
                 new com.ckemere.cubeworld.city.VillageGroundFixer(this), this);
+        // Enrich ores where terrain corresponds to real Earth mineral provinces.
+        oreEnrichment = new com.ckemere.cubeworld.generation.OreEnrichment(this);
+        getServer().getPluginManager().registerEvents(oreEnrichment, this);
         // Rare "Master Traders" visit the special cities with exceptional goods.
         masterTraders = new com.ckemere.cubeworld.trades.MasterTraderService(this, teleport);
         masterTraders.start();
@@ -183,7 +187,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, exploration::tick, 100L, 20L);
 
         CubeWorldCommand executor = new CubeWorldCommand(geometry, netherGeometry, seams, mirrors,
-                maps, teleport, masterTraders);
+                maps, teleport, masterTraders, oreEnrichment);
         PluginCommand command = getCommand("cubeworld");
         if (command != null) {
             command.setExecutor(executor);
@@ -329,6 +333,11 @@ public final class CubeWorldPlugin extends JavaPlugin {
 
     public CubeGeometry geometry() {
         return geometry;
+    }
+
+    /** The map service (Earth data + per-seed samplers) for coordinate work. */
+    public MapService maps() {
+        return maps;
     }
 
     private volatile java.util.List<double[]> cityAnchorCache;
