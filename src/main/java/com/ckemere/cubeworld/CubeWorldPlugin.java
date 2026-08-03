@@ -308,6 +308,14 @@ public final class CubeWorldPlugin extends JavaPlugin {
         boolean nether = world.getEnvironment() == World.Environment.NETHER;
         CubeTopology topo = nether ? netherTopology : topology;
         MirrorService mir = nether ? netherMirrors : mirrors;
+        // Cube-aware locator bar: dots for other players point along the cube geodesic.
+        // Overworld + nether only (the End is standard vanilla). -Dcubeworld.cubeLocator=false
+        // keeps the vanilla (flat) locator bar.
+        if (isCubeWorld(world)
+                && !"false".equalsIgnoreCase(System.getProperty("cubeworld.cubeLocator", "true"))) {
+            com.ckemere.cubeworld.seam.nms.WaypointManagerHook.install(
+                    world, new com.ckemere.cubeworld.geometry.CubeBearing(topo), getLogger());
+        }
         LiquidSeamService liquids = new LiquidSeamService(topo, mir, world);
         EntityMirrorService entityMirrors = new EntityMirrorService(this, topo, MARGIN_BLOCKS);
         PartnerTicketService tickets = new PartnerTicketService(this, topo, MARGIN_BLOCKS);
