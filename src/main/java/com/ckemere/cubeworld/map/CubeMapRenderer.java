@@ -1,5 +1,6 @@
 package com.ckemere.cubeworld.map;
 
+import com.ckemere.cubeworld.geometry.CubeBearing;
 import com.ckemere.cubeworld.geometry.CubeGeometry;
 import com.ckemere.cubeworld.geometry.CubeTopology;
 import com.ckemere.cubeworld.teleport.TeleportService;
@@ -25,6 +26,7 @@ public final class CubeMapRenderer extends MapRenderer {
 
     private final CubeGeometry geom;
     private final CubeTopology topo;
+    private final CubeBearing bearing;
     private final TeleportService teleport;
     private final int centerX;
     private final int centerZ;
@@ -38,6 +40,7 @@ public final class CubeMapRenderer extends MapRenderer {
         super(true);                 // contextual = per-player (for the player cursor)
         this.geom = geom;
         this.topo = topo;
+        this.bearing = new CubeBearing(topo);
         this.teleport = teleport;
         this.centerX = centerX;
         this.centerZ = centerZ;
@@ -90,8 +93,11 @@ public final class CubeMapRenderer extends MapRenderer {
 
     private void addCursor(MapCursorCollection cc, int wx, int wz,
                            MapCursor.Type type, String label) {
-        double fx = (wx - centerX) / (double) blocksPerPixel;   // pixels from centre
-        double fz = (wz - centerZ) / (double) blocksPerPixel;
+        // Fold the marker into the map's home-face frame so it lands where CubeMapImage
+        // actually drew that face, not at its raw net position across a seam.
+        CubeBearing.Folded f = bearing.fold(centerX + 0.5, centerZ + 0.5, wx + 0.5, wz + 0.5);
+        double fx = (f.x() - centerX) / (double) blocksPerPixel;   // pixels from centre
+        double fz = (f.z() - centerZ) / (double) blocksPerPixel;
         if (Math.abs(fx) > 64 || Math.abs(fz) > 64) {
             return;                     // off this map; stations get no off-map arrow
         }
@@ -101,12 +107,17 @@ public final class CubeMapRenderer extends MapRenderer {
     }
 
     private void addPlayer(MapCursorCollection cc, Player player) {
-        double fx = (player.getLocation().getX() - centerX) / (double) blocksPerPixel;
-        double fz = (player.getLocation().getZ() - centerZ) / (double) blocksPerPixel;
+        CubeBearing.Folded f = bearing.fold(centerX + 0.5, centerZ + 0.5,
+                player.getLocation().getX(), player.getLocation().getZ());
+        double fx = (f.x() - centerX) / (double) blocksPerPixel;
+        double fz = (f.z() - centerZ) / (double) blocksPerPixel;
         boolean off = Math.abs(fx) > 64 || Math.abs(fz) > 64;
         int cx = clampByte((int) Math.round(fx * 2));
         int cz = clampByte((int) Math.round(fz * 2));
-        int dir = ((int) Math.round(player.getLocation().getYaw() / 22.5) + 8) & 15;
+        // Rotate the arrow by the fold's seam rotation so it points correctly on the
+        // folded terrain (the neighbour face is drawn turned by the same amount).
+        double yaw = player.getLocation().getYaw() - 90.0 * f.quarterTurns();
+        int dir = ((int) Math.round(yaw / 22.5) + 8) & 15;
         cc.addCursor(new MapCursor((byte) cx, (byte) cz, (byte) dir,
                 off ? MapCursor.Type.PLAYER_OFF_MAP : MapCursor.Type.PLAYER, true));
     }

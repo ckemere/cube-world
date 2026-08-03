@@ -126,6 +126,14 @@ public final class CubeWorldPlugin extends JavaPlugin {
         // Enrich ores where terrain corresponds to real Earth mineral provinces.
         oreEnrichment = new com.ckemere.cubeworld.generation.OreEnrichment(this);
         getServer().getPluginManager().registerEvents(oreEnrichment, this);
+        // Re-aim thrown Eyes of Ender along the cube geodesic toward the nearest
+        // stronghold, so they point at the correct seam instead of a raw XZ line.
+        com.ckemere.cubeworld.geometry.CubeBearing bearing =
+                new com.ckemere.cubeworld.geometry.CubeBearing(topology);
+        getServer().getPluginManager().registerEvents(
+                new com.ckemere.cubeworld.seam.EnderEyeListener(this, bearing), this);
+        // Locator-bar dot toward the centre of a cube map the player is holding.
+        new com.ckemere.cubeworld.map.MapCenterLocator(this, bearing);
         // Rare "Master Traders" visit the special cities with exceptional goods.
         masterTraders = new com.ckemere.cubeworld.trades.MasterTraderService(this, teleport);
         masterTraders.start();
