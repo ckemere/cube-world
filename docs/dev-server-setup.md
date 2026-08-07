@@ -243,7 +243,7 @@ code and the existing files' headers, and both download URLs were checked live
 
 ### What the files actually contain
 
-`run/earth.dat` — CWE1, roll **-70.0** (the locked orientation), **5 layers**, 343 MB:
+`run/earth.dat` — CWE1, roll **-70.0** (the locked orientation), **6 layers**, 359 MB:
 
 | layer | grid | scale | source |
 |---|---|---|---|
@@ -252,6 +252,11 @@ code and the existing files' headers, and both download URLs were checked live
 | `precip` | 2160x1080 | 1.0 | WorldClim v2.1 10m **BIO12** (annual precip) |
 | `river` | 10800x5400 | 0.001 | Natural Earth rivers/lakes, as a distance ramp |
 | `river_y` | 10800x5400 | 1.0 | river surface elevation |
+| `sst` | 360x180 | 0.01 | WOA23 annual mean sea-surface temp (see the `sst` section) |
+
+`sst` is appended only when `tools/compact/out/sst_total.npy` exists, so an export
+run without it writes 5 layers and the plugin silently falls back to the latitude
+proxy — see [Sea-surface temperature](#sea-surface-temperature-the-sst-layer).
 
 `run/coast.dat` — CWE1, **1 layer** `coast` 2160x1080, 4.5 MB: true
 distance-to-ocean in km, chamfer transform. Derived FROM `earth.dat`, so it must
@@ -358,20 +363,14 @@ for path in ("run/earth.dat", "run/coast.dat"):
 PY
 ```
 
-Expect exactly the five layers above with `roll=-70.0`. **Also check the river layer
+Expect the six layers above with `roll=-70.0` (five if you have not built `sst`
+yet — that is the one layer an export legitimately omits). **Also check the river layer
 is not empty** -- the header alone will not tell you. Read the raw arrays and count
 non-zeros: `height`/`temp`/`precip` come out ~99%, and **`river` should be about
 2-3%**. A `river` of 0.00% means the 10m Natural Earth vectors were missing when the
 export ran, and the world will have no rivers at all. Then regenerate the world
 (section 6) — the rasters are read at world-gen time, so existing chunks keep the
 old terrain.
-
-### Not part of the pipeline
-
-`tools/compact/sst.py` is an **analysis script only** — it writes no file and no
-sea-surface-temperature layer exists in `earth.dat`. It needs a WOA23 extract
-fetched by hand (the URL is in its header) and exists to study ocean-temperature
-coverage. Ignore it when rebuilding.
 
 ## Sea-surface temperature (the `sst` layer)
 
@@ -381,6 +380,7 @@ average, 6.4 C RMSE, and lands **64% of ocean area in the wrong vanilla
 temperature band** — warm ocean survived only as a thin equatorial stripe.
 Rebuild the layer with:
 
+    mkdir -p tools/compact/out                  # gitignored, so absent on a clean clone
     curl -s "$(python3 -c "import sys;sys.path.insert(0,'tools/compact');import sst;print(sst.WOA_URL)")" \
          -o tools/compact/out/woa_sst.ascii     # ~680 KB, WOA23 1 deg annual mean
     python3 tools/compact/sst.py                # -> out/sst_total.npy (hole-free)
