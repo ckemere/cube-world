@@ -49,11 +49,15 @@ anything without them. Copy these from a working box:
 |---|---|---|
 | `run/earth.dat` | ~359 MB | elevation / temperature / precipitation (+ `sst`) rasters |
 | `run/coast.dat` | ~4.5 MB | coast-distance sidecar (CWE1) |
+| `tools/cubemap/out/globe.html` | ~1.6 MB | web map's 3-D globe page — without it that page 500s |
+| `tools/cubemap/out/worldblob.cwb` | optional | web map's terrain layer — omit and only that layer is blank |
 
 ```bash
-mkdir -p run
+mkdir -p run tools/cubemap/out
 scp you@mainbox:~/projects/cube-world/run/earth.dat run/
 scp you@mainbox:~/projects/cube-world/run/coast.dat run/
+# for the web map's globe page (see section 6); optional but tiny:
+scp you@mainbox:~/projects/cube-world/tools/cubemap/out/globe.html tools/cubemap/out/
 ```
 
 Copying beats regenerating: `earth.dat` is built out-of-core from ETOPO source and
@@ -146,6 +150,15 @@ cd tools/playermap && python3 server.py &      # web map on :8080
 
 Skipping step 3 leaves the teleport network reporting "still forming" and the map's
 structure overlay empty.
+
+**The web map** (`server.py`, binds `0.0.0.0:8080`, `PORT` env overrides) needs three
+things: the game server running (it pulls live player/structure data over RCON), the
+biome rasters + `stations.csv` that step 3 produces, and — for the 3-D globe page only
+— `tools/cubemap/out/globe.html` (copied in section 2, or built with
+`python3 -m cubemap globe`, which needs the ETOPO download from section 9). The flat
+biome map and structure overlay work without `globe.html`; only the globe view needs
+it, and the terrain layer needs the optional `worldblob.cwb`. Open port 8080 in the
+firewall for remote access.
 
 Regenerating terrain means deleting **`run/world*` AND
 `run/plugins/CubeWorld/{stations.csv,rings.csv}`**. Keep the registry and
