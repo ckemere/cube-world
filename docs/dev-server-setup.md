@@ -155,7 +155,7 @@ generator so you are looking at raw output.
 ./run-server.sh                       # boot 1: logs "no cubeworld structure sets found"
 #   (it writes the cities datapack during this boot; stop it)
 ./run-server.sh                       # boot 2: logs "30 cities anchored across 6 tiers"
-python3 tools/seed_cities.py          # builds all 30 teleport stations + biome rasters
+python3 tools/seed_cities.py          # 30 teleport stations + ALL map data (biome rasters incl. y-27, params, strongholds.json)
 cd tools/playermap && python3 server.py &      # web map on :8080
 ```
 

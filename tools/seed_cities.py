@@ -103,19 +103,22 @@ def main():
             break
         time.sleep(6)
 
-    # Refresh the map's biome data too — the structure overlay + biome/nether
-    # faces read these, and they must be regenerated for a fresh world (else the
-    # web map's structure overlay comes up empty). Cheap; safe to always run.
-    print("refreshing map biome rasters (overworld/nether) + biome params ...")
+    # Refresh ALL of the map's data too — everything the web map reads, so a fresh
+    # world doesn't come up empty/stale. The complete set: overworld + overworld_y-27
+    # (ancient-city start height) + nether biome rasters, biome params, and
+    # strongholds.json (end portals). Cheap; safe to always run.
+    print("refreshing map data (biome rasters incl. y-27, params, strongholds) ...")
     # Let the village ground fixer drain its queue before the chunks unload;
     # otherwise its repairs are skipped and villages keep standing over water.
     print("  settling (village ground repair) ...")
     time.sleep(45)
-    rcon(["cubeworld biomeraster overworld", "cubeworld biomeraster nether",
-          "cubeworld dumpbiomeparams", "save-all", "forceload remove all"], timeout=90)
+    rcon(["cubeworld biomeraster overworld", "cubeworld biomeraster overworld -27",
+          "cubeworld biomeraster nether", "cubeworld dumpbiomeparams",
+          "cubeworld strongholds", "save-all", "forceload remove all"], timeout=90)
     n = built_count()
-    print(f"done: {n}/{len(cities)} stations built + map rasters refreshed, saved, "
-          f"force-loads cleared. (Restart the playermap if it was already running.)")
+    print(f"done: {n}/{len(cities)} stations built + full map data refreshed (biome "
+          f"rasters incl. y-27, params, strongholds), saved, force-loads cleared. "
+          f"(Restart the playermap if it was already running.)")
     sys.exit(0 if n >= len(cities) else 1)
 
 
