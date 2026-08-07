@@ -13,15 +13,16 @@ sudo apt install -y \
     python3 python3-numpy python3-pil
 ```
 
-**Both JDKs are deliberate.** Paper 26.1+ needs **Java 25** to compile *and* run —
-it will not even load under 21 (`class file version 69.0 vs 65.0`). But Gradle
-9.6.1's daemon wants 21, so leave the *system default* `java` at 21 and let
-`run-server.sh` pick a Java >= 25 for the server, which it does automatically.
+**Both JDKs are installed for headroom.** Paper 26.1+ needs **Java 25** to compile
+*and* run — it will not even load under 21 (`class file version 69.0 vs 65.0`).
+Gradle 9.6.1 builds fine with **Java 25 as the default** (verified 2026-08 on a
+clean clone), so you can leave the default at 25; the 21 JDK is kept only as a
+fallback in case a future Gradle rejects 25. Either way `run-server.sh` auto-picks
+a Java >= 25 for the server, so the one hard requirement is that a 25 JDK exists.
 
 ```bash
-sudo update-alternatives --config java     # choose the 21 entry
-java -version                              # should say 21
-ls -d /usr/lib/jvm/*25*                    # 25 must exist for the server
+java -version                              # 25.x is fine
+ls -d /usr/lib/jvm/*25*                    # a 25 JDK must exist for the server
 ```
 
 `python3-numpy` and `python3-pil` are needed by `tools/voxcam.py` and the web map.
@@ -29,11 +30,16 @@ No pip installs are required.
 
 ## 2. Clone and get the data
 
+The repo is **private**, so clone over SSH with a key that has access (e.g. a
+GitHub deploy key on the new box), not HTTPS:
+
 ```bash
-git clone https://github.com/ckemere/cube-world.git
+git clone git@github.com:ckemere/cube-world.git
 cd cube-world
 git checkout nightly
 ```
+
+(HTTPS works only with a personal access token in place of a password.)
 
 **`run/` is gitignored in its entirety**, so a fresh clone has no world data, no
 server config, and — critically — **no Earth rasters**. The generator cannot do
@@ -41,7 +47,7 @@ anything without them. Copy these from a working box:
 
 | file | size | what it is |
 |---|---|---|
-| `run/earth.dat` | ~343 MB | elevation / temperature / precipitation rasters |
+| `run/earth.dat` | ~359 MB | elevation / temperature / precipitation (+ `sst`) rasters |
 | `run/coast.dat` | ~4.5 MB | coast-distance sidecar (CWE1) |
 
 ```bash
