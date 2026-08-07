@@ -26,7 +26,8 @@ ls -d /usr/lib/jvm/*25*                    # a 25 JDK must exist for the server
 ```
 
 `python3-numpy` and `python3-pil` are needed by `tools/voxcam.py` and the web map.
-No pip installs are required.
+The default data build (section 9) needs three more Python packages — `netCDF4`,
+`tifffile`, `imagecodecs` — installed in that section. Nothing else needs pip.
 
 ## 2. Clone and get the data
 
@@ -42,26 +43,36 @@ git checkout nightly
 (HTTPS works only with a personal access token in place of a password.)
 
 **`run/` is gitignored in its entirety**, so a fresh clone has no world data, no
-server config, and — critically — **no Earth rasters**. The generator cannot do
-anything without them. Copy these from a working box:
+server config, and — critically — **no Earth rasters** (nor the web-map globe). The
+generator cannot do anything without them:
 
 | file | size | what it is |
 |---|---|---|
 | `run/earth.dat` | ~359 MB | elevation / temperature / precipitation (+ `sst`) rasters |
-| `run/coast.dat` | ~4.5 MB | coast-distance sidecar (CWE1) |
+| `run/coast.dat` | ~4.5 MB | coast-distance sidecar (CWE1), derived from earth.dat |
 | `tools/cubemap/out/globe.html` | ~1.6 MB | web map's 3-D globe page — without it that page 500s |
 | `tools/cubemap/out/worldblob.cwb` | optional | web map's terrain layer — omit and only that layer is blank |
+
+These are **not seed-derived** — they are compiled from public real-world datasets
+(ETOPO, WorldClim, Natural Earth, WOA), so the seed cannot produce them. Two ways to
+get them:
+
+**Default — regenerate from source (section 9).** Downloads the source datasets and
+builds `earth.dat` / `coast.dat` / `globe.html` with the locked roll (−70), so the
+result is byte-identical to any other box and this machine stays self-contained. It
+needs network (~580 MB of downloads) and ~2 GB RAM during the build, and the Paper
+server must be stopped for it (see §9's memory note).
+
+**Shortcut — copy from a working box** (skips the downloads/RAM; needs SSH to it):
 
 ```bash
 mkdir -p run tools/cubemap/out
 scp you@mainbox:~/projects/cube-world/run/earth.dat run/
 scp you@mainbox:~/projects/cube-world/run/coast.dat run/
-# for the web map's globe page (see section 6); optional but tiny:
 scp you@mainbox:~/projects/cube-world/tools/cubemap/out/globe.html tools/cubemap/out/
 ```
 
-Copying beats regenerating: `earth.dat` is built out-of-core from ETOPO source and
-regenerating it on a small box will OOM the machine.
+Either way the output is identical, so the world is the same.
 
 ## 3. Server config
 
@@ -221,11 +232,14 @@ That answers "why did I get this biome" in seconds and with certainty. Selection
 **nearest-neighbour, not box containment**, which is the single biggest source of
 surprises — see `TODO.md` item 7 for the full set of traps.
 
-## 9. Regenerating `earth.dat` and `coast.dat` from source
+## 9. Building `earth.dat`, `coast.dat` and `globe.html` from source (the default)
 
-Copying is faster, but the pipeline is reproducible. Everything below was read
-out of the code and the existing files' headers, and both download URLs were
-checked live (HTTP 200) on 2026-07-27.
+This is the default data path (section 2): it makes the box self-contained instead
+of depending on an existing install, and the pipeline is deterministic (roll −70) so
+the output is identical to any other box's. The copy shortcut in section 2 skips all
+of this if you have access to a working box. Everything below was read out of the
+code and the existing files' headers, and both download URLs were checked live
+(HTTP 200) on 2026-07-27.
 
 ### What the files actually contain
 
@@ -307,6 +321,11 @@ python3 -m cubemap export --dest ../../run/earth.dat
 # 2. coast.dat  (reads run/earth.dat, so it must come second)
 cd ../..
 python3 tools/compact/build_coast.py            # default 2160 wide
+
+# 3. globe.html  (web map's 3-D globe page; reuses step 1's ETOPO download)
+cd tools/cubemap
+python3 -m cubemap globe                        # -> tools/cubemap/out/globe.html
+cd ../..
 ```
 
 `--roll` defaults to the locked `EARTH_ROLL_DEG` of -70. **Do not change it**
