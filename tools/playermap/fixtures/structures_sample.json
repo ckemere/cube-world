@@ -1,0 +1,35 @@
+{
+  "_comment": "Hand-written sample of the /markers contract, for developing the flat face page (/face?f=EQ_EAST&src=/fixtures/structures_sample.json) without depending on live structure data. u,v are face-local in [-1,1]; x = u*faceSize/2 + gridCol*faceSize, z = v*faceSize/2 + gridRow*faceSize. confidence 'superset' markers are drawn hollow: they may not exist in the world.",
+  "seed": 123,
+  "faceSize": 10240,
+  "dim": "overworld",
+  "face": "EQ_EAST",
+  "layers": {
+    "villages": [
+      { "x": 11616, "z": -1504, "face": "EQ_EAST", "u": 0.2669, "v": -0.2979,
+        "type": "minecraft:village_desert", "confidence": "exact" },
+      { "x": 8800, "z": 2208, "face": "EQ_EAST", "u": -0.28125, "v": 0.43125,
+        "type": "minecraft:village_plains", "confidence": "exact" },
+      { "x": 13920, "z": 3680, "face": "EQ_EAST", "u": 0.71875, "v": 0.71875,
+        "type": "minecraft:village_taiga", "confidence": "exact" }
+    ],
+    "ancient_cities": [
+      { "x": 10240, "z": 0, "face": "EQ_EAST", "u": 0.0, "v": 0.0,
+        "type": "minecraft:ancient_city", "confidence": "superset" },
+      { "x": 7168, "z": -3072, "face": "EQ_EAST", "u": -0.6, "v": -0.6,
+        "type": "minecraft:ancient_city", "confidence": "superset" }
+    ],
+    "woodland_mansions": [
+      { "x": 12800, "z": -4096, "face": "EQ_EAST", "u": 0.5, "v": -0.8,
+        "type": "minecraft:mansion", "confidence": "superset" }
+    ],
+    "cities": [
+      { "x": 11973, "z": -1360, "face": "EQ_EAST", "u": 0.33875, "v": -0.26583,
+        "name": "Axum", "type": "cubeworld:city", "confidence": "exact",
+        "pop": 20000, "country": "Ethiopia", "year": 400 },
+      { "x": 12563, "z": -3699, "face": "EQ_EAST", "u": 0.453639, "v": -0.72242,
+        "name": "Baghdad", "type": "cubeworld:city", "confidence": "exact",
+        "pop": 1500000, "country": "Iraq", "year": 1000 }
+    ]
+  }
+}

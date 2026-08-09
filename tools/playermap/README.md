@@ -23,6 +23,51 @@ generator actually made.
 
 Needs Pillow + numpy (already used by `../cubemap`); not stdlib-only anymore.
 
+## Flat face maps (`faceview.py`)
+**Click a cube face on the globe** and it opens `/face?f=<FACE>` — that one face
+as a flat, window-filling map. Browser Back (or the `← globe` button) returns to
+the rotating cube. On the flat page:
+
+- **click anywhere → the world x,z under the pointer**, plus a live cursor
+  readout, a pin, and copy buttons (`x z`, or a ready-made `/tp`). This is the
+  thing the globe could never answer.
+- structures and cities are a marker **overlay** with per-layer checkboxes,
+  counts and hover labels. `confidence: "superset"` markers are drawn **hollow**
+  — those layers over-report (see `structures/compute.SUPERSET_LAYERS`), so the
+  marker may not exist in the world.
+- drag pans, scroll zooms, double-click fits; a coordinate grid snaps to round
+  world blocks and is clipped to the face (off the face, x,z belong to a
+  different face).
+- background select: composited terrain or the biome raster.
+
+The 30 historical cities are a **real layer** now, on the globe as well: they
+used to be anonymous amber dots baked into the face textures by
+`realmap.composite_uris`, which meant they could be neither switched off nor
+identified. `/cities` serves them with names, and the globe draws them on a
+canvas overlay with a checkbox and hover labels.
+
+### Routes
+| route | serves |
+| --- | --- |
+| `/` | the rotating globe (also `/index.html`) |
+| `/face?f=EQ_EAST[&u=&v=&dim=&seed=&src=]` | flat map of one face (`u,v` place the pin) |
+| `/faceimage?f=EQ_EAST&bg=terrain\|biomes\|nether` | that face's texture as image bytes |
+| `/markers?[face=&dim=&seed=]` | `{seed, faceSize, layers:{name:[{x,z,face,u,v,type,confidence}]}}` |
+| `/cities` | the 30 cities, marker shape + the cube point the globe projects |
+| `/fixtures/<name>.json` | development fixtures (see below) |
+
+`/markers` is the shape to build against: `x,z` (world blocks) and `confidence`
+are derived here from the overlay markers, which carry only face-local `u,v`.
+`x = u*faceSize/2 + gridCol*faceSize` — the exact inverse of
+`structures/cubegate.world_to_faceuv`, so a marker's `x,z` is the block its dot
+sits on. Unknown paths now 404; they used to fall through to the globe, so a
+typo returned 1.6 MB of the wrong page with a 200.
+
+`fixtures/structures_sample.json` is a hand-written `/markers` response for
+developing the page against a fixed set of markers:
+`/face?f=EQ_EAST&src=/fixtures/structures_sample.json` (only `/fixtures/…`
+sources are accepted).
+
 ## Run
 ```bash
 python3 -m cubemap globe          # first, generate the globe the map embeds

@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 
+import faceview
 import realmap
 
 try:
@@ -47,33 +48,11 @@ REGION_DIR = os.environ.get("WORLD_REGION_DIR", os.path.join(
     "dimensions", "minecraft", "overworld", "region"))
 SAVE_EVERY = float(os.environ.get("SAVE_EVERY", "20"))   # min seconds between save-all
 
-# Temporary historical-city overlay: precomputed cube points from cities_globe.json
-# (delete the file to remove the overlay). See precompute in the commit message.
-CITIES_JSON = os.environ.get("CITIES_JSON",
-                             os.path.join(os.path.dirname(__file__), "cities_globe.json"))
-
-
-def load_cities():
-    try:
-        with open(CITIES_JSON, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
-
-
-def cities_by_face():
-    """Group cities into {face: [(u, v, pop)]} for painting onto face textures."""
-    d = {}
-    for c in load_cities():
-        d.setdefault(c["face"], []).append((c["u"], c["v"], c["pop"]))
-    return d
-
-
-def _cities_sig():
-    try:
-        return os.path.getmtime(CITIES_JSON)
-    except OSError:
-        return None
+# The 30 historical cities are NOT painted into the face textures any more.
+# Baked dots could be neither switched off nor identified -- you could see that
+# something was there and had no way to learn what. They are served as a real
+# overlay layer instead (`/cities`, drawn by faceview.GLOBE_ADDON on the globe
+# and by the flat face page), with a checkbox and hover labels.
 
 
 # Strongholds used to be baked into the face textures from a hand-maintained
@@ -349,7 +328,7 @@ def composited_uris():
 def _recompute_faces():
     """Recompute the composite if any input changed (region blocks / overlays)."""
     _maybe_save()
-    sig = (realmap.region_signature(REGION_DIR), _cities_sig(), _stations_sig())
+    sig = (realmap.region_signature(REGION_DIR), _stations_sig())
     with _faces_lock:
         if _cache["sig"] == sig and _cache["uris"] is not None:
             return
@@ -357,7 +336,7 @@ def _recompute_faces():
     if not base:
         return
     try:
-        uris, painted = realmap.composite_uris(base, REGION_DIR, cities_by_face(),
+        uris, painted = realmap.composite_uris(base, REGION_DIR, None,
                                                stations_by_face())
     except Exception as e:
         print("faces composite error:", e)
@@ -532,16 +511,30 @@ STRUCTURE_OVERLAY = r"""
 """
 
 
+_seed_cache = [None]
+
+
 def default_seed():
+    """The world's seed, resolved once and remembered.
+
+    level-seed= in server.properties is usually blank, so this normally falls
+    through to RCON -- and RCON can fail (server busy, restarting). It used to
+    return 0 then, which is not "unknown", it is a DIFFERENT WORLD: every
+    structure position computed from it is wrong, and the page shows no sign
+    that anything went wrong. Once a real seed is known it is kept."""
+    if _seed_cache[0]:
+        return _seed_cache[0]
     p = os.path.join(os.path.dirname(__file__), "..", "..", "run", "server.properties")
     try:
         for line in open(p):
             if line.startswith("level-seed="):
-                return int(line.split("=", 1)[1].strip())
+                _seed_cache[0] = int(line.split("=", 1)[1].strip())
+                return _seed_cache[0]
     except Exception:
         pass
     try:
-        return int(rcon(["seed"])[0].split("[")[1].split("]")[0])
+        _seed_cache[0] = int(rcon(["seed"])[0].split("[")[1].split("]")[0])
+        return _seed_cache[0]
     except Exception:
         return 0
 
@@ -671,17 +664,126 @@ def load_page():
     uris = composited_uris()
     if uris:
         html = realmap.replace_uris(html, uris)
-    # City dots are painted onto the face textures themselves (composited_uris),
-    # so they sit on each face and occlude correctly — no screen-space overlay.
     page = html + MARKER_OVERLAY + FACES_REFRESH
     if scompute is not None:
         page += STRUCTURE_OVERLAY.replace("__SEED__", str(default_seed()))
+    # cities layer + click-a-face-to-open-its-flat-map. Last, so its checkbox can
+    # attach itself to the structures panel when that overlay is present.
+    page += faceview.GLOBE_ADDON
     return page
+
+
+def markers_payload(seed, dim, face=None):
+    """Structure + city markers in the published contract shape (see faceview):
+    {seed, faceSize, layers:{name:[{x,z,face,u,v,type,confidence}]}}."""
+    ov = scompute.compute_overlays(seed, dim) if scompute is not None else {}
+    sup = getattr(scompute, "SUPERSET_LAYERS", None) if scompute is not None else None
+    return faceview.markers_payload(seed, dim, ov, face=face, superset=sup)
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
+
+    def _send404(self, msg="not found"):
+        msg = (msg.replace("&", "&amp;").replace("<", "&lt;")
+                  .replace(">", "&gt;"))[:200]      # never echo raw request text
+        body = ("<h1>404</h1><p>%s</p><p>Routes: <a href='/'>/</a> "
+                "· /face?f=EQ_EAST · /faceimage · /markers · /cities · /players "
+                "· /faces · /structures · /biomes · /biomefaces · /biomelegend "
+                "· /netherfaces · /compare</p>" % msg).encode()
+        try:
+            self.send_response(404)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
+
+    def _flat_face_routes(self, path, q):
+        """The flat single-face map and its data. Returns True if it handled the
+        request. Exact path matches, deliberately: the old chain of startswith()
+        prefixes is why /cities used to return the globe byte-for-byte."""
+        def one(k, dflt=None):
+            return q.get(k, [dflt])[0]
+
+        if path == "/face":
+            face = faceview.valid_face(one("f") or one("face") or "")
+            if not face:
+                self._send(faceview.face_index_page().encode("utf-8"),
+                           "text/html; charset=utf-8")
+                return True
+            def num(k):
+                try:
+                    return max(-1.0, min(1.0, float(one(k))))
+                except (TypeError, ValueError):
+                    return None
+            try:
+                seed = int(one("seed"))
+            except (TypeError, ValueError):
+                seed = default_seed()
+            src = one("src")
+            if src and not src.startswith("/fixtures/"):
+                src = None                     # only our own fixture feed
+            html = faceview.face_page(face, dim=one("dim", "overworld") or "overworld",
+                                      seed=seed, u=num("u"), v=num("v"), src=src)
+            self._send(html.encode("utf-8"), "text/html; charset=utf-8")
+            return True
+
+        if path == "/faceimage":
+            face = faceview.valid_face(one("f") or one("face") or "")
+            if not face:
+                self._send404("unknown face")
+                return True
+            bg = one("bg", "terrain")
+            try:
+                if bg == "biomes":
+                    uris = biome_face_uris_from_raster()
+                elif bg == "nether":
+                    uris = nether_face_uris() if nether_face_uris else []
+                else:
+                    uris = composited_uris()
+            except Exception as e:
+                print("faceimage error:", e)
+                uris = []
+            body, ctype = faceview.face_image(uris, face)
+            if body is None:
+                self._send404("no imagery for that face yet")
+            else:
+                self._send(body, ctype)
+            return True
+
+        if path == "/markers":
+            try:
+                seed = int(one("seed"))
+            except (TypeError, ValueError):
+                seed = default_seed()
+            dim = one("dim", "overworld") or "overworld"
+            face = faceview.valid_face(one("face") or "")
+            try:
+                payload = markers_payload(seed, dim, face)
+            except Exception as e:
+                print("markers error:", e)
+                payload = {"seed": seed, "faceSize": faceview.face_size(dim),
+                           "dim": dim, "face": face, "layers": {}}
+            self._send(json.dumps(payload).encode(), "application/json")
+            return True
+
+        if path == "/cities":
+            self._send(json.dumps(faceview.cities_globe()).encode(), "application/json")
+            return True
+
+        if path.startswith("/fixtures/"):
+            p = faceview.fixture_path(path[len("/fixtures/"):])
+            if not p:
+                self._send404("no such fixture")
+                return True
+            with open(p, "rb") as f:
+                self._send(f.read(), "application/json")
+            return True
+
+        return False
 
     def _send(self, body, ctype):
         try:
@@ -696,6 +798,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
+            from urllib.parse import urlparse, parse_qs
+            _u = urlparse(self.path)
+            if self._flat_face_routes(_u.path, parse_qs(_u.query)):
+                return
             if self.path.startswith("/compare"):
                 # Side-by-side current-vs-compact parameter study, generated by
                 # tools/compact/render_compare.py (self-contained HTML).
@@ -754,8 +860,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     print("biomefaces error:", e)
                     uris = []
                 self._send(json.dumps(uris).encode(), "application/json")
-            else:
+            elif _u.path in ("/", "/index.html", "/globe"):
                 self._send(load_page().encode("utf-8"), "text/html; charset=utf-8")
+            else:
+                # Unknown paths used to fall through to the globe, so a typo (or
+                # /cities) silently served 1.6 MB of the wrong page with a 200.
+                self._send404("no route " + _u.path)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
 
