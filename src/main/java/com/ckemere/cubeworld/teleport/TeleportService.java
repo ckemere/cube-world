@@ -371,6 +371,18 @@ public final class TeleportService {
     /** Load the 30 city sites so their stations can be built when chunks load.
      * Cities already built (present in the persisted registry) are skipped so a
      * restart doesn't rebuild — and re-stack — them. */
+    /**
+     * The city name from field 5 of cities_anchor.csv, minus any trailing inline
+     * {@code #} comment. Several rows annotate why a site was moved, e.g.
+     * {@code ...,Rome   # moved 11km off the water: 80% -> 92% land}; without
+     * stripping, the whole annotation became part of the station name and showed
+     * up in the registry and in player-facing station listings.
+     */
+    public static String cityNameOf(String field) {
+        int hash = field.indexOf('#');
+        return (hash < 0 ? field : field.substring(0, hash)).trim();
+    }
+
     public void seedCities() {
         java.util.Set<String> built = new java.util.HashSet<>();
         for (Station s : stations.values()) {
@@ -393,7 +405,7 @@ public final class TeleportService {
                     if (p.length < 5) {
                         continue;
                     }
-                    String name = p[4].trim();
+                    String name = cityNameOf(p[4]);
                     if (built.contains(name)) {
                         continue;                    // already built in a prior session
                     }

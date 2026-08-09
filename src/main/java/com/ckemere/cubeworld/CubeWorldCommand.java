@@ -29,12 +29,15 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
     private final com.ckemere.cubeworld.teleport.TeleportService teleport;
     private final com.ckemere.cubeworld.trades.MasterTraderService masterTraders;
     private final com.ckemere.cubeworld.generation.OreEnrichment oreEnrichment;
+    private final com.ckemere.cubeworld.generation.Prospector prospector;
 
     public CubeWorldCommand(CubeGeometry geometry, CubeGeometry netherGeometry, SeamService seams,
                             MirrorService mirrors, MapService maps,
                             com.ckemere.cubeworld.teleport.TeleportService teleport,
                             com.ckemere.cubeworld.trades.MasterTraderService masterTraders,
-                            com.ckemere.cubeworld.generation.OreEnrichment oreEnrichment) {
+                            com.ckemere.cubeworld.generation.OreEnrichment oreEnrichment,
+                            com.ckemere.cubeworld.generation.Prospector prospector) {
+        this.prospector = prospector;
         this.geometry = geometry;
         this.netherGeometry = netherGeometry;
         this.seams = seams;
@@ -93,15 +96,50 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
         return maps.mapFor(org.bukkit.Bukkit.getWorlds().get(0).getSeed()).sampler();
     }
 
+    /**
+     * The only subcommands a non-op may run. Everything else is admin/research:
+     * it either mutates the world, grants items, reveals the teleport network
+     * (which players are meant to discover), or x-rays terrain.
+     *
+     * <p>Deliberately an allow-list, not a deny-list: a new subcommand added
+     * later defaults to admin-only rather than silently becoming public.
+     */
+    private static final java.util.Set<String> PUBLIC_SUBCOMMANDS =
+            java.util.Set.of("ping", "oreprobe", "findlatlon");
+
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command,
                              @NotNull String label, String @NotNull [] args) {
         if (args.length == 0) {
             return false;
         }
-        switch (args[0].toLowerCase(Locale.ROOT)) {
+        String sub = args[0].toLowerCase(Locale.ROOT);
+        // Console/RCON passes both checks (ConsoleCommandSender has every
+        // permission), so tools/ keeps working unchanged.
+        String needed = PUBLIC_SUBCOMMANDS.contains(sub) ? "cubeworld.use" : "cubeworld.admin";
+        if (!sender.hasPermission(needed)) {
+            sender.sendMessage(Component.text(
+                    PUBLIC_SUBCOMMANDS.contains(sub)
+                            ? "You do not have permission to use CubeWorld commands."
+                            : "That is an operator-only command. Try: "
+                              + String.join(", ", new java.util.TreeSet<>(PUBLIC_SUBCOMMANDS)),
+                    NamedTextColor.RED));
+            return true;
+        }
+        switch (sub) {
             case "ping" -> {
                 sender.sendMessage(Component.text("CubeWorld: pong!", NamedTextColor.GREEN));
+                return true;
+            }
+            case "prospector" -> {
+                if (!(sender instanceof Player p)) {
+                    sender.sendMessage(Component.text("Players only.", NamedTextColor.RED));
+                    return true;
+                }
+                p.getInventory().addItem(prospector.create());
+                p.sendMessage(Component.text(
+                        "Gave an untuned Prospector. Craft it together with an ore sample "
+                        + "(e.g. a gold ingot) to tune it.", NamedTextColor.AQUA));
                 return true;
             }
             case "reciperecheck" -> {
@@ -311,7 +349,9 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                         }
                         int cx = Integer.parseInt(p[0].trim());
                         int cz = Integer.parseInt(p[1].trim());
-                        String name = p.length > 4 ? p[4].trim() : "?";
+                        String name = p.length > 4
+                                ? com.ckemere.cubeworld.teleport.TeleportService.cityNameOf(p[4])
+                                : "?";
                         double base = landFraction(cx, cz, footprint, step, margin);
                         int bx = cx;
                         int bz = cz;

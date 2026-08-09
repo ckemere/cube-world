@@ -76,10 +76,23 @@ public final class OreDeposits {
         }
     }
 
-    /** {lat, lon} in degrees. */
+    /** {lat, lon, radius} in degrees; radius 0 means "use the global default". */
     private static double[] p(double lat, double lon) {
-        return new double[] {lat, lon};
+        return new double[] {lat, lon, 0};
     }
+
+    /**
+     * A province with its own radius in blocks. Used for the offshore fields, which
+     * are genuinely enormous in reality -- the Clarion-Clipperton Zone alone is about
+     * 4.5 million km2 -- and which have to repay a much harder journey (deep ocean or
+     * polar water, so breathing gear or a conduit) than any land deposit.
+     */
+    private static double[] p(double lat, double lon, double radius) {
+        return new double[] {lat, lon, radius};
+    }
+
+    /** Radius for the deep-water fields. See {@link #p(double, double, double)}. */
+    private static final double SEA = 800;
 
     /**
      * Real Earth mineral provinces per ore. Diamond and lapis get 5 each; the rest
@@ -91,13 +104,19 @@ public final class OreDeposits {
             p( 62.53, 113.99),   // Mirny, Siberia, Russia
             p(-21.30,  25.37),   // Orapa, Botswana
             p(-16.71, 128.40),   // Argyle, Western Australia
-            p( 64.50, -110.30)), // Diavik / Ekati, NWT, Canada
+            p( 64.50, -110.30),  // Diavik / Ekati, NWT, Canada
+            // --- deep water (see SEA) ---
+            p(-26.50,  14.50, SEA),  // Debmarine Atlantic 1, Namibia -- real marine diamonds
+            p( 85.00,  85.00, SEA)), // Gakkel Ridge, Arctic Ocean -- polar
         Ore.LAPIS, List.of(
             p( 36.18,  70.80),   // Sar-e-Sang, Badakhshan, Afghanistan
             p(-30.60, -70.90),   // Flor de los Andes, Chile
             p( 51.65, 103.72),   // Slyudyanka, Lake Baikal, Russia
             p( 38.82, -106.75),  // Italian Mountain, Colorado, USA
-            p( 38.10,  72.30)),  // Lyadzhuar Dara, Pamir, Tajikistan
+            p( 38.10,  72.30),   // Lyadzhuar Dara, Pamir, Tajikistan
+            // --- deep water: real nodule fields, lapis is our own mapping ---
+            p( -7.00, -90.00, SEA),  // Peru Basin nodule field
+            p(-20.00, -160.00, SEA)), // Cook Islands EEZ, cobalt-rich nodules
         Ore.REDSTONE, List.of(  // ruby / garnet
             p( 22.92,  96.51),   // Mogok, Myanmar (ruby)
             p(  6.68,  80.40),   // Ratnapura, Sri Lanka
@@ -119,7 +138,10 @@ public final class OreDeposits {
             p( 34.80,  72.35),   // Swat, Pakistan
             p(-20.60,  29.80),   // Sandawana, Zimbabwe
             p( 24.63,  34.80),   // Sikait (Cleopatra's mines), Egypt
-            p(-21.23,  48.34)),  // Mananjary, Madagascar
+            p(-21.23,  48.34),   // Mananjary, Madagascar
+            // --- deep water: real fields, emerald is our own mapping ---
+            p(-10.00,  75.00, SEA),  // Central Indian Ocean Basin nodule field
+            p(-56.00, -30.00, SEA)), // East Scotia Ridge, Southern Ocean -- polar
         Ore.GOLD, List.of(
             p(-26.27,  27.50),   // Witwatersrand, South Africa
             p( 37.96, -120.38),  // Mother Lode, California, USA
@@ -130,7 +152,12 @@ public final class OreDeposits {
             p( -6.98, -78.51),   // Yanacocha, Peru
             p( 40.80, -116.13),  // Carlin, Nevada, USA
             p( -6.02, -49.67),   // Serra Pelada, Brazil
-            p(  5.90,  38.90)),  // Adola / Lega Dembi, Ethiopia
+            p(  5.90,  38.90),   // Adola / Lega Dembi, Ethiopia
+            // --- deep water: seafloor massive sulfides really are gold-bearing ---
+            p( 26.14, -44.83, SEA),  // TAG hydrothermal field, Mid-Atlantic Ridge
+            p( 21.36,  38.05, SEA),  // Atlantis II Deep, Red Sea -- Au/Ag muds
+            p(-22.20, -176.60, SEA), // Lau Basin, SW Pacific
+            p( 10.00, -145.00, SEA)), // Clarion-Clipperton Zone -- the big one
         Ore.IRON, List.of(
             p( 67.85,  20.22),   // Kiruna, Sweden
             p(-23.36, 119.68),   // Mount Whaleback, Pilbara, Australia

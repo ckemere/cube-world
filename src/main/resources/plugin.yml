@@ -8,4 +8,13 @@ author: ckemere
 commands:
   cubeworld:
     description: CubeWorld commands
-    usage: /cubeworld <ping|face|tp|simulate>
+    usage: "/cubeworld <ping|oreprobe|findlatlon> (operators have many more)"
+permissions:
+  cubeworld.use:
+    description: Player-facing CubeWorld commands (ping, oreprobe, findlatlon).
+    default: true
+  cubeworld.admin:
+    description: >-
+      Administrative and world-generation research commands. These mutate the
+      world, grant items, reveal the teleport network, or x-ray terrain.
+    default: op

@@ -76,7 +76,9 @@ def main():
             if not ln or ln.startswith("#"):
                 continue
             p = ln.split(",")
-            cities.append((int(p[0]), int(p[1]), p[4]))
+            # Field 5 may carry a trailing "# why this site moved" annotation;
+            # keep only the name or it ends up in the station registry.
+            cities.append((int(p[0]), int(p[1]), p[4].split("#")[0].strip()))
     print(f"seeding {len(cities)} city stations via RCON {HOST}:{PORT} ...")
 
     # Force-load each city's chunk (+ a small box so buildCityStation's house

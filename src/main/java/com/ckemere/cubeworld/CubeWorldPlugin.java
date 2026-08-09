@@ -57,6 +57,11 @@ public final class CubeWorldPlugin extends JavaPlugin {
     private com.ckemere.cubeworld.teleport.TeleportService teleport;
     private com.ckemere.cubeworld.trades.MasterTraderService masterTraders;
     private com.ckemere.cubeworld.generation.OreEnrichment oreEnrichment;
+    private com.ckemere.cubeworld.generation.Prospector prospector;
+
+    public com.ckemere.cubeworld.generation.Prospector prospector() {
+        return prospector;
+    }
 
     /** Per-world seam machinery. Both cube worlds share geometry and topology. */
     public record WorldServices(World world, LiquidSeamService liquids,
@@ -126,6 +131,10 @@ public final class CubeWorldPlugin extends JavaPlugin {
         // Enrich ores where terrain corresponds to real Earth mineral provinces.
         oreEnrichment = new com.ckemere.cubeworld.generation.OreEnrichment(this);
         getServer().getPluginManager().registerEvents(oreEnrichment, this);
+        // The carried ore detector that reads the same field.
+        prospector = new com.ckemere.cubeworld.generation.Prospector(this, oreEnrichment);
+        prospector.registerRecipes();
+        prospector.start();
         // Re-aim thrown Eyes of Ender along the cube geodesic toward the nearest
         // stronghold, so they point at the correct seam instead of a raw XZ line.
         com.ckemere.cubeworld.geometry.CubeBearing bearing =
@@ -195,7 +204,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, exploration::tick, 100L, 20L);
 
         CubeWorldCommand executor = new CubeWorldCommand(geometry, netherGeometry, seams, mirrors,
-                maps, teleport, masterTraders, oreEnrichment);
+                maps, teleport, masterTraders, oreEnrichment, prospector);
         PluginCommand command = getCommand("cubeworld");
         if (command != null) {
             command.setExecutor(executor);
