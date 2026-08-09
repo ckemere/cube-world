@@ -64,6 +64,9 @@ public final class CubeMapRenderer extends MapRenderer {
 
     @Override
     public void render(MapView view, MapCanvas canvas, Player player) {
+        // Paint only when the image changed. CraftMapView gives every renderer its
+        // OWN per-player canvas (Map<MapRenderer, Map<CraftPlayer, CraftMapCanvas>>),
+        // so vanilla's renderer cannot overwrite ours and there is nothing to redraw.
         if (dirty || cached == null) {
             cached = CubeMapImage.render(player.getWorld(), geom, topo,
                     centerX, centerZ, blocksPerPixel);
@@ -77,6 +80,9 @@ public final class CubeMapRenderer extends MapRenderer {
             }
             dirty = false;
         }
+        // Cursors from every renderer are accumulated into one RenderData.cursors
+        // list, so vanilla's decorations (treasure X, explorer targets, banners)
+        // survive alongside ours without us merging anything.
         canvas.setCursors(cursors(player));
     }
 
@@ -91,6 +97,15 @@ public final class CubeMapRenderer extends MapRenderer {
         return cc;
     }
 
+    /**
+     * How far off the map, in map-widths, a station marker still gets clamped to the
+     * edge instead of being dropped. A freshly crafted map is 1 block/pixel — only
+     * 128 blocks across — so requiring a station to fall inside the footprint meant
+     * an ordinary map never showed a single city. Clamping gives a bearing to the
+     * nearby ones; the cap stops all 30 piling onto the border.
+     */
+    private static final double OFF_MAP_WIDTHS = 4.0;
+
     private void addCursor(MapCursorCollection cc, int wx, int wz,
                            MapCursor.Type type, String label) {
         // Fold the marker into the map's home-face frame so it lands where CubeMapImage
@@ -98,8 +113,9 @@ public final class CubeMapRenderer extends MapRenderer {
         CubeBearing.Folded f = bearing.fold(centerX + 0.5, centerZ + 0.5, wx + 0.5, wz + 0.5);
         double fx = (f.x() - centerX) / (double) blocksPerPixel;   // pixels from centre
         double fz = (f.z() - centerZ) / (double) blocksPerPixel;
-        if (Math.abs(fx) > 64 || Math.abs(fz) > 64) {
-            return;                     // off this map; stations get no off-map arrow
+        double limit = 64 * OFF_MAP_WIDTHS;
+        if (Math.abs(fx) > limit || Math.abs(fz) > limit) {
+            return;                     // too far to be worth a border marker
         }
         int cx = clampByte((int) Math.round(fx * 2));           // 2 cursor units per pixel
         int cz = clampByte((int) Math.round(fz * 2));
@@ -112,6 +128,21 @@ public final class CubeMapRenderer extends MapRenderer {
         double fx = (f.x() - centerX) / (double) blocksPerPixel;
         double fz = (f.z() - centerZ) / (double) blocksPerPixel;
         boolean off = Math.abs(fx) > 64 || Math.abs(fz) > 64;
+        // Vanilla still draws its own PLAYER decoration (MapItemSavedData line ~218,
+        // gated on trackingPosition). Where the fold is the identity and the player is
+        // on the map, that decoration is already correct, so adding ours would just
+        // stack a second arrow on the same pixel. Stand down and let vanilla have it;
+        // we only take over where vanilla is wrong -- across a seam (folded position
+        // differs from raw) or off the map (vanilla drops the marker, we clamp it).
+        //
+        // Turning trackingPosition off instead would also remove the item-frame "+"
+        // marker, which is gated on the same flag; the treasure-map X is NOT, so it
+        // survives either way.
+        boolean foldIsIdentity = f.x() == player.getLocation().getX()
+                && f.z() == player.getLocation().getZ();
+        if (foldIsIdentity && !off) {
+            return;
+        }
         int cx = clampByte((int) Math.round(fx * 2));
         int cz = clampByte((int) Math.round(fz * 2));
         // Rotate the arrow by the fold's seam rotation so it points correctly on the

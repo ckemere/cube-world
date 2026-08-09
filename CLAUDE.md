@@ -11,7 +11,24 @@ Minecraft world structured as six cube faces so the map wraps at the date line a
 
 ## API accuracy
 
-Training-data Bukkit/Spigot patterns predate the 2026 Paper hard fork and are often wrong. Check docs.papermc.io for current APIs before writing code against memory. Known traps:
+Training-data Bukkit/Spigot patterns predate the 2026 Paper hard fork and are often wrong. Check docs.papermc.io for current APIs before writing code against memory.
+
+**Read the decompiled server source. Do not reason about vanilla/CraftBukkit behaviour from memory — the full remapped Java is on this box.** paperweight's dev bundle ships sources, not just classes:
+
+```bash
+JAR=$(ls -d ~/.gradle/caches/paperweight-userdev/v2/work/applyDevBundlePatches_*/output.jar | head -1)
+javap -p -cp "$JAR" org.bukkit.craftbukkit.map.CraftMapView          # fields + signatures
+unzip -o -q "$JAR" "*/MapItemSavedData.java" -d /tmp/nms             # actual method bodies
+grep -rn trackingPosition /tmp/nms                                    # then just read it
+```
+
+`javap -p` answers "what exists"; unzipping answers "what does it do". Either takes under a minute, and **both beat a plausible-sounding guess every time**. Guessing here is not cheap — in one session it produced a per-frame full-canvas repaint to prevent an overwrite that `CraftMapView`'s per-renderer canvases make impossible, a "cursor merge" that read our own canvas and therefore merged nothing, and an invented risk of deleting treasure-map decorations that one `grep` disproves. All three were reverted; none needed to be written.
+
+Corollary: when you catch yourself writing "probably", "I suspect", "this may be because", or proposing a fix whose justification you have not verified — stop and go read the source or measure it. If something genuinely cannot be established (rendering that needs a real client, say), state that plainly instead of filling the gap with a theory.
+
+**Comments in this repo are not automatically ground truth.** Commits are authored `Caleb (Claude) Kemere`, so a confident-sounding comment may be a previous session's *hypothesis*. Treat them as leads to verify — e.g. `tools/playermap/structures/compute.py` asserts "the biome filter is not what fails", but it only ever measured two of the seventeen overlay layers.
+
+Known traps:
 
 - paper-api coordinates: `io.papermc.paper:paper-api:<mcver>.build.<n>-<status>` (pinned in build.gradle.kts; get exact strings from repo.papermc.io maven-metadata.xml when bumping).
 - Paper 26.1+ requires **Java 25** — for BOTH compile and *run*. Gradle's toolchain provisions 25 for the build, but the **system default `java` is 21** (`/usr/lib/jvm/java-21-openjdk-amd64`), and Paper won't even load under it (`class file version 69.0 vs 65.0`). A stable system 25 is available: `sudo apt install -y openjdk-25-jdk`. Leave the *default* `java` at 21 (Gradle 9.6's daemon runs on it); `run-server.sh` auto-picks a Java ≥25 for the server.

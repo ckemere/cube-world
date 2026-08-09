@@ -143,6 +143,12 @@ public final class CubeWorldPlugin extends JavaPlugin {
                 new com.ckemere.cubeworld.seam.EnderEyeListener(this, bearing), this);
         // Locator-bar dot toward the centre of a cube map the player is holding.
         new com.ckemere.cubeworld.map.MapCenterLocator(this, bearing);
+        // Every map made in a cube world gets the seam-flattening renderer, so a
+        // crafted map behaves like the demo ones instead of falling back to vanilla
+        // (which draws void across seams and drops the player marker off-map).
+        getServer().getPluginManager().registerEvents(
+                new com.ckemere.cubeworld.map.CubeMapListener(
+                        this, geometry, topology, teleport), this);
         // Rare "Master Traders" visit the special cities with exceptional goods.
         masterTraders = new com.ckemere.cubeworld.trades.MasterTraderService(this, teleport);
         masterTraders.start();
