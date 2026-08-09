@@ -10,6 +10,7 @@ import os
 
 from . import cubegate
 from .biomeraster import load as load_raster
+from . import village_placement
 from .placement import RandomSpread
 from .javarandom import JavaRandom
 from . import frequency
@@ -23,20 +24,35 @@ VILLAGE_POOLS = json.load(open(os.path.join(_DIR, "village_pools.json")))["varia
 # so the biome alone decides which pool (and so which pool SIZE) is rolled.
 _VILLAGE_VARIANT = {b: v for v, d in VILLAGE_POOLS.items() for b in d["biomes"]}
 
-# Layers that are deliberately a SUPERSET of what the world contains. Vanilla
-# runs terrain checks after the biome check that no seed-maths map can replay:
+# Layers believed to be a SUPERSET of what the world contains, i.e. vanilla runs
+# a check after the biome test that seed maths cannot replay.
 #
-#   ancient_cities     the jigsaw assembly can decline to build (recall 7/7,
-#                      precision 21/30; deep_dark confirmed present at every miss)
-#   woodland_mansions  needs getLowestYIn5by5BoxOffset7Blocks >= y60, so a
-#                      candidate whose 5x5 footprint dips into a valley is
-#                      dropped -- measured: 3 predicted, 2 real, and the phantom
-#                      sat in jagged_peaks/grove with no water anywhere near it,
-#                      so proximity to water is NOT the predictor
+#   woodland_mansions  REAL gate, read in the 26.2 sources:
+#                      WoodlandMansionStructure.findGenerationPoint returns empty
+#                      when getLowestYIn5by5BoxOffset7Blocks < y60. Measured 3
+#                      predicted / 2 real. This one is genuine.
 #
-# Both are left as supersets on purpose: a marker that might be there beats a
-# missing one you would never go looking for. Do not "fix" the counts by
-# tightening the biome filter -- the biome filter is not what fails.
+#   ancient_cities     UNVERIFIED. The stated mechanism -- "the jigsaw assembly
+#                      declines to build" -- does not exist in the code: for a
+#                      jigsaw with size > 0 the centre piece is always added, so
+#                      StructureStart.isValid() cannot fail. The 21/30 precision
+#                      is more likely the same sampling bug villages had:
+#                      ancient_city sets start_jigsaw_name city_anchor, so its
+#                      stub position is shifted by a randomly chosen named jigsaw
+#                      block -- tens of blocks in X/Z and offset in Y -- while
+#                      overworld_y-27.cwbr samples the chunk CORNER at exactly
+#                      y=-27, the wrong cell on all three axes. Worth fixing the
+#                      same way villages were before accepting it as a floor.
+#
+# Villages USED to be listed here with the note "the biome filter is not what
+# fails". That was wrong, and it only ever measured the two layers above.
+# Villages were failing precisely on the biome test -- at the wrong POSITION (see
+# village_placement). Correcting the position took them from P .786 / R .786 to
+# P .923 / R .857 over 46,875 decided chunks, and they are not a superset at all:
+# they were wrong in both directions at roughly equal rates.
+#
+# The lesson, since this file misled a later session for hours: a confident
+# comment here may be a previous run's hypothesis. Measure before trusting it.
 SUPERSET_LAYERS = {"ancient_cities", "woodland_mansions"}
 
 NETHER_SETS = {"nether_complexes", "nether_fossils"}
@@ -293,7 +309,22 @@ def compute_overlays(seed, dimension="overworld", types=None):
             m = cubegate.marker(cx, cz)
             if m is None:
                 continue
-            if allowed and not biome_prechecked:
+            if name == "villages":
+                # Vanilla tests the biome at the town-centre bounding-box centre --
+                # the chunk CORNER plus a rotation-dependent offset -- not at the
+                # chunk centre. See village_placement for the chain. Measured over
+                # the 46,875 chunks where vanilla has actually decided:
+                #   chunk centre : 14 predicted, 11 TP  3 FP  3 FN  P .786 R .786
+                #   bbox centre  : 13 predicted, 12 TP  1 FP  2 FN  P .923 R .857
+                # Residual error is resolution, not position: the sample needs a
+                # QUART (4-block) biome value and overworld.cwbr stores one per
+                # chunk, while 36.8% of chunks hold more than one biome across
+                # their 4x4 surface quart grid.
+                if village_placement.resolve(
+                        seed, cx, cz,
+                        lambda x, z: br.biome_at_chunk(x >> 4, z >> 4)) is None:
+                    continue
+            elif allowed and not biome_prechecked:
                 b = br.biome_at_chunk(cx, cz)
                 if b not in allowed:
                     continue
