@@ -139,6 +139,79 @@ def _section_blocks(sec):
     return palette, idx
 
 
+# Chunk statuses at or after "biomes", i.e. the ones whose biome container has
+# actually been filled from the biome source. Earlier statuses still serialise a
+# biome container, but it holds the placeholder (all plains) and is not real.
+BIOMES_DONE = frozenset("minecraft:" + s for s in (
+    "biomes", "noise", "surface", "carvers", "features",
+    "initialize_light", "light", "spawn", "full"))
+
+
+def chunk_biomes(root):
+    """{sectionY: (palette, idx64)} for every section that carries biomes.
+
+    Biomes are stored on a 4x4x4 lattice: 64 entries per 16-block section,
+    index order YZX with y/z/x each 0..3 (quart coordinates). `idx64` is a
+    length-64 array of palette indices (all zero for a single-value palette).
+    Returns None for a chunk whose biomes have not been generated yet.
+    """
+    if root.get("Status") not in BIOMES_DONE:
+        return None
+    out = {}
+    for sec in root.get("sections") or []:
+        bi = sec.get("biomes")
+        if not bi:
+            continue
+        palette = list(bi.get("palette", []))
+        if not palette:
+            continue
+        data = bi.get("data")
+        if len(palette) == 1 or data is None or len(data) == 0:
+            out[sec.get("Y")] = (palette, np.zeros(64, dtype=np.int64))
+            continue
+        # entries never span a long boundary, so the packed width follows from
+        # how many longs were written; start at ceil(log2(size)) and grow.
+        bits = max(1, (len(palette) - 1).bit_length())
+        while bits <= 32 and -(-64 // (64 // bits)) != len(data):
+            bits += 1
+        out[sec.get("Y")] = (palette, _unpack(data, bits, 64))
+    return out
+
+
+def biome_at_quart(biomes, y, qz, qx):
+    """Biome name at absolute block y and in-section quart indices qz, qx."""
+    sy = y >> 4
+    entry = biomes.get(sy)
+    if entry is None:
+        return None
+    palette, idx = entry
+    qy = (y & 15) >> 2
+    return palette[int(idx[(qy * 4 + qz) * 4 + qx])]
+
+
+def read_region_chunks(path):
+    """Yield (cx, cz, root) for every chunk NBT in a region file."""
+    with open(path, "rb") as f:
+        data = f.read()
+    if len(data) < 4096:
+        return
+    for slot in range(1024):
+        off = (data[slot * 4] << 16) | (data[slot * 4 + 1] << 8) | data[slot * 4 + 2]
+        if off == 0:
+            continue
+        start = off * 4096
+        if start + 5 > len(data):
+            continue
+        ln = struct.unpack_from(">I", data, start)[0]
+        if ln == 0 or start + 4 + ln > len(data):
+            continue
+        try:
+            root = _NBT(_decompress(data[start + 5:start + 4 + ln], data[start + 4])).root()
+        except Exception:
+            continue
+        yield root.get("xPos"), root.get("zPos"), root
+
+
 def chunk_surface(root):
     """(cx, cz, names16x16) for a full chunk, using WORLD_SURFACE heights.
     `names` is a 16x16 (z, x) array of block-name strings (top visible block).
