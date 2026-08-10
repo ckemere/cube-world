@@ -46,10 +46,12 @@ _VILLAGE_VARIANT = {b: v for v, d in VILLAGE_POOLS.items() for b in d["biomes"]}
 #
 # Villages USED to be listed here with the note "the biome filter is not what
 # fails". That was wrong, and it only ever measured the two layers above.
-# Villages were failing precisely on the biome test -- at the wrong POSITION (see
-# village_placement). Correcting the position took them from P .786 / R .786 to
-# P .923 / R .857 over 46,875 decided chunks, and they are not a superset at all:
-# they were wrong in both directions at roughly equal rates.
+# Villages were failing precisely on the biome test -- at the wrong POSITION and
+# then at the wrong RESOLUTION (see village_placement). They are now exact:
+# P 1.000 / R 1.000 over all 2006 candidates against 349 real villages, and the
+# model agrees with the engine field-by-field via `/cubeworld villagedebug`.
+# They were never a superset -- they were wrong in both directions at roughly
+# equal rates.
 #
 # The lesson, since this file misled a later session for hours: a confident
 # comment here may be a previous run's hypothesis. Measure before trusting it.
@@ -68,6 +70,31 @@ DERIVED_SETS = ["zombie_villages", "end_portals"]
 # plugin dumps the list the world actually uses instead.
 STRONGHOLDS_JSON = os.path.join(_DIR, "..", "..", "..", "run", "plugins",
                                 "CubeWorld", "strongholds.json")
+
+
+def _village_biome_probe():
+    """(biome_at(x,y,z), height_at(x,z)) from the Python port of the plugin's
+    BiomeProvider, or (None, None) if its inputs are not on disk.
+
+    Villages are the one layer whose answer needs a QUART-resolution biome: the
+    town-centre centre lands wherever the rotation and template put it, and
+    36.8% of chunks hold more than one biome across their 4x4 surface quart
+    grid. Measured over all 2006 candidates on this cube against 349 real
+    villages read out of the region files:
+
+        chunk raster (biome_at_chunk)   355 predicted  P .941  R .957
+        biomegen (this)                 349 predicted  P 1.000 R 1.000
+
+    Every other layer keeps the raster: they test at the chunk the marker is
+    drawn in, so chunk resolution is the right resolution for them.
+    """
+    try:
+        from biomegen import biome_at as _ba      # sibling package, not a subpackage
+        model = _ba._default()
+    except (ImportError, OSError, ValueError):
+        return None, None
+    return (lambda s: (lambda x, y, z: model.biome_at(s, x, y, z))), \
+           (lambda x, z: model.sampler.height_at(x + 0.5, z + 0.5))
 
 
 def _end_portals():
@@ -108,6 +135,12 @@ def is_zombie_village(seed, cx, cz, biome):
     variant = _VILLAGE_VARIANT.get(biome)
     if variant is None:
         return None
+    return is_zombie_variant(seed, cx, cz, variant)
+
+
+def is_zombie_variant(seed, cx, cz, variant):
+    """As `is_zombie_village`, but for a variant already resolved by
+    village_placement (which knows which pool vanilla actually rolled)."""
     pool = VILLAGE_POOLS[variant]
     rnd = JavaRandom(0)
     rnd.set_large_feature_seed(seed, cx, cz)
@@ -275,6 +308,12 @@ def compute_overlays(seed, dimension="overworld", types=None):
         out["zombie_villages"] = []
     if "end_portals" in want:
         out["end_portals"] = _end_portals()
+    village_biome, village_height = None, None
+    if "villages" in want:
+        make_biome, village_height = _village_biome_probe()
+        village_biome = make_biome(seed) if make_biome else None
+        if village_biome is None:                 # biomegen inputs absent
+            village_biome = lambda x, y, z: r.biome_at_chunk(x >> 4, z >> 4)  # noqa: E731
     for name in types_for(dimension):
         if name not in want or name in DERIVED_SETS:
             continue
@@ -310,19 +349,16 @@ def compute_overlays(seed, dimension="overworld", types=None):
             if m is None:
                 continue
             if name == "villages":
-                # Vanilla tests the biome at the town-centre bounding-box centre --
-                # the chunk CORNER plus a rotation-dependent offset -- not at the
-                # chunk centre. See village_placement for the chain. Measured over
-                # the 46,875 chunks where vanilla has actually decided:
-                #   chunk centre : 14 predicted, 11 TP  3 FP  3 FN  P .786 R .786
-                #   bbox centre  : 13 predicted, 12 TP  1 FP  2 FN  P .923 R .857
-                # Residual error is resolution, not position: the sample needs a
-                # QUART (4-block) biome value and overworld.cwbr stores one per
-                # chunk, while 36.8% of chunks hold more than one biome across
-                # their 4x4 surface quart grid.
-                if village_placement.resolve(
-                        seed, cx, cz,
-                        lambda x, z: br.biome_at_chunk(x >> 4, z >> 4)) is None:
+                # Vanilla does not test the biome at the chunk centre; it tests it
+                # at the town-centre bounding-box centre, on the quart lattice, at
+                # the height the generator reports there. See village_placement for
+                # the whole chain (verified field-by-field against the engine via
+                # `/cubeworld villagedebug`). Measured over all 2006 candidates
+                # against 349 real villages: P 1.000 / R 1.000 with the biomegen
+                # probe, P .941 / R .957 with the chunk raster.
+                resolved = village_placement.resolve(seed, cx, cz, village_biome,
+                                                     village_height)
+                if resolved is None:
                     continue
             elif allowed and not biome_prechecked:
                 b = br.biome_at_chunk(cx, cz)
@@ -336,7 +372,9 @@ def compute_overlays(seed, dimension="overworld", types=None):
                 continue
             markers.append(m)
             if want_zombie and name == "villages":
-                if is_zombie_village(seed, cx, cz, r.biome_at_chunk(cx, cz)):
+                # the pool is the one `resolve` found vanilla roll, not the one the
+                # chunk-centre biome would suggest
+                if is_zombie_variant(seed, cx, cz, resolved[0]):
                     out["zombie_villages"].append(m)
         out[name] = markers
     if want_zombie and "villages" not in (set(types) if types else want):
