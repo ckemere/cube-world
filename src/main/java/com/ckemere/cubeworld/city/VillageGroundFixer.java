@@ -87,10 +87,26 @@ public final class VillageGroundFixer implements Listener {
     private int pieces;
     private int filled;
 
-    /** -Dcubeworld.villageFix=false leaves the raw jigsaw placement alone, so the
-     * gap between a building and the ground it was placed over can be measured. */
+    /**
+     * DEFAULT OFF as of the factor-relaxation work.
+     *
+     * <p>This fixer was never a village feature: it is compensation for terrain that
+     * cannot be moved. {@code factor} is pinned to 64 wherever the freeboard rule bites,
+     * which is hardest on flat low ground, and villages need flat ground -- so every city
+     * lands where vanilla's Beardifier has almost no authority (0.43 blocks of
+     * near-surface zone, 0.50 blocks of noise, measured at Antioch). Something then had
+     * to plinth the buildings by hand, and what it produced was worse than what it fixed:
+     * substrate pillars up to MAX_DEPTH tall standing in open air under tree trunks.
+     *
+     * <p>SphereDensity now relaxes the factor cap inside a city footprint so the beard can
+     * do the job properly. That is NOT yet proven to remove the need for this -- the
+     * pinned-vs-relaxed comparison was never completed on equal footing -- so the code is
+     * kept and can be switched back on with -Dcubeworld.villageFix=true while that is
+     * settled. It is off by default because leaving it on masks the very thing the next
+     * measurement has to see.
+     */
     private final boolean enabled =
-            !"false".equalsIgnoreCase(System.getProperty("cubeworld.villageFix", "true"));
+            !"false".equalsIgnoreCase(System.getProperty("cubeworld.villageFix", "false"));
 
     /** Also CARVE away terrain that rises above a piece and buries it (uphill burial
      * on steep city sites -- "dirt walls around the walls"). -Dcubeworld.villageCarve=false
