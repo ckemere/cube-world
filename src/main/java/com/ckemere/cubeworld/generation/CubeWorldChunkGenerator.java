@@ -426,11 +426,54 @@ public final class CubeWorldChunkGenerator extends ChunkGenerator {
         return topology.inPillar(cx, cz, marginBlocks + 12);
     }
 
+    /**
+     * Where the ground actually is.
+     *
+     * <p>This used to answer with the Earth model — {@code round(max(heightAt, SEA_LEVEL)) + 1}
+     * — but the terrain that generates comes from the FOLDED noise router, and the two
+     * disagree. Measured over 40 columns at Antioch: mean +1, but ranging −5 to +12.
+     *
+     * <p>That gap is the root of the village problems, because
+     * {@code project_start_to_heightmap: WORLD_SURFACE_WG} positions the entire jigsaw
+     * using this number. Answer too high and the village stands on air; too low and it
+     * is buried. Vanilla's Beardifier is supposed to absorb the difference, and it does
+     * run — but its kernel radius is 12 blocks, so a 12-block error is the whole of its
+     * reach. Everything {@code VillageGroundFixer} was invented to repair — the plinths,
+     * the 48-block deburying, the dirt pillars under trees — is downstream of this one
+     * method lying about the terrain.
+     *
+     * <p>So sample the real thing: walk the folded density down the column and return the
+     * zero crossing. Falls back to the Earth model when the router is not installed yet
+     * (early boot) or the column is off the cube net.
+     */
     @Override
     public int getBaseHeight(@NotNull WorldInfo worldInfo, @NotNull Random random,
                              int x, int z, @NotNull HeightMap heightMap) {
         MapSampler sampler = maps.mapFor(worldInfo.getSeed()).sampler();
-        return (int) Math.round(Math.max(sampler.heightAt(x + 0.5, z + 0.5), SEA_LEVEL)) + 1;
+        double earth = Math.max(sampler.heightAt(x + 0.5, z + 0.5), SEA_LEVEL);
+        SphereDensity sd = SphereDensity.LAST;
+        net.minecraft.world.level.levelgen.NoiseRouter router = routerFor(worldInfo);
+        if (sd != null && router != null) {
+            double y = TerrainEval.surfaceY(sd, router, x + 0.5, z + 0.5, earth);
+            if (!Double.isNaN(y)) {
+                return (int) Math.round(y) + 1;
+            }
+        }
+        return (int) Math.round(earth) + 1;
+    }
+
+    /** The live folded router for this world, or null before the hook installs it. */
+    private net.minecraft.world.level.levelgen.NoiseRouter routerFor(WorldInfo worldInfo) {
+        try {
+            org.bukkit.World w = org.bukkit.Bukkit.getWorld(worldInfo.getUID());
+            if (w == null) {
+                return null;
+            }
+            return ((org.bukkit.craftbukkit.CraftWorld) w).getHandle()
+                    .getChunkSource().randomState().router();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     @Override

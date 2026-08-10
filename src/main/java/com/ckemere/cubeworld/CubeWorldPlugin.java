@@ -128,6 +128,12 @@ public final class CubeWorldPlugin extends JavaPlugin {
         // floats and no villager can walk into deep water.
         getServer().getPluginManager().registerEvents(
                 new com.ckemere.cubeworld.city.VillageGroundFixer(this), this);
+        // Generation-time support: hooks AsyncStructureGenerateEvent so a village piece
+        // is founded as it is written, with the block's provenance known rather than
+        // reconstructed afterwards. Run with -Dcubeworld.villageFix=false to disable the
+        // old chunk-load repair and see this one's output on its own.
+        getServer().getPluginManager().registerEvents(
+                new com.ckemere.cubeworld.city.VillageFoundationTransformer(this), this);
         // Enrich ores where terrain corresponds to real Earth mineral provinces.
         oreEnrichment = new com.ckemere.cubeworld.generation.OreEnrichment(this);
         getServer().getPluginManager().registerEvents(oreEnrichment, this);

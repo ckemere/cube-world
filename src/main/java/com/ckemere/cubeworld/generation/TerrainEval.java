@@ -424,7 +424,10 @@ public final class TerrainEval {
      * zero crossing. Remaining difference from a real chunk is the surface
      * rules and carvers, which run afterwards and can only remove material.
      */
-    private static double surfaceY(SphereDensity sd, NoiseRouter router,
+    /** The Y where the FOLDED density crosses zero -- the terrain that actually
+     * generates, as opposed to the Earth model's opinion of it. Public so the chunk
+     * generator can answer getBaseHeight with the real surface. */
+    public static double surfaceY(SphereDensity sd, NoiseRouter router,
                                    double wx, double wz, double target) {
         int x0 = Math.floorDiv((int) Math.floor(wx), CELL_XZ) * CELL_XZ;
         int z0 = Math.floorDiv((int) Math.floor(wz), CELL_XZ) * CELL_XZ;

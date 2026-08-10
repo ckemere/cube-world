@@ -131,6 +131,22 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage(Component.text("CubeWorld: pong!", NamedTextColor.GREEN));
                 return true;
             }
+            case "villagepreview" -> {
+                org.bukkit.World vw = null;
+                for (org.bukkit.World w : org.bukkit.Bukkit.getWorlds()) {
+                    if (w.getEnvironment() == org.bukkit.World.Environment.NORMAL) {
+                        vw = w;
+                        break;
+                    }
+                }
+                if (vw == null || args.length < 3) {
+                    sender.sendMessage(Component.text(
+                            "Usage: /cubeworld villagepreview <chunkX> <chunkZ> [list|<index>] [mark]",
+                            NamedTextColor.RED));
+                    return true;
+                }
+                return com.ckemere.cubeworld.city.VillageFixPreview.run(sender, vw, args);
+            }
             case "prospector" -> {
                 if (!(sender instanceof Player p)) {
                     sender.sendMessage(Component.text("Players only.", NamedTextColor.RED));
@@ -811,6 +827,32 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                             "biome at (%d,%d,%d): %s", bx, by, bz, b.getKey()), NamedTextColor.AQUA));
                 } catch (NumberFormatException e) {
                     sender.sendMessage(Component.text("Coordinates must be integers.", NamedTextColor.RED));
+                }
+                return true;
+            }
+            case "villagedebug" -> {
+                // Ground truth for tools/playermap/structures/village_placement.py:
+                // replay vanilla's village decision for one chunk with the real
+                // engine objects. Reads only getBaseHeight + the biome source, so
+                // it loads no chunks. Op-only (not in PUBLIC_SUBCOMMANDS).
+                if (args.length != 3) {
+                    sender.sendMessage(Component.text(
+                            "Usage: /cubeworld villagedebug <chunkX> <chunkZ>", NamedTextColor.RED));
+                    return true;
+                }
+                try {
+                    int qcx = Integer.parseInt(args[1]);
+                    int qcz = Integer.parseInt(args[2]);
+                    for (String line : com.ckemere.cubeworld.seam.nms.VillagePlacementProbe.probe(
+                            org.bukkit.Bukkit.getWorlds().get(0), qcx, qcz)) {
+                        sender.sendMessage(Component.text(line, NamedTextColor.AQUA));
+                    }
+                } catch (NumberFormatException e) {
+                    sender.sendMessage(Component.text("Chunk coordinates must be integers.",
+                            NamedTextColor.RED));
+                } catch (RuntimeException e) {
+                    sender.sendMessage(Component.text("villagedebug failed: " + e,
+                            NamedTextColor.RED));
                 }
                 return true;
             }

@@ -100,6 +100,107 @@ public final class SphereDensity {
             Double.parseDouble(System.getProperty("cubeworld.factorPinned", "64.0"));
 
     /**
+     * Factor cap inside a city footprint, and the radii over which it blends back to
+     * {@link #FACTOR_PINNED}.
+     *
+     * <p>Villages need flat land, and flat low land is exactly what the freeboard rule
+     * pins hardest — so essentially every city sits at the 64 cap by construction, where
+     * the near-surface zone is 0.43 blocks. Two things follow, both measured at Antioch:
+     * vanilla's Beardifier cannot move the surface (its whole contribution is worth well
+     * under a block at that stiffness), so village pieces hang over rolling ground and
+     * something has to plinth them afterwards; and cave subtraction applies immediately
+     * below the surface, carving voids through the ground the village stands on.
+     *
+     * <p>Relaxing the cap to ~10 inside the footprint restores a ~2.5 block near-surface
+     * zone and hands the beard back its authority, so the terrain meets the buildings
+     * instead of being patched to. The blend to the pinned value is deliberately wider
+     * than the footprint: the coastline outside must stay pinned (that rule exists
+     * because a transect through the Antioch shore generated 7 of 11 land points as open
+     * sea without it), and a hard edge would leave a visible terrace at the village rim.
+     */
+    private static final double CITY_FACTOR_CAP =
+            Double.parseDouble(System.getProperty("cubeworld.cityFactorCap", "10.0"));
+
+    /** Full relaxation out to here: jigsaw reach (80) plus the beard kernel (12). */
+    private static final double CITY_RELAX_INNER =
+            Double.parseDouble(System.getProperty("cubeworld.cityRelaxInner", "96.0"));
+
+    /** Blended back to the pinned cap by here. */
+    private static final double CITY_RELAX_OUTER =
+            Double.parseDouble(System.getProperty("cubeworld.cityRelaxOuter", "192.0"));
+
+    /** City centres in world blocks, loaded once from the bundled anchor list. */
+    private static final int[][] CITY_XZ = loadCities();
+
+    private static int[][] loadCities() {
+        java.util.List<int[]> out = new java.util.ArrayList<>();
+        try (java.io.InputStream in =
+                     SphereDensity.class.getClassLoader().getResourceAsStream("cities_anchor.csv")) {
+            if (in == null) {
+                return new int[0][];
+            }
+            try (java.io.BufferedReader br = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(in, java.nio.charset.StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    line = line.trim();
+                    if (line.isEmpty() || line.startsWith("#")) {
+                        continue;
+                    }
+                    String[] p = line.split(",");
+                    if (p.length < 2) {
+                        continue;
+                    }
+                    try {
+                        out.add(new int[] {Integer.parseInt(p[0].trim()),
+                                           Integer.parseInt(p[1].trim())});
+                    } catch (NumberFormatException ignored) {
+                        // header or malformed row
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            return new int[0][];
+        }
+        return out.toArray(new int[0][]);
+    }
+
+    /** Smoothstep 0..1. */
+    private static double smoothstep(double t) {
+        double u = Math.clamp(t, 0.0, 1.0);
+        return u * u * (3 - 2 * u);
+    }
+
+    /**
+     * The factor cap at a column: relaxed inside a city, pinned outside, smoothly
+     * blended between. Squared distances only — this runs per density sample.
+     */
+    static double factorCapAt(int blockX, int blockZ) {
+        if (CITY_XZ.length == 0 || CITY_FACTOR_CAP >= FACTOR_PINNED) {
+            return FACTOR_PINNED;
+        }
+        double outer2 = CITY_RELAX_OUTER * CITY_RELAX_OUTER;
+        double best2 = Double.MAX_VALUE;
+        for (int[] c : CITY_XZ) {
+            double dx = blockX - c[0];
+            double dz = blockZ - c[1];
+            double d2 = dx * dx + dz * dz;
+            if (d2 < best2) {
+                best2 = d2;
+                if (best2 <= CITY_RELAX_INNER * CITY_RELAX_INNER) {
+                    return CITY_FACTOR_CAP;         // well inside: fully relaxed
+                }
+            }
+        }
+        if (best2 >= outer2) {
+            return FACTOR_PINNED;
+        }
+        double t = (Math.sqrt(best2) - CITY_RELAX_INNER)
+                / (CITY_RELAX_OUTER - CITY_RELAX_INNER);
+        return CITY_FACTOR_CAP + (FACTOR_PINNED - CITY_FACTOR_CAP) * smoothstep(t);
+    }
+
+    /**
      * Water depth (blocks) at which the seabed may carry its full relief-driven
      * character. Below this it is damped toward flat, because the failure the
      * old landGate was written for is real: relief is max|dh| over a ~9 km
@@ -357,7 +458,7 @@ public final class SphereDensity {
         // printing the relief term alone once sent an investigation the wrong way.
         double freeboard = natural - EarthMapSpec.SEA_LEVEL;
         double f = freeboard < 0 ? fRelief
-                : Math.min(FACTOR_PINNED,
+                : Math.min(factorCapAt(bx, bz),
                         Math.max(fRelief, FREEBOARD_TIGHTNESS / Math.max(freeboard, 1.0)));
         return String.format(java.util.Locale.ROOT,
                 "natural=%.2f | relief=%.0fm landGate=%.2f reliefNorm=%.2f "
@@ -927,7 +1028,7 @@ public final class SphereDensity {
             // divisor at 1 gives it FACTOR_PINNED (~0.5 blocks of wobble) and a
             // crisp waterline; genuinely submerged columns still take the
             // seabed path above.
-            return Math.min(FACTOR_PINNED,
+            return Math.min(factorCapAt(c.blockX(), c.blockZ()),
                     Math.max(relief, FREEBOARD_TIGHTNESS / Math.max(freeboard, 1.0)));
         }
 
@@ -1128,7 +1229,7 @@ public final class SphereDensity {
             fillColumn(c.blockX(), c.blockZ());
             double freeboard = reliefCache.get()[4] - EarthMapSpec.SEA_LEVEL;
             if (freeboard >= 0.0) {
-                return Math.min(FACTOR_PINNED,
+                return Math.min(factorCapAt(c.blockX(), c.blockZ()),
                         Math.max(v, FREEBOARD_TIGHTNESS / Math.max(freeboard, 1.0)));
             }
             // SYMMETRIC UNDERWATER CASE. The old landGate simply pinned the whole
