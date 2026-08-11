@@ -1,6 +1,6 @@
 # CubeWorld
 
-A Paper plugin that makes a Minecraft world behave like the surface of a planet: walk west across the international date line and you arrive in the far east of the map; walk over a pole and you come down the other side. No more invisible walls or endless procedurally-generated frontier — one finite, seamless, wrap-around world.
+A Paper plugin that makes a Minecraft world behave like the surface of a planet: walk west across the international date line and you arrive in the far east of the map; walk over a pole and you come down the other side. No more invisible walls or endless procedurally-generated frontier — one finite, seamless, wrap-around world. And the planet is ours: the map is generated from real Earth data at roughly one kilometre per block.
 
 ## How it works
 
@@ -11,28 +11,51 @@ Crossing an edge is handled with two cooperating mechanisms, both entirely serve
 - **Teleportation** — when a player walks across the boundary of one face, the server teleports them to the corresponding position on the adjacent face, rotating their orientation and velocity to match how the two faces meet on the cube. Done at the right moment, the transition is imperceptible.
 - **Virtual blocks** — teleportation alone would still let you *see* the edge of the world. To make the seam invisible, the server sends packet-level "virtual" copies of the terrain from the adjacent face into the visible margin beyond each edge, transformed to line up with the local face's coordinates. The blocks the client renders past a boundary are a live view of the neighboring face; they exist only on the wire, never in the world save.
 
-Because everything is done with standard teleports and block packets, **a stock vanilla client works unmodified** — no client mod, no resource pack.
+Because everything is done with standard teleports and block packets, **a stock vanilla client works unmodified** — no client mod, no resource pack. That constraint runs through every feature below.
+
+## Features
+
+### The seams
+
+- **Seam teleportation** — players and all other entities crossing a stitched edge teleport with rotated position, view, and velocity. Walking east around the equator or south over a pole loops seamlessly.
+- **Mirrored margins** — 96 blocks of terrain beyond every stitched edge render as a live view of the far side. Edits near a seam propagate into the mirrors, and edits *in* a mirror forward to the real blocks, with block states rotated appropriately.
+- **Entity mirrors** — entities near a seam get synced clone puppets in the margin, so a creeper stalking you across the date line is visible before it crosses; damage to a clone forwards to its source.
+- **Liquid continuity** — water and lava flow and drain across seams like anywhere else.
+- **Portal linking** — nether portals preserve the cube-surface position, so a portal links to "the same place" in the other world rather than vanilla's coordinate scatter.
+- **Corner pillars** — full-height bedrock cylinders at the eight cube vertices, the one place where consistent rendering is geometrically impossible.
+- **Cube-aware locator bar** — the dots for other players point along the cube geodesic, not through the flat map.
+
+### The planet
+
+- **Real Earth terrain** — elevation and coastlines from Earth rasters folded onto the cube (~1 km/block), with vanilla's terrain router shaped by the real heightfield: continents, oceans, beaches, highlands, snowcaps, aquifers and caves underneath.
+- **Real Earth biomes** — a climate-driven biome function places deserts, jungles, taigas and the rest where Earth actually has them.
+- **1:8 cube nether** — the nether is its own cube at one-eighth scale: a true 8×-travel nether with vanilla nether terrain, biomes, lava seas and fortresses, seamless across its own edges.
+- **Strongholds on the sphere** — the stronghold ring is placed in cube-aware positions so End portals are reachable from anywhere on the planet.
+- **Spawn in the Rift Valley** — new players start at Addis Ababa, Ethiopia; humanity walks out of Africa again.
+
+### Civilization
+
+- **30 historical cities** — from Rome and Baghdad to Teotihuacan and Kilwa, vanilla villages generate at historically attested locations, sized by importance (large and huge tiers). Each city is its own structure registry entry, registered in code at boot — `/locate structure cubeworld:antioch` works, no datapack involved.
+- **Forest villages** — vanilla ships no village for temperate forests, which would leave Europe and eastern North America empty; CubeWorld widens plains villages into the deciduous biomes so the natural settlement map matches history too.
+- **The teleport network** — every city hosts a teleport station (a reskinned-lodestone pad, built as its chunk first loads). Stations form two rings spanning all 30 cities; craft a teleporter, stand on a pad, and travel costs lapis scaled by distance.
+- **Master Traders** — rare traders with exceptional goods visit the special cities.
+
+### Riches and exploration
+
+- **Earth mineral provinces** — ore generation is enriched where the terrain corresponds to real mineral belts, layered on top of vanilla's own placement.
+- **The Prospector** — a tuned brush whose enchantment glint blinks faster the closer you are to a province of its ore: a working ore detector rendered entirely with vanilla client affordances.
+- **Exploration advancements** — custom achievements for reaching the poles, summiting the great peaks, and circumnavigating the planet.
+
+### Tooling
+
+- **Live web map** (`tools/playermap`) — a spinning-globe and per-face flat view of the planet with live players, biomes, structures, the city network, and End portals; click for coordinates.
+- **Offline world tools** — region-file renderers and probes (`tools/voxcam.py` and friends) for inspecting terrain without a client.
 
 ## Geometry notes
 
 - Each cube edge joins two faces with a specific rotation (0°, 90°, 180°, or 270°); positions, look angles, and velocities are remapped accordingly on crossing.
 - The eight cube corners are the degenerate points (analogous to the poles of a map projection): three faces meet, and the wrap-around margin there needs special handling.
 - "Wraps at the international date line and poles" falls out naturally: travel in any fixed direction eventually returns you to your starting point, just as on a globe.
-
-## Status
-
-The core topology works end to end, now with map-driven terrain (per-chunk height + biome cells per face, rolling continents with oceans, beaches, highlands, and snowcaps):
-
-- **Geometry core** (`geometry/`, pure Java, unit-tested): the cross layout, the 7 stitched cube edges with their crossing transforms, margin/mirror mappings, and the 14 cube-vertex pillar sites.
-- **Seam teleportation**: players and all other entities crossing a stitched edge teleport with rotated position, view, and velocity. Walking east around the equator or south over the pole loops seamlessly.
-- **Mirrored margins**: 96 blocks of terrain beyond every stitched edge generate as a live view of the far side (matching biomes); player edits near seams propagate into mirrors, and edits *in* mirrors forward to the real blocks (block states rotated appropriately).
-- **Corner pillars**: full-height immutable bedrock cylinders at every net image of the 8 cube vertices, where consistent rendering is geometrically impossible.
-- **Virtual entities v1**: real entities near seams get AI-less clone puppets in the margin, synced every tick; damage to a clone forwards to its source. Player clones not yet implemented.
-- **Map-spec generation**: terrain is specified as a 50×50 grid of chunk cells per face, each with a height and terrain theme (`MapSpec`). Heights interpolate bilinearly between cell centers, and the interpolation neighborhood reaches *across* stitched seams through the edge transforms, so terrain is continuous over every boundary. The demo map samples a smooth function of the cube-surface embedding (`CubeSurface`: face + local → 3D point), which makes seam agreement automatic — the same plumbing will consume real Earth rasters (cube point → lat/lon → data).
-- **Vanilla structures**: villages, mineshafts, and the rest generate on face chunks with an 8-chunk buffer from every stitched edge (jigsaw sprawl is capped at 80 blocks, so no piece can reach a margin); near-seam structures appear across the seam through the mirror pipeline with correctly rotated block states.
-- **Cube-shaped nether**: `world_nether` runs the same topology — an open hellscape with its own height field, the five nether biomes as continuous cube-surface fields, lava seas, and gated fortresses/bastions. Portal travel preserves the cube-surface position (no vanilla /8 coordinate scatter), so a portal links to "the same place" in the other world; lava flows and drains across nether seams like water does in the overworld. True 8× nether travel awaits a world with 1:8 face sizes.
-
-Next up: player clones across seams, sound/effect mirroring, and the Earth-map chunk generator (quadrilateralized spherical cube projection over real elevation/biome data).
 
 ## Seeds and randomness on a folded cube
 
@@ -45,34 +68,48 @@ three sanctioned forms:
    height, caves, and cave biomes. Each seed picks a *different continuous
    function of the cube surface*, so every seed's world is seam-consistent by
    construction. Same seed, same planet.
-2. **Position-keyed hashes** (future) — per-feature placement can hash
+2. **Position-keyed hashes** — per-feature placement hashes
    `(seed, source-resolved cell)`; margins then mirror features automatically.
 3. **Chunk-seeded vanilla randomness** — used only for vanilla decorations
    (trees, ores, cave flora), which run exclusively on face chunks away from
    seams and pillars.
 
-The eventual Earth map ignores the seed for shape — data is data — and keeps
-it for caves and decoration detail. The dev server pins `level-seed=20260712`
-for reproducibility.
+The Earth map ignores the seed for shape — data is data — and keeps it for
+caves and decoration detail. The dev server pins `level-seed=8675309` for
+reproducibility.
 
 ## Building and running
 
 ```sh
 ./gradlew build          # plugin jar in build/libs/
-./gradlew runServer      # boot a dev Paper server (26.1.2) with the plugin loaded
+./gradlew runServer      # boot a dev Paper server with the plugin loaded
 ```
 
-The dev server lives in `run/`; accept the EULA in `run/eula.txt` on first launch. Requires Java 25 (the Gradle toolchain will locate or download one automatically).
+On memory-constrained dev boxes prefer `./run-server.sh` after building — it
+launches Paper directly with a capped heap and no Gradle daemon. The dev
+server lives in `run/`; accept the EULA in `run/eula.txt` on first launch.
+Requires **Java 25 for both build and run** (the Gradle toolchain locates or
+downloads one for the build).
+
+Fresh-world bring-up is a single boot (city structures register in code),
+then `python3 tools/seed_cities.py` to build the 30 teleport stations and
+the web map's data; see `CLAUDE.md` for the operational detail.
 
 ## Commands
 
+`/cubeworld` carries a large set of subcommands; the player-relevant ones:
+
 | Command | Description |
 | --- | --- |
-| `/cubeworld ping` | Replies "CubeWorld: pong!" — pipeline smoke test. |
 | `/cubeworld face` | Which cube face you're on, with face-local coordinates. |
 | `/cubeworld tp <face>` | Teleport to a face center (`north_pole`, `eq_prime`, `eq_east`, `eq_back`, `eq_west`, `south_pole`). |
-| `/cubeworld simulate <fromX> <fromZ> <toX> <toZ> <yaw>` | Dry-run the seam crossing logic from the console. |
-| `/cubeworld mirrorpush / marginbreak / marginplace` | Debug hooks for the mirror-sync paths (console/RCON testing). |
+| `/cubeworld tpstations` | The teleport network's station registry and ring status. |
+| `/cubeworld map` | Where to reach the live web map. |
+| `/locate structure cubeworld:<city>` | Find any of the 30 historical cities by name. |
+
+The remainder (`biomeraster`, `strongholds`, `nudgeanchors`, `oreprobe`,
+`villagepreview`, …) are development and diagnostic tools — see
+`CubeWorldCommand` for the full list.
 
 ## License
 
