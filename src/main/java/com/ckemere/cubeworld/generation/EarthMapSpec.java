@@ -7,7 +7,7 @@ import com.ckemere.cubeworld.geometry.Vec3;
 
 /**
  * The Earth map: per-cell height and theme sampled on demand from real
- * {@link EarthData} rasters (GEBCO elevation, WorldClim temperature and
+ * {@link EarthData} rasters (ETOPO 2022 elevation, WorldClim temperature and
  * precipitation) through the cube-surface embedding. Continuity across seams
  * is automatic — the embedding folds continuously, so cells on either side of
  * a stitched edge map to the same lon/lat.

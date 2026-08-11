@@ -8,7 +8,7 @@ import com.ckemere.cubeworld.geometry.Vec3;
  * Turns real Earth data into vanilla's six climate parameters (roughly
  * [-1, 1]) so {@link VanillaBiomeMapper} can pick the biome vanilla would.
  * Temperature and humidity come from WorldClim, continentalness and erosion
- * from GEBCO elevation and its local ruggedness, weirdness from a smooth
+ * from ETOPO elevation and its local ruggedness, weirdness from a smooth
  * seam-safe field of the cube point, and depth from height below the surface
  * (0 at the surface, ~1 deep — where cave biomes live).
  */
@@ -888,7 +888,7 @@ public final class EarthClimate {
     /** Local relief in metres, ~0.08 deg (~9 km) around the point. */
     /**
      * Named-summit cone elevation (m) at a lon/lat — {@link PeakField}'s restored
-     * peak, or 0 away from the 6000 m summits. The GEBCO raster averages summits
+     * peak, or 0 away from the 6000 m summits. The ETOPO raster averages summits
      * down (Everest reads ~5000 m, not 8849), and {@code SphereDensity} restores
      * them for TERRAIN; the climate path must see them too or a named peak reads
      * as gentle mid-altitude ground — no jagged-peak biome, and erosion stays

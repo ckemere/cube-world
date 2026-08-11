@@ -13,6 +13,73 @@ Crossing an edge is handled with two cooperating mechanisms, both entirely serve
 
 Because everything is done with standard teleports and block packets, **a stock vanilla client works unmodified** — no client mod, no resource pack. That constraint runs through every feature below.
 
+## The planet's data
+
+The world is generated from real Earth data, compiled by `tools/cubemap` into
+a single `earth.dat` (CWE1 format: named int16 raster layers in equirectangular
+projection) plus a derived `coast.dat` (distance-to-ocean). Upstream sources:
+
+| Layer(s) | Source | Resolution used |
+| --- | --- | --- |
+| `height` (and river carving DEM) | [ETOPO 2022](https://www.ncei.noaa.gov/products/etopo-global-relief-model) global relief (NOAA NCEI, 60 arc-sec) | 2 arc-min (~3.7 km) |
+| `temp`, `precip` | [WorldClim 2.1](https://www.worldclim.org/data/worldclim21.html) bioclim BIO1 / BIO12 | 10 arc-min (~18.5 km) |
+| `river`, `river_y` | [Natural Earth 10m](https://www.naturalearthdata.com/downloads/10m-physical-vectors/) rivers + lakes centerlines | rasterized at 2 arc-min |
+| `sst` (sea-surface temperature) | [World Ocean Atlas 2023](https://www.ncei.noaa.gov/products/world-ocean-atlas) annual mean | 1° (~111 km) |
+| summits (`peaks6000.csv`) | OpenStreetMap `natural=peak` ≥ 6000 m, filtered against ETOPO | 3,126 peaks |
+
+The build recipe lives in `docs/dev-server-setup.md`; the current `earth.dat`
+is ~360 MB (loaded into RAM at boot) at roll −70°, which places all six face
+centers on interesting geography.
+
+### Scale requirements
+
+Everything scales from one number, the face edge `FACE_SIZE` (currently
+10,240 blocks = 640 chunks): km/block = 40,075 / (4 × FACE_SIZE); terrain
+height is posted once per chunk (bilinearly interpolated between postings),
+while climate and terrain-character sample the rasters per block column — so
+the height raster wants to resolve roughly one sample per block, and the
+posting grid is 16× coarser than that. Requirements at representative scales:
+
+| Scale (km/block) | Face edge | World size (chunks) | Height posting | Height raster to match | Suggested DEM | `earth.dat` (≈ RAM) |
+| --- | --- | --- | --- | --- | --- | --- |
+| ~4 | 2,560 blocks | 153,600 | 63 km | 2 arc-min | ETOPO 2022 60s (downsampled) | ~360 MB (current file works) |
+| ~2 | 5,120 blocks | 614,400 | 31 km | 1 arc-min | ETOPO 2022 60s | ~1.4 GB |
+| **~1 (current)** | **10,240 blocks** | **2,457,600** | **15.6 km** | **30 arc-sec** | **ETOPO 2022 30s** | **~5.6 GB** |
+| ~0.5 | 20,480 blocks | 9,830,400 | 7.8 km | 15 arc-sec | ETOPO 2022 15s | ~22 GB |
+| ~0.25 | 40,960 blocks | 39,321,600 | 3.9 km | 7.5 arc-sec | Copernicus GLO-90 (downsampled) | ~90 GB |
+
+(The current build ships the 2 arc-min height layer — per-column sampling at
+1 km/block is therefore slightly under-resolved, which is fine in practice
+because terrain *character* is driven by relief measured over a ~9 km
+baseline. WorldClim's 10 arc-min climate is adequate through ~1 km/block;
+finer scales would move to its 2.5 arc-min or 30 arc-sec editions. Disk for
+the generated world scales with chunk count: the current scale is ~2.4 M
+chunks across 2,400 region files.)
+
+### The algorithm, briefly
+
+**Terrain** — vanilla places every block; CubeWorld only bends the density
+graph. A hook rebinds vanilla's noise router so every horizontal-noise node
+samples at the sphere-embedded cube point (terrain, caves, aquifers, and ore
+veins become seam-consistent by construction), and vanilla's `depth` node is
+replaced with one centred on the real Earth surface — `heightAt` from the
+rasters, maxed against restored summit cones — so all downstream vanilla
+arithmetic (`sloped_cheese`, caves, aquifers) runs unchanged, merely
+re-anchored. Terrain *character* comes from real geography instead of Perlin:
+the factor (smoothing) axis follows measured 9-km relief, ridge amplitude
+appears only on real mountain flanks, and aquifers stay enabled against the
+substituted surface.
+
+**Biomes** — no hand-rolled lookup table: per block column, real climate
+values (WorldClim temperature/precipitation, distance-to-coast
+continentalness, relief-quantile erosion, elevation-floored weirdness, SST
+for oceans) are mapped into vanilla's own six-dimensional climate space and
+handed to the genuine `MultiNoiseBiomeSource` — so all overworld biomes are
+reachable and partitioned exactly as vanilla partitions them, but *where
+Earth's climate says they belong*. A handful of targeted overrides handle
+oceans by temperature, rivers from the river raster, and edge cases like
+Antarctic dryness.
+
 ## Features
 
 ### The seams

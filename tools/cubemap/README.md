@@ -54,6 +54,6 @@ python3 -m pip install --user --break-system-packages netCDF4
 
 The base map is **schematic**: Natural Earth coastlines + a latitude-band tint,
 enough to judge orientation. When we want a data-accurate biome preview, add a
-`from_raster` builder in `earthdata.py` (WorldClim/GEBCO) with the same output
+`from_raster` builder in `earthdata.py` (WorldClim/ETOPO) with the same output
 contract — an `H×W×3` uint8 array, lon −180..180 across, lat 90..−90 down — and
 everything downstream works unchanged.

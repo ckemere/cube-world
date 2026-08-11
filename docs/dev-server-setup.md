@@ -243,7 +243,7 @@ code and the existing files' headers, and both download URLs were checked live
 
 ### What the files actually contain
 
-`run/earth.dat` — CWE1, roll **-70.0** (the locked orientation), **5 layers**, 343 MB:
+`run/earth.dat` — CWE1, roll **-70.0** (the locked orientation), **6 layers** (incl. `sst`), 359 MB:
 
 | layer | grid | scale | source |
 |---|---|---|---|
@@ -368,10 +368,9 @@ old terrain.
 
 ### Not part of the pipeline
 
-`tools/compact/sst.py` is an **analysis script only** — it writes no file and no
-sea-surface-temperature layer exists in `earth.dat`. It needs a WOA23 extract
-fetched by hand (the URL is in its header) and exists to study ocean-temperature
-coverage. Ignore it when rebuilding.
+(Historical note: `tools/compact/sst.py` began as an analysis-only script; the
+`sst` layer it studies is now part of `earth.dat` — see the sea-surface
+temperature section below, and `add_sst.py` for appending it in place.)
 
 ## Sea-surface temperature (the `sst` layer)
 
