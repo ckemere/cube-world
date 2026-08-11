@@ -51,6 +51,18 @@ Because everything is done with standard teleports and block packets, **a stock 
 - **Live web map** (`tools/playermap`) — a spinning-globe and per-face flat view of the planet with live players, biomes, structures, the city network, and End portals; click for coordinates.
 - **Offline world tools** — region-file renderers and probes (`tools/voxcam.py` and friends) for inspecting terrain without a client.
 
+The globe view renders the world as the cube it actually is (toggleable to a
+sphere), with every structure layer togglable and counted:
+
+![The cube-globe view: Asia and Australia on the folded cube, with structure layers](docs/screenshots/playermap-globe.png)
+
+Each face opens as a flat map — terrain or biome background, structure and
+city layers, and click-to-coordinates (with a copyable `/tp`):
+
+![Per-face flat view of the Africa/Middle-East face with the historical cities labeled](docs/screenshots/playermap-face.png)
+
+![The same face with the generated-biome background](docs/screenshots/playermap-face-biomes.png)
+
 ## Geometry notes
 
 - Each cube edge joins two faces with a specific rotation (0°, 90°, 180°, or 270°); positions, look angles, and velocities are remapped accordingly on crossing.
