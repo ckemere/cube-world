@@ -349,25 +349,12 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                 final double want = 0.92;
                 final int step = 4;
                 java.util.List<String> rows = new java.util.ArrayList<>();
-                try (java.io.InputStream in = CubeWorldCommand.class.getClassLoader()
-                        .getResourceAsStream("cities_anchor.csv")) {
-                    java.io.BufferedReader br = new java.io.BufferedReader(
-                            new java.io.InputStreamReader(in, java.nio.charset.StandardCharsets.UTF_8));
-                    String line;
-                    while ((line = br.readLine()) != null) {
-                        line = line.trim();
-                        if (line.isEmpty() || line.startsWith("#")) {
-                            continue;
-                        }
-                        String[] p = line.split(",");
-                        if (p.length < 4) {
-                            continue;
-                        }
-                        int cx = Integer.parseInt(p[0].trim());
-                        int cz = Integer.parseInt(p[1].trim());
-                        String name = p.length > 4
-                                ? com.ckemere.cubeworld.teleport.TeleportService.cityNameOf(p[4])
-                                : "?";
+                try {
+                    for (com.ckemere.cubeworld.city.CityAnchors.CityAnchor c
+                            : com.ckemere.cubeworld.city.CityAnchors.load()) {
+                        int cx = c.x();
+                        int cz = c.z();
+                        String name = c.name();
                         double base = landFraction(cx, cz, footprint, step, margin);
                         int bx = cx;
                         int bz = cz;

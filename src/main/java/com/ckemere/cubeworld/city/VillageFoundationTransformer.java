@@ -87,7 +87,7 @@ public final class VillageFoundationTransformer implements Listener {
         // never match" -- two very different bugs with identical symptoms.
         if (n <= 5) {
             plugin.getLogger().info("VillageFoundation: event #" + n
-                    + " structure=" + event.getStructure().getKey()
+                    + " structure=" + org.bukkit.Registry.STRUCTURE.getKeyOrThrow(event.getStructure())
                     + " cause=" + event.getCause()
                     + " world=" + event.getWorld().getName()
                     + " cube=" + plugin.isCubeWorld(event.getWorld())

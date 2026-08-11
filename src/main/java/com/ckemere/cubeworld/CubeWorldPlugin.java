@@ -58,6 +58,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
     private com.ckemere.cubeworld.trades.MasterTraderService masterTraders;
     private com.ckemere.cubeworld.generation.OreEnrichment oreEnrichment;
     private com.ckemere.cubeworld.generation.Prospector prospector;
+    private com.ckemere.cubeworld.city.VillagePlacementWatcher placementWatcher;
 
     public com.ckemere.cubeworld.generation.Prospector prospector() {
         return prospector;
@@ -78,14 +79,6 @@ public final class CubeWorldPlugin extends JavaPlugin {
 
     public @Nullable WorldServices servicesFor(World world) {
         return perWorld.get(world.getUID());
-    }
-
-    @Override
-    public void onLoad() {
-        // Worldgen datapacks must be on disk BEFORE datapack registries load
-        // (which happens before onEnable and cannot be reloaded at runtime).
-        // onLoad runs early enough — write the anchored-city structures now.
-        writeCitiesDatapack();
     }
 
     @Override
@@ -134,6 +127,13 @@ public final class CubeWorldPlugin extends JavaPlugin {
         // old chunk-load repair and see this one's output on its own.
         getServer().getPluginManager().registerEvents(
                 new com.ckemere.cubeworld.city.VillageFoundationTransformer(this), this);
+        // Watch-only recorder for the same event: -Dcubeworld.placeWatch=true logs every
+        // block a structure places (order, replaced block, gap below) for offline study.
+        // Only registered when enabled, so the default config pays no dispatch cost.
+        placementWatcher = new com.ckemere.cubeworld.city.VillagePlacementWatcher(this);
+        if (placementWatcher.isEnabled()) {
+            getServer().getPluginManager().registerEvents(placementWatcher, this);
+        }
         // Enrich ores where terrain corresponds to real Earth mineral provinces.
         oreEnrichment = new com.ckemere.cubeworld.generation.OreEnrichment(this);
         getServer().getPluginManager().registerEvents(oreEnrichment, this);
@@ -159,6 +159,13 @@ public final class CubeWorldPlugin extends JavaPlugin {
         masterTraders = new com.ckemere.cubeworld.trades.MasterTraderService(this, teleport);
         masterTraders.start();
         loadEarthData();
+        // Register the 30 per-city village structures (cubeworld:<city>) into
+        // the frozen STRUCTURE registry — code replaces the old cities
+        // datapack. Must precede world load; onEnable (load: STARTUP) is.
+        // Also widens vanilla village_plains biomes so natural villages settle
+        // temperate forests. Runs even with -Dcubeworld.anchorCities=false so
+        // `/place structure cubeworld:<city>` works on raw-terrain probes.
+        com.ckemere.cubeworld.seam.nms.CityStructures.registerStructures(getLogger());
         // Fold vanilla's terrain router onto the sphere BEFORE spawn chunks
         // generate. WorldInitEvent fires during world load (this STARTUP plugin
         // is already enabled), which is early enough; the first server tick is
@@ -173,6 +180,10 @@ public final class CubeWorldPlugin extends JavaPlugin {
                     com.ckemere.cubeworld.seam.nms.SphereRouterHook.install(
                             w, maps.mapFor(w.getSeed()).sampler(), FACE_SIZE,
                             maps.hasEarthData(), maps.earthData(), getLogger());
+                    // Anchor the per-city village structures at their historical
+                    // chunks — before spawn chunks, so even a city near spawn
+                    // would generate (the old first-tick hook could not).
+                    com.ckemere.cubeworld.seam.nms.CityStructures.injectWorld(w, getLogger());
                 } else if (isCubeWorld(w) && w.getEnvironment() == World.Environment.NETHER) {
                     // Cube nether: fold vanilla nether density (BlendedNoise + biome
                     // sampler) onto the 1:8 nether cube so real netherrack terrain,
@@ -263,54 +274,6 @@ public final class CubeWorldPlugin extends JavaPlugin {
         getLogger().info("No earth.dat found; using demo terrain.");
     }
 
-    /**
-     * Copy the bundled anchored-city worldgen datapack into the overworld folder
-     * so it is present when the world loads (worldgen registries freeze then and
-     * cannot be reloaded at runtime, unlike the advancement datapack).
-     */
-    private void writeCitiesDatapack() {
-        try {
-            java.nio.file.Path root = new java.io.File(getServer().getWorldContainer(), "world")
-                    .toPath().resolve("datapacks").resolve("cubeworld_cities");
-            java.util.List<String> files = new java.util.ArrayList<>();
-            files.add("pack.mcmeta");
-            files.add("data/cubeworld/tags/worldgen/biome/anchor.json");
-            // Merged (replace:false) into vanilla's village_plains biome tag, so
-            // the temperate forests can hold villages. Minecraft ships no forest
-            // village at all, which meant whole correctly-classified continents
-            // -- eastern North America, most of Europe -- were settlement-free:
-            // measured, the deciduous group plus sunflower_plains is 4.72% of the
-            // surface against 10.38% that was village-eligible in total.
-            files.add("data/minecraft/tags/worldgen/biome/has_structure/village_plains.json");
-            for (String pool : new String[] {"plains", "desert", "savanna"}) {
-                for (String size : new String[] {"large", "huge"}) {
-                    files.add("data/cubeworld/worldgen/structure/" + pool + "_" + size + ".json");
-                    files.add("data/cubeworld/worldgen/structure_set/" + pool + "_" + size + ".json");
-                }
-            }
-            int wrote = 0;
-            for (String rel : files) {
-                try (java.io.InputStream in = getResource("anchor_datapack/" + rel)) {
-                    if (in == null) {
-                        getLogger().warning("Cities datapack: missing bundled resource " + rel);
-                        continue;
-                    }
-                    byte[] data = in.readAllBytes();
-                    java.nio.file.Path dst = root.resolve(rel);
-                    java.nio.file.Files.createDirectories(dst.getParent());
-                    if (java.nio.file.Files.exists(dst)
-                            && java.util.Arrays.equals(data, java.nio.file.Files.readAllBytes(dst))) {
-                        continue;
-                    }
-                    java.nio.file.Files.write(dst, data);
-                    wrote++;
-                }
-            }
-            getLogger().info("Cities datapack: " + wrote + " file(s) updated at " + root);
-        } catch (Exception e) {
-            getLogger().warning("Cities datapack write failed (" + e + "); anchored cities absent.");
-        }
-    }
 
     private void setupWorld(World world) {
         if (world.getEnvironment() == World.Environment.NORMAL && maps.hasEarthData()) {
@@ -322,8 +285,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
         if (world.getEnvironment() == World.Environment.NORMAL) {
             com.ckemere.cubeworld.seam.nms.StrongholdSphereHook.install(
                     world, geometry, topology, MARGIN_BLOCKS, this, getLogger());
-            // must run AFTER the stronghold hook (which sets hasGeneratedPositions)
-            com.ckemere.cubeworld.seam.nms.VillageAnchorHook.install(world, this, getLogger());
+            // (city villages are anchored earlier, at WorldInit — CityStructures)
         }
         // the nether cube is 1:8, so its seams run on the nether topology/mirrors
         boolean nether = world.getEnvironment() == World.Environment.NETHER;
@@ -365,6 +327,9 @@ public final class CubeWorldPlugin extends JavaPlugin {
         }
         if (teleport != null) {
             teleport.save();
+        }
+        if (placementWatcher != null) {
+            placementWatcher.close();
         }
     }
 

@@ -390,33 +390,13 @@ public final class TeleportService {
                 built.add(s.name());
             }
         }
-        try (InputStream in = plugin.getResource("cities_anchor.csv")) {
-            if (in == null) {
-                return;
+        for (com.ckemere.cubeworld.city.CityAnchors.CityAnchor c
+                : com.ckemere.cubeworld.city.CityAnchors.load()) {
+            if (built.contains(c.name())) {
+                continue;                            // already built in a prior session
             }
-            try (BufferedReader br = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = br.readLine()) != null) {
-                    line = line.trim();
-                    if (line.isEmpty() || line.startsWith("#")) {
-                        continue;
-                    }
-                    String[] p = line.split(",");
-                    if (p.length < 5) {
-                        continue;
-                    }
-                    String name = cityNameOf(p[4]);
-                    if (built.contains(name)) {
-                        continue;                    // already built in a prior session
-                    }
-                    int x = Integer.parseInt(p[0].trim());
-                    int z = Integer.parseInt(p[1].trim());
-                    pendingByChunk.computeIfAbsent(chunkKey(x >> 4, z >> 4), k -> new ArrayList<>())
-                            .add(new PendingCity(x, z, name));
-                }
-            }
-        } catch (Exception e) {
-            plugin.getLogger().warning("Teleport: failed to seed cities (" + e + ").");
+            pendingByChunk.computeIfAbsent(chunkKey(c.x() >> 4, c.z() >> 4), k -> new ArrayList<>())
+                    .add(new PendingCity(c.x(), c.z(), c.name()));
         }
     }
 

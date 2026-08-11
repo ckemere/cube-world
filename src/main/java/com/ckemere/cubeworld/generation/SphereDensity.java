@@ -133,36 +133,9 @@ public final class SphereDensity {
     private static final int[][] CITY_XZ = loadCities();
 
     private static int[][] loadCities() {
-        java.util.List<int[]> out = new java.util.ArrayList<>();
-        try (java.io.InputStream in =
-                     SphereDensity.class.getClassLoader().getResourceAsStream("cities_anchor.csv")) {
-            if (in == null) {
-                return new int[0][];
-            }
-            try (java.io.BufferedReader br = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(in, java.nio.charset.StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = br.readLine()) != null) {
-                    line = line.trim();
-                    if (line.isEmpty() || line.startsWith("#")) {
-                        continue;
-                    }
-                    String[] p = line.split(",");
-                    if (p.length < 2) {
-                        continue;
-                    }
-                    try {
-                        out.add(new int[] {Integer.parseInt(p[0].trim()),
-                                           Integer.parseInt(p[1].trim())});
-                    } catch (NumberFormatException ignored) {
-                        // header or malformed row
-                    }
-                }
-            }
-        } catch (Exception ignored) {
-            return new int[0][];
-        }
-        return out.toArray(new int[0][]);
+        return com.ckemere.cubeworld.city.CityAnchors.load().stream()
+                .map(c -> new int[] {c.x(), c.z()})
+                .toArray(int[][]::new);
     }
 
     /** Smoothstep 0..1. */
