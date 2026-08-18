@@ -155,6 +155,29 @@ def rcon(cmds):
 
 
 def get_players():
+    # Ask the plugin first: `cubeworld mapplayers` applies the hide mechanics
+    # (sneaking, invisibility, mob head/pumpkin, spectator) and each player's
+    # chosen precision (positions pre-quantized, r = uncertainty radius).
+    try:
+        res = rcon(["cubeworld mapplayers"])[0]
+        i = res.find("[")
+        if i >= 0:
+            out = []
+            for e in json.loads(res[i:]):
+                cp = world_to_cube(float(e["x"]), float(e["z"]))
+                if cp is None:
+                    continue
+                p, face = cp
+                m = {"name": str(e.get("name", "?")), "p": [p[0], p[1], p[2]],
+                     "face": face, "x": round(e["x"]), "z": round(e["z"]),
+                     "r": int(e.get("r", 0))}
+                if e.get("y") is not None:
+                    m["y"] = round(e["y"])
+                out.append(m)
+            return out
+    except Exception:
+        pass
+    # Legacy fallback (plugin without mapplayers): raw entity positions.
     try:
         lst = rcon(["list"])[0]
     except Exception:
@@ -182,7 +205,7 @@ def get_players():
             continue
         p, face = cp
         out.append({"name": name, "p": [p[0], p[1], p[2]], "face": face,
-                    "x": round(x), "y": round(y), "z": round(z)})
+                    "x": round(x), "y": round(y), "z": round(z), "r": 0})
     return out
 
 
@@ -238,8 +261,14 @@ MARKER_OVERLAY = r"""
       var el=els[pl.name];
       if(!el){el=document.createElement('div');el.className='pmk';
         el.innerHTML='<div class="dot"></div><div class="lbl"></div>';
-        cont.appendChild(el);els[pl.name]=el;
-        el.querySelector('.lbl').textContent=pl.name;}
+        cont.appendChild(el);els[pl.name]=el;}
+      // marker size follows the player's precision setting: r is the
+      // uncertainty radius in blocks (0 = exact); fuzzy dots for coarse.
+      var rr=pl.r||0, px=rr>=256?34:(rr>0?22:13);
+      var dot=el.querySelector('.dot');
+      dot.style.width=px+'px';dot.style.height=px+'px';
+      dot.style.opacity=rr>0?0.6:1;
+      el.querySelector('.lbl').textContent=pl.name+(rr>0?' ±'+rr:'');
       seen[pl.name]=1;
       if(c[3]>0 && vz>0.15){
         var sx=(c[0]/c[3]*0.5+0.5)*cv.clientWidth;

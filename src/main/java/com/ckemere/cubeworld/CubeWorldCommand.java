@@ -105,7 +105,7 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
      * later defaults to admin-only rather than silently becoming public.
      */
     private static final java.util.Set<String> PUBLIC_SUBCOMMANDS =
-            java.util.Set.of("ping", "oreprobe", "findlatlon");
+            java.util.Set.of("ping", "oreprobe", "findlatlon", "mapprecision");
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command,
@@ -958,6 +958,83 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
             case "map" -> {
                 return handleMap(sender, args);
             }
+            case "mapprecision" -> {
+                if (!(sender instanceof Player p)) {
+                    sender.sendMessage(Component.text("Players only.", NamedTextColor.RED));
+                    return true;
+                }
+                if (args.length < 2) {
+                    var cur = com.ckemere.cubeworld.map.MapPrivacy.precision(p);
+                    sender.sendMessage(Component.text(
+                            "Your web-map precision is " + cur.name().toLowerCase(Locale.ROOT)
+                                    + (cur.cell > 0 ? " (within ~" + cur.cell + " blocks)" : " (exact)")
+                                    + ". Usage: /cubeworld mapprecision <high|medium|low>",
+                            NamedTextColor.AQUA));
+                    return true;
+                }
+                com.ckemere.cubeworld.map.MapPrivacy.Precision prec;
+                try {
+                    prec = com.ckemere.cubeworld.map.MapPrivacy.Precision
+                            .valueOf(args[1].toUpperCase(Locale.ROOT));
+                } catch (IllegalArgumentException e) {
+                    sender.sendMessage(Component.text(
+                            "Usage: /cubeworld mapprecision <high|medium|low>", NamedTextColor.RED));
+                    return true;
+                }
+                com.ckemere.cubeworld.map.MapPrivacy.setPrecision(p, prec);
+                sender.sendMessage(Component.text(switch (prec) {
+                    case HIGH -> "Web map shows your exact position.";
+                    case MEDIUM -> "Web map shows your position within ~128 blocks.";
+                    case LOW -> "Web map shows your position within ~512 blocks.";
+                }, NamedTextColor.GREEN));
+                sender.sendMessage(Component.text(
+                        "Sneaking, invisibility, or wearing a mob head / carved pumpkin"
+                                + " hides you from the map entirely.",
+                        NamedTextColor.GRAY));
+                return true;
+            }
+            case "mapplayers" -> {
+                // Machine-readable feed for the map website (tools/playermap):
+                // hide mechanics applied, positions quantized per player setting.
+                StringBuilder json = new StringBuilder("[");
+                for (Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
+                    org.bukkit.World w = p.getWorld();
+                    if (w.getEnvironment() != org.bukkit.World.Environment.NORMAL
+                            || !(w.getGenerator()
+                                    instanceof com.ckemere.cubeworld.generation.CubeWorldChunkGenerator)) {
+                        continue;               // only the cube overworld is on the map
+                    }
+                    if (com.ckemere.cubeworld.map.MapPrivacy.isHiddenFromMap(p)) {
+                        continue;
+                    }
+                    var prec = com.ckemere.cubeworld.map.MapPrivacy.precision(p);
+                    var loc = p.getLocation();
+                    int x = loc.getBlockX();
+                    int z = loc.getBlockZ();
+                    if (json.length() > 1) {
+                        json.append(',');
+                    }
+                    json.append("{\"name\":\"")
+                            .append(p.getName().replace("\\", "").replace("\"", ""))
+                            .append('"');
+                    if (prec.cell > 0) {
+                        json.append(",\"x\":")
+                                .append(com.ckemere.cubeworld.map.MapPrivacy.quantize(x, prec.cell))
+                                .append(",\"z\":")
+                                .append(com.ckemere.cubeworld.map.MapPrivacy.quantize(z, prec.cell))
+                                .append(",\"r\":").append(prec.cell / 2);
+                    } else {
+                        json.append(",\"x\":").append(x)
+                                .append(",\"y\":").append(loc.getBlockY())
+                                .append(",\"z\":").append(z)
+                                .append(",\"r\":0");
+                    }
+                    json.append('}');
+                }
+                json.append(']');
+                sender.sendMessage(Component.text(json.toString()));
+                return true;
+            }
             case "genprof" -> {
                 if (args.length > 1 && args[1].equalsIgnoreCase("reset")) {
                     com.ckemere.cubeworld.generation.GenProfiler.reset();
@@ -1665,19 +1742,31 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command,
                                       @NotNull String alias, String @NotNull [] args) {
         List<String> out = new ArrayList<>();
+        // Completions must not reveal more than the sender may run: non-admins
+        // see exactly the public subcommands, admins the curated working set.
+        boolean admin = sender.hasPermission("cubeworld.admin");
         if (args.length == 1) {
-            for (String sub : new String[] {"ping", "face", "tp", "simulate", "biomeat",
-                    "biomeraster", "refreshmap", "map", "strongholds", "tpcore",
-                    "tpstations"}) {
+            String[] subs = admin
+                    ? new String[] {"ping", "face", "tp", "simulate", "biomeat",
+                            "biomeraster", "refreshmap", "map", "mapprecision",
+                            "strongholds", "tpcore", "tpstations"}
+                    : new java.util.TreeSet<>(PUBLIC_SUBCOMMANDS).toArray(new String[0]);
+            for (String sub : subs) {
                 if (sub.startsWith(args[0].toLowerCase(Locale.ROOT))) {
                     out.add(sub);
                 }
             }
-        } else if (args.length == 2 && args[0].equalsIgnoreCase("tp")) {
+        } else if (args.length == 2 && args[0].equalsIgnoreCase("tp") && admin) {
             for (CubeFace face : CubeFace.values()) {
                 String name = face.name().toLowerCase(Locale.ROOT);
                 if (name.startsWith(args[1].toLowerCase(Locale.ROOT))) {
                     out.add(name);
+                }
+            }
+        } else if (args.length == 2 && args[0].equalsIgnoreCase("mapprecision")) {
+            for (String level : new String[] {"high", "medium", "low"}) {
+                if (level.startsWith(args[1].toLowerCase(Locale.ROOT))) {
+                    out.add(level);
                 }
             }
         }
