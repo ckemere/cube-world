@@ -42,8 +42,11 @@ public final class MasterTrades {
         List<Supplier<MerchantRecipe>> pool = new ArrayList<>(pool());
         Collections.shuffle(pool, ThreadLocalRandom.current());
         List<MerchantRecipe> out = new ArrayList<>();
-        for (int i = 0; i < Math.min(count, pool.size()); i++) {
-            out.add(pool.get(i).get());
+        for (int i = 0; i < pool.size() && out.size() < count; i++) {
+            MerchantRecipe r = pool.get(i).get();
+            if (r != null) {                    // a good may be unavailable (no stations yet)
+                out.add(r);
+            }
         }
         return out;
     }
@@ -66,6 +69,9 @@ public final class MasterTrades {
             () -> buy(item(Material.CREEPER_HEAD), 40, 3),
             () -> buy(item(Material.PIGLIN_HEAD), 40, 3),
             () -> cityTicket(44, 4),
+            // Cheaper than a named city ticket: you don't get to pick — the
+            // destination is a real station, revealed only on travel.
+            () -> mysteryTicket(16, 4),
             () -> buyArmed(item(Material.DIAMOND_HORSE_ARMOR), 48, 8, 3),
             () -> buy(item(Material.MUSIC_DISC_PIGSTEP), 42, 3),
             () -> buy(item(Material.BUDDING_AMETHYST), 56, 2),
@@ -110,6 +116,13 @@ public final class MasterTrades {
                 ? item(Material.MAP)
                 : teleport.ticketBook(cities.get(ThreadLocalRandom.current().nextInt(cities.size())));
         return buy(result, emeralds, maxUses);
+    }
+
+    /** A ticket to a random REAL station with the destination obscured; null
+     * (trade skipped) while the network has no stations yet. */
+    private MerchantRecipe mysteryTicket(int emeralds, int maxUses) {
+        Station s = teleport.randomStation();
+        return s == null ? null : buy(teleport.mysteryTicketBook(s), emeralds, maxUses);
     }
 
     private static ItemStack item(Material m) {

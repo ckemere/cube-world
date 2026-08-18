@@ -365,18 +365,28 @@ public final class TeleporterListener implements Listener {
 
         ItemStack main = p.getInventory().getItemInMainHand();
         ItemStack off = p.getInventory().getItemInOffHand();
-        TeleportService.Station ticketTarget = svc.ticketTarget(main);
-        if (ticketTarget == null) {
-            ticketTarget = svc.ticketTarget(off);
+        // Resolve the held ticket once: its code, whether it maps to a real
+        // station, and whether it's a trader mystery ticket (destination masked
+        // in the menu until travel).
+        String code = svc.ticketCode(main);
+        boolean mystery = code != null && svc.isMysteryTicket(main);
+        if (code == null) {
+            code = svc.ticketCode(off);
+            mystery = code != null && svc.isMysteryTicket(off);
         }
+        TeleportService.Station ticketTarget = svc.stationByCode(code);
+        // A well-formed code with no station is an "uncharted" destination:
+        // hashed from the code + world seed, one-way, delivered at the surface.
+        TeleportService.Station uncharted =
+                (code != null && ticketTarget == null) ? svc.unchartedFor(code, s) : null;
         boolean hasBook = main.getType() == Material.WRITABLE_BOOK
                 || off.getType() == Material.WRITABLE_BOOK;
 
-        List<TeleportService.Offer> offers = svc.offers(s, ticketTarget);
+        List<TeleportService.Offer> offers = svc.offers(s, ticketTarget, uncharted);
         List<MerchantRecipe> recipes = new ArrayList<>();
         for (TeleportService.Offer o : offers) {
             int cost = svc.lapisCost(e.getClickedBlock().getLocation(), o.dest());
-            MerchantRecipe r = new MerchantRecipe(destIcon(o, cost), Integer.MAX_VALUE);
+            MerchantRecipe r = new MerchantRecipe(destIcon(o, cost, mystery), Integer.MAX_VALUE);
             r.addIngredient(new ItemStack(Material.LAPIS_LAZULI, Math.max(1, Math.min(64, cost))));
             recipes.add(r);
         }
@@ -429,12 +439,33 @@ public final class TeleporterListener implements Listener {
         }
         e.setCancelled(true);                       // never hand out the destination "preview" map
         if (idx >= 0 && idx < menu.offers.size()) {
-            TeleportService.Station dest = menu.offers.get(idx).dest();
+            TeleportService.Offer offer = menu.offers.get(idx);
+            TeleportService.Station dest = offer.dest();
             Location source = menu.source.location(plugin);
             plugin.getServer().getScheduler().runTask(plugin, () -> {
                 p.closeInventory();                 // returns the staged lapis to the inventory
-                svc.travel(p, source, dest);        // charges lapis + teleports
+                boolean ok = offer.kind() == TeleportService.OfferKind.UNCHARTED
+                        ? svc.travelUncharted(p, source, dest)
+                        : svc.travel(p, source, dest);
+                // Tickets are single-use: any ticket-based transfer (real
+                // station or uncharted) consumes one matching book on success.
+                if (ok && (offer.kind() == TeleportService.OfferKind.TICKET
+                        || offer.kind() == TeleportService.OfferKind.UNCHARTED)) {
+                    consumeTicket(p, dest.code());
+                }
             });
+        }
+    }
+
+    /** Remove one held book whose text carries this code (main hand, then off). */
+    private void consumeTicket(Player p, String code) {
+        for (ItemStack it : new ItemStack[] {
+                p.getInventory().getItemInMainHand(), p.getInventory().getItemInOffHand()}) {
+            if (code != null && code.equals(svc.ticketCode(it))) {
+                it.setAmount(it.getAmount() - 1);
+                p.sendMessage(Component.text("Your ticket is spent.", NamedTextColor.GRAY));
+                return;
+            }
         }
     }
 
@@ -443,22 +474,34 @@ public final class TeleporterListener implements Listener {
         open.remove(e.getPlayer().getUniqueId());
     }
 
-    private ItemStack destIcon(TeleportService.Offer o, int cost) {
+    private ItemStack destIcon(TeleportService.Offer o, int cost, boolean mystery) {
         TeleportService.Station d = o.dest();
-        ItemStack it = new ItemStack(o.kind() == TeleportService.OfferKind.TICKET
-                ? Material.PAPER : Material.FILLED_MAP);
+        boolean ticketKind = o.kind() == TeleportService.OfferKind.TICKET
+                || o.kind() == TeleportService.OfferKind.UNCHARTED;
+        boolean masked = o.kind() == TeleportService.OfferKind.UNCHARTED
+                || (o.kind() == TeleportService.OfferKind.TICKET && mystery);
+        ItemStack it = new ItemStack(o.kind() == TeleportService.OfferKind.UNCHARTED
+                ? Material.MAP : ticketKind ? Material.PAPER : Material.FILLED_MAP);
         ItemMeta m = it.getItemMeta();
-        m.displayName(Component.text(d.name(), d.city() ? NamedTextColor.GOLD : NamedTextColor.AQUA)
+        m.displayName(Component.text(masked ? "???" : d.name(),
+                masked ? NamedTextColor.LIGHT_PURPLE : d.city() ? NamedTextColor.GOLD : NamedTextColor.AQUA)
                 .decoration(TextDecoration.ITALIC, false));
-        m.lore(List.of(
-                lore(switch (o.kind()) {
-                    case RING_A -> "Ring route Ⅰ";
-                    case RING_B -> "Ring route Ⅱ";
-                    case TICKET -> "Your ticket";
-                }, NamedTextColor.GRAY),
-                lore("Cost: " + cost + " lapis", NamedTextColor.BLUE),
-                lore("Code: " + d.code(), NamedTextColor.DARK_GRAY),
-                lore("Buy (take the map) to travel", NamedTextColor.GREEN)));
+        List<Component> lore = new ArrayList<>();
+        lore.add(lore(switch (o.kind()) {
+            case RING_A -> "Ring route Ⅰ";
+            case RING_B -> "Ring route Ⅱ";
+            case TICKET -> mystery ? "Your mystery ticket" : "Your ticket";
+            case UNCHARTED -> "This code matches no station";
+        }, NamedTextColor.GRAY));
+        lore.add(lore("Cost: " + cost + " lapis", NamedTextColor.BLUE));
+        if (!masked) {
+            lore.add(lore("Code: " + d.code(), NamedTextColor.DARK_GRAY));
+        }
+        if (ticketKind) {
+            lore.add(lore("One-way — the ticket is spent", NamedTextColor.DARK_PURPLE));
+        }
+        lore.add(lore("Buy (take the map) to travel", NamedTextColor.GREEN));
+        m.lore(lore);
         it.setItemMeta(m);
         return it;
     }

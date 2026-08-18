@@ -80,7 +80,7 @@ public final class TeleportService {
     }
 
     /** A destination the menu can offer, tagged by how it was reached. */
-    public enum OfferKind { RING_A, RING_B, TICKET }
+    public enum OfferKind { RING_A, RING_B, TICKET, UNCHARTED }
 
     public record Offer(Station dest, OfferKind kind) {
     }
@@ -88,6 +88,7 @@ public final class TeleportService {
     private final Plugin plugin;
     private final NamespacedKey coreKey;                 // PDC marker on the item
     private final NamespacedKey recipeKey;
+    private final NamespacedKey mysteryKey;              // PDC marker on mystery tickets
     private final Map<String, Station> stations = new LinkedHashMap<>();
     private final Map<String, Station> byCode = new java.util.HashMap<>();
     private final Map<String, Long> wear = new java.util.HashMap<>();   // key -> mined ticks
@@ -104,6 +105,7 @@ public final class TeleportService {
         this.plugin = plugin;
         this.coreKey = new NamespacedKey(plugin, "teleporter_core");
         this.recipeKey = new NamespacedKey(plugin, "teleporter_core_recipe");
+        this.mysteryKey = new NamespacedKey(plugin, "mystery_ticket");
     }
 
     // ---------------------------------------------------------------- the item
@@ -301,6 +303,11 @@ public final class TeleportService {
     // --------------------------------------------------------- offers / tickets
     /** The two (distinct) ring destinations for a station, plus a ticket target. */
     public List<Offer> offers(Station source, Station ticketTarget) {
+        return offers(source, ticketTarget, null);
+    }
+
+    /** As above, plus an "uncharted" destination for a valid-but-unmapped code. */
+    public List<Offer> offers(Station source, Station ticketTarget, Station uncharted) {
         List<Offer> out = new ArrayList<>();
         List<String> dests = rings.twoDestinations(source.key());
         if (dests.size() > 0) {
@@ -311,8 +318,25 @@ public final class TeleportService {
         }
         if (ticketTarget != null) {
             addOffer(out, ticketTarget, OfferKind.TICKET, source);
+        } else if (uncharted != null) {
+            addOffer(out, uncharted, OfferKind.UNCHARTED, source);
         }
         return out;
+    }
+
+    /**
+     * A synthetic (never registered) station for a well-formed code that maps
+     * to no real station: the hashed "uncharted" destination. Y is a
+     * placeholder — {@link #travelUncharted} resolves the real surface on
+     * arrival, so the trip always ends at ground level (or treading water at
+     * sea level over oceans — the Pacific is survivable by design).
+     */
+    public Station unchartedFor(String code, Station source) {
+        World w = plugin.getServer().getWorld(source.world());
+        long seed = w == null ? 0 : w.getSeed();
+        int[] xz = Ticketing.unchartedXZ(code, seed,
+                com.ckemere.cubeworld.CubeWorldPlugin.FACE_SIZE);
+        return new Station(source.world(), xz[0], 0, xz[1], "Uncharted", false, code, "");
     }
 
     private void addOffer(List<Offer> out, Station dest, OfferKind kind, Station source) {
@@ -341,6 +365,11 @@ public final class TeleportService {
 
     /** The station a held book-ticket points to (parsed from its text), or null. */
     public Station ticketTarget(ItemStack it) {
+        return stationByCode(ticketCode(it));
+    }
+
+    /** The canonical four-word code in a held book, or null (not a book / no code). */
+    public String ticketCode(ItemStack it) {
         if (it == null || !(it.getItemMeta() instanceof org.bukkit.inventory.meta.BookMeta bm)) {
             return null;
         }
@@ -352,7 +381,35 @@ public final class TeleportService {
             sb.append(net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
                     .plainText().serialize(page)).append(' ');
         }
-        return stationByCode(Ticketing.parse(sb.toString()));
+        return Ticketing.parse(sb.toString());
+    }
+
+    /** A trader-sold mystery ticket: a real station's code, destination obscured. */
+    public ItemStack mysteryTicketBook(Station s) {
+        ItemStack it = new ItemStack(Material.WRITTEN_BOOK);
+        org.bukkit.inventory.meta.BookMeta m = (org.bukkit.inventory.meta.BookMeta) it.getItemMeta();
+        m.title(Component.text("Mystery Ticket"));
+        m.author(Component.text("CubeWorld Transit"));
+        m.addPages(Component.text("Mystery ticket\n\nDestination: unknown.\n\nCode:\n" + s.code()
+                + "\n\nSpend it at any station\nto find out where."));
+        m.getPersistentDataContainer().set(mysteryKey, PersistentDataType.BYTE, (byte) 1);
+        it.setItemMeta(m);
+        return it;
+    }
+
+    /** Whether a held book is a trader-sold mystery ticket (destination hidden in UI). */
+    public boolean isMysteryTicket(ItemStack it) {
+        return it != null && it.hasItemMeta() && it.getItemMeta()
+                .getPersistentDataContainer().has(mysteryKey, PersistentDataType.BYTE);
+    }
+
+    /** A random registered station for a mystery ticket, or null if none exist. */
+    public Station randomStation() {
+        List<Station> all = new ArrayList<>(stations.values());
+        if (all.isEmpty()) {
+            return null;
+        }
+        return all.get(java.util.concurrent.ThreadLocalRandom.current().nextInt(all.size()));
     }
 
     public double dist(Location from, Station s) {
@@ -677,6 +734,44 @@ public final class TeleportService {
         p.playSound(stand, org.bukkit.Sound.BLOCK_AMETHYST_BLOCK_RESONATE, 1f, 1.2f);
         p.sendMessage(net.kyori.adventure.text.Component.text("Teleported to " + dest.name() + " ("
                 + cost + " lapis).", net.kyori.adventure.text.format.NamedTextColor.AQUA));
+        return true;
+    }
+
+    /**
+     * Travel to an uncharted (hashed) destination: same lapis rules, but the
+     * arrival Y is resolved against the REAL terrain on arrival — chunk loaded,
+     * ground found (canopy and water skipped), then clamped up to sea level so
+     * an ocean destination means treading water at the surface, never the
+     * seabed. One-way by design: there is no station at the far end.
+     */
+    public boolean travelUncharted(org.bukkit.entity.Player p, Location source, Station dest) {
+        int cost = lapisCost(source, dest);
+        if (countLapis(p) < cost) {
+            p.sendMessage(net.kyori.adventure.text.Component.text("Not enough lapis (need " + cost
+                    + ").", net.kyori.adventure.text.format.NamedTextColor.RED));
+            return false;
+        }
+        World w = plugin.getServer().getWorld(dest.world());
+        if (w == null) {
+            p.sendMessage(net.kyori.adventure.text.Component.text("Destination unavailable.",
+                    net.kyori.adventure.text.format.NamedTextColor.RED));
+            return false;
+        }
+        removeLapis(p, cost);
+        p.closeInventory();
+        spark(source);
+        w.getChunkAt(dest.x() >> 4, dest.z() >> 4);      // force-generate the arrival chunk
+        int surface = Math.max(groundY(w, dest.x(), dest.z()),
+                com.ckemere.cubeworld.generation.CubeWorldChunkGenerator.SEA_LEVEL);
+        Location stand = new Location(w, dest.x() + 0.5, surface + 1, dest.z() + 0.5,
+                p.getLocation().getYaw(), p.getLocation().getPitch());
+        p.teleport(stand);
+        spark(stand);
+        p.playSound(stand, org.bukkit.Sound.BLOCK_AMETHYST_BLOCK_RESONATE, 1f, 0.7f);
+        p.sendMessage(net.kyori.adventure.text.Component.text(
+                "The code matched no station on file. You arrive... somewhere ("
+                        + cost + " lapis).",
+                net.kyori.adventure.text.format.NamedTextColor.LIGHT_PURPLE));
         return true;
     }
 

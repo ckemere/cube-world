@@ -115,6 +115,8 @@ public final class CubeWorldPlugin extends JavaPlugin {
         teleport.seedCities();
         getServer().getPluginManager().registerEvents(
                 new com.ckemere.cubeworld.teleport.TeleporterListener(this, teleport), this);
+        // Expedition advancements (cubeworld:*) each award one Teleporter Core.
+        getServer().getPluginManager().registerEvents(new AdvancementRewards(teleport), this);
         getServer().getScheduler().runTaskTimer(this, teleport::ambientTick, 40L, 40L);
         // Repair the ground under the forced city villages once the structure
         // exists: fill water and voids across the walkable footprint so nothing
