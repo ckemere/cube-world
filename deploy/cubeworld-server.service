@@ -1,0 +1,22 @@
+# CubeWorld Minecraft server (Paper) — install to /etc/systemd/system/
+[Unit]
+Description=CubeWorld Minecraft server (Paper)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=cubecraft
+WorkingDirectory=/home/cubecraft/projects/cube-world
+ExecStart=/home/cubecraft/projects/cube-world/run-server.sh
+# A clean stop (RCON `stop`, or systemctl stop) stays down — required for the
+# stop -> gradle build -> start rebuild cycle. Crashes restart automatically.
+Restart=on-failure
+RestartSec=10
+# World save on shutdown can take a while; don't SIGKILL it mid-save.
+TimeoutStopSec=180
+# systemctl stop sends SIGTERM; the JVM's shutdown hook exits 143. Clean.
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target

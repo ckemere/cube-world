@@ -1,0 +1,2 @@
+cubecraft ALL=(root) NOPASSWD: /usr/bin/systemctl start cubeworld-server, /usr/bin/systemctl stop cubeworld-server, /usr/bin/systemctl restart cubeworld-server, /usr/bin/systemctl status cubeworld-server
+cubecraft ALL=(root) NOPASSWD: /usr/bin/systemctl start cubeworld-map, /usr/bin/systemctl stop cubeworld-map, /usr/bin/systemctl restart cubeworld-map, /usr/bin/systemctl status cubeworld-map
