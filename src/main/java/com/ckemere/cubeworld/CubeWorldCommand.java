@@ -967,7 +967,7 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                     var cur = com.ckemere.cubeworld.map.MapPrivacy.precision(p);
                     sender.sendMessage(Component.text(
                             "Your web-map precision is " + cur.name().toLowerCase(Locale.ROOT)
-                                    + (cur.cell > 0 ? " (within ~" + cur.cell + " blocks)" : " (exact)")
+                                    + (cur.cell > 0 ? " (±" + (cur.cell / 2) + " blocks)" : " (exact)")
                                     + ". Usage: /cubeworld mapprecision <high|medium|low>",
                             NamedTextColor.AQUA));
                     return true;
@@ -984,8 +984,8 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                 com.ckemere.cubeworld.map.MapPrivacy.setPrecision(p, prec);
                 sender.sendMessage(Component.text(switch (prec) {
                     case HIGH -> "Web map shows your exact position.";
-                    case MEDIUM -> "Web map shows your position within ~128 blocks.";
-                    case LOW -> "Web map shows your position within ~512 blocks.";
+                    case MEDIUM -> "Web map shows your position ±64 blocks.";
+                    case LOW -> "Web map shows your position ±256 blocks.";
                 }, NamedTextColor.GREEN));
                 sender.sendMessage(Component.text(
                         "Sneaking, invisibility, or wearing a mob head / carved pumpkin"

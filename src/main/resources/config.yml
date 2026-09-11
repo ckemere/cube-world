@@ -1,0 +1,13 @@
+# CubeWorld configuration.
+
+spawn:
+  # World spawn in block coordinates. Y is derived from the terrain height
+  # model at boot (never below sea level). Applied to the cube overworld on
+  # every world load, so changing this takes effect on the next restart.
+  #
+  # Default: the Pamphylian bay on the Turquoise Coast - a sheltered sandy
+  # harbor in old-growth forest under the Taurus mountains, between the
+  # Ephesus station (329 blocks west) and Antioch (492 blocks east).
+  # Previous spawn (the first world's): Addis Ababa, 11973 / -856.
+  x: 11240
+  z: -3942

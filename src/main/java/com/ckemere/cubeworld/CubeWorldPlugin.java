@@ -38,9 +38,8 @@ public final class CubeWorldPlugin extends JavaPlugin {
     public static final int NETHER_FACE_SIZE = FACE_SIZE / 8;
     public static final int NETHER_SCALE = 8;
 
-    /** Overworld spawn: Addis Ababa, Ethiopia, folded to the net at roll -70. */
-    private static final int SPAWN_X = 11973;
-    private static final int SPAWN_Z = -856;
+    // Overworld spawn comes from config.yml (spawn.x / spawn.z); the defaults
+    // there are the Pamphylian bay between the Ephesus and Antioch stations.
 
     /** Depth of the mirrored seam margins in blocks (6 chunks; match view-distance). */
     public static final int MARGIN_BLOCKS = 6 * 16;
@@ -83,6 +82,7 @@ public final class CubeWorldPlugin extends JavaPlugin {
 
     @Override
     public void onEnable() {
+        saveDefaultConfig();                 // writes config.yml on first run only
         getServer().getPluginManager().registerEvents(new SeamTeleportListener(this, seams), this);
         getServer().getPluginManager().registerEvents(new MirrorSyncListener(this, mirrors), this);
         getServer().getPluginManager().registerEvents(new MarginInteractionListener(this, mirrors), this);
@@ -279,10 +279,13 @@ public final class CubeWorldPlugin extends JavaPlugin {
 
     private void setupWorld(World world) {
         if (world.getEnvironment() == World.Environment.NORMAL && maps.hasEarthData()) {
+            int sx = getConfig().getInt("spawn.x", 11240);
+            int sz = getConfig().getInt("spawn.z", -3942);
             int sy = (int) Math.round(
-                    maps.mapFor(world.getSeed()).sampler().heightAt(SPAWN_X + 0.5, SPAWN_Z + 0.5)) + 2;
-            world.setSpawnLocation(SPAWN_X, Math.max(sy, 64), SPAWN_Z);
-            getLogger().info("Overworld spawn set to Ethiopia (" + SPAWN_X + ", " + sy + ", " + SPAWN_Z + ")");
+                    maps.mapFor(world.getSeed()).sampler().heightAt(sx + 0.5, sz + 0.5)) + 2;
+            world.setSpawnLocation(sx, Math.max(sy, 64), sz);
+            getLogger().info("Overworld spawn set to (" + sx + ", " + sy + ", " + sz
+                    + ") from config.yml");
         }
         if (world.getEnvironment() == World.Environment.NORMAL) {
             com.ckemere.cubeworld.seam.nms.StrongholdSphereHook.install(
