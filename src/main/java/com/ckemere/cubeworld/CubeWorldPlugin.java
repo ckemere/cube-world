@@ -58,6 +58,16 @@ public final class CubeWorldPlugin extends JavaPlugin {
     private com.ckemere.cubeworld.generation.OreEnrichment oreEnrichment;
     private com.ckemere.cubeworld.generation.Prospector prospector;
     private com.ckemere.cubeworld.city.VillagePlacementWatcher placementWatcher;
+    private com.ckemere.cubeworld.lifesteal.HeartService heartService;
+    private com.ckemere.cubeworld.lifesteal.ZoneTracker zoneTracker;
+
+    public com.ckemere.cubeworld.lifesteal.HeartService heartService() {
+        return heartService;
+    }
+
+    public com.ckemere.cubeworld.lifesteal.ZoneTracker zoneTracker() {
+        return zoneTracker;
+    }
 
     public com.ckemere.cubeworld.generation.Prospector prospector() {
         return prospector;
@@ -117,6 +127,15 @@ public final class CubeWorldPlugin extends JavaPlugin {
                 new com.ckemere.cubeworld.teleport.TeleporterListener(this, teleport), this);
         // Expedition advancements (cubeworld:*) each award one Teleporter Core.
         getServer().getPluginManager().registerEvents(new AdvancementRewards(teleport), this);
+        // Lifesteal: death in the wilds costs a heart and spills it; teleport
+        // stations project sanctuaries; Luck/Unluck clovers (amplifier -1 =
+        // icon only) show which side of the line you stand on.
+        heartService = new com.ckemere.cubeworld.lifesteal.HeartService(this, teleport);
+        heartService.registerRecipes();
+        getServer().getPluginManager().registerEvents(
+                new com.ckemere.cubeworld.lifesteal.LifestealListener(this, heartService), this);
+        zoneTracker = new com.ckemere.cubeworld.lifesteal.ZoneTracker(this, heartService);
+        getServer().getScheduler().runTaskTimer(this, zoneTracker::tick, 60L, 20L);
         getServer().getScheduler().runTaskTimer(this, teleport::ambientTick, 40L, 40L);
         // Repair the ground under the forced city villages once the structure
         // exists: fill water and voids across the walkable footprint so nothing

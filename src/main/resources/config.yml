@@ -11,3 +11,15 @@ spawn:
   # Previous spawn (the first world's): Addis Ababa, 11973 / -856.
   x: 11240
   z: -3942
+
+lifesteal:
+  # Death outside a sanctuary costs a heart and spills it as an edible item
+  # at the death site. Teleport stations (city and player-built) each project
+  # a sanctuary of `radius` blocks where death is plain vanilla.
+  enabled: true
+  radius: 512
+  # Hearts never drop below the floor (no loss, no drop there) and never
+  # exceed the cap. New players start at `start` (10 = vanilla health).
+  floor: 3
+  cap: 20
+  start: 10

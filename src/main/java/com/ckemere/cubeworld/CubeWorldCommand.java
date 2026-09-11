@@ -105,7 +105,7 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
      * later defaults to admin-only rather than silently becoming public.
      */
     private static final java.util.Set<String> PUBLIC_SUBCOMMANDS =
-            java.util.Set.of("ping", "oreprobe", "findlatlon", "mapprecision");
+            java.util.Set.of("ping", "oreprobe", "findlatlon", "mapprecision", "hearts");
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command,
@@ -957,6 +957,36 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
             }
             case "map" -> {
                 return handleMap(sender, args);
+            }
+            case "hearts" -> {
+                if (!(sender instanceof Player p)) {
+                    sender.sendMessage(Component.text("Players only.", NamedTextColor.RED));
+                    return true;
+                }
+                var plugin = org.bukkit.plugin.java.JavaPlugin.getPlugin(CubeWorldPlugin.class);
+                var hs = plugin.heartService();
+                if (hs == null || !hs.enabled()) {
+                    sender.sendMessage(Component.text("Lifesteal is not active.", NamedTextColor.GRAY));
+                    return true;
+                }
+                int n = hs.hearts(p);
+                var near = hs.nearest(p.getLocation());
+                boolean safe = near != null && hs.distTo(p.getLocation(), near) <= hs.radius();
+                sender.sendMessage(Component.text("Hearts: " + n + " / " + hs.cap(),
+                        NamedTextColor.RED));
+                if (safe) {
+                    sender.sendMessage(Component.text("You stand in the sanctuary of "
+                            + near.name() + ".", NamedTextColor.AQUA));
+                } else if (near != null) {
+                    sender.sendMessage(Component.text(String.format(Locale.ROOT,
+                            "The wilds. Nearest sanctuary: %s, %.0f blocks.",
+                            near.name(), hs.distTo(p.getLocation(), near) - hs.radius()),
+                            NamedTextColor.GOLD));
+                } else {
+                    sender.sendMessage(Component.text("The wilds — no sanctuaries exist yet.",
+                            NamedTextColor.GOLD));
+                }
+                return true;
             }
             case "mapprecision" -> {
                 if (!(sender instanceof Player p)) {
