@@ -137,6 +137,20 @@ public final class CityStructures {
             // holder ourselves or the first .value() call throws "unbound value".
             Method bindValue = Holder.Reference.class.getDeclaredMethod("bindValue", Object.class);
             bindValue.setAccessible(true);
+            // A Reference has a SECOND deferred binding: its tag set. Leaving it
+            // unbound is a landmine — the first holder.is(tag) call (e.g. the cat
+            // spawner's village check with a player standing in a city) throws
+            // "Tags not bound" and crashes the tick loop. Bind the vanilla plains
+            // village's tags, so cities also COUNT as villages for every
+            // tag-driven mechanic (cat spawns, `/locate structure #minecraft:village`).
+            Method bindTags = Holder.Reference.class
+                    .getDeclaredMethod("bindTags", java.util.Collection.class);
+            bindTags.setAccessible(true);
+            List<net.minecraft.tags.TagKey<Structure>> villageTags =
+                    structures.get(ResourceKey.create(Registries.STRUCTURE,
+                            Identifier.withDefaultNamespace("village_plains")))
+                            .map(h -> h.tags().toList())
+                            .orElse(List.of());
             int added = 0;
             frozen.set(structures, false);
             try {
@@ -174,8 +188,10 @@ public final class CityStructures {
                             List.of(),
                             DimensionPadding.ZERO,
                             JigsawStructure.DEFAULT_LIQUID_SETTINGS);
-                    bindValue.invoke(Registry.registerForHolder(structures, key, structure),
-                            structure);
+                    Holder.Reference<Structure> holder =
+                            Registry.registerForHolder(structures, key, structure);
+                    bindValue.invoke(holder, structure);
+                    bindTags.invoke(holder, villageTags);
                     added++;
                 }
             } finally {
