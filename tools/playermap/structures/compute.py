@@ -98,7 +98,14 @@ def _village_biome_probe():
 
 
 def _end_portals():
-    """One marker per stronghold: every stronghold contains exactly one end portal."""
+    """One marker per stronghold: every stronghold contains exactly one end portal.
+
+    Positions are deliberately DEGRADED to medium resolution here at the
+    source — snapped to 128-block cell centers, carrying r=64 — so no exact
+    End-portal coordinate ever reaches a browser (tooltips, marker JSON, or
+    dev tools). The map narrows the search; the last 128 blocks are yours.
+    """
+    cell = 128
     try:
         with open(STRONGHOLDS_JSON, encoding="utf-8") as f:
             rows = json.load(f)
@@ -107,11 +114,17 @@ def _end_portals():
     out = []
     for s in rows:
         try:
-            x, y, z = cubegate.cube_point(s["face"], s["u"], s["v"])
+            qx = (s["x"] // cell) * cell + cell // 2
+            qz = (s["z"] // cell) * cell + cell // 2
+            fuv = cubegate.world_to_faceuv(qx, qz)
+            if fuv is None:                    # cell center nudged off-net: keep
+                fuv = (s["face"], s["u"], s["v"])   # the face, degrade less
+            f2, u, v = fuv
+            x, y, z = cubegate.cube_point(f2, u, v)
         except Exception:
             continue
-        out.append({"face": s["face"], "u": s["u"], "v": s["v"], "p": [x, y, z],
-                    "cx": s["x"] >> 4, "cz": s["z"] >> 4})
+        out.append({"face": f2, "u": u, "v": v, "p": [x, y, z],
+                    "cx": qx >> 4, "cz": qz >> 4, "r": 64})
     return out
 
 

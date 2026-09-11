@@ -184,10 +184,13 @@ def markers_payload(seed, dim, overlays, face=None, superset=None):
                 continue
             u, v = m["u"], m["v"]
             x, z = uv_to_world(f, u, v, dim)
-            arr.append({"x": round(x), "z": round(z), "face": f,
-                        "u": round(u, 6), "v": round(v, 6),
-                        "type": TYPE_ID.get(name, "minecraft:" + name.rstrip("s")),
-                        "confidence": "superset" if name in sup else "exact"})
+            entry = {"x": round(x), "z": round(z), "face": f,
+                     "u": round(u, 6), "v": round(v, 6),
+                     "type": TYPE_ID.get(name, "minecraft:" + name.rstrip("s")),
+                     "confidence": "superset" if name in sup else "exact"}
+            if m.get("r"):
+                entry["r"] = m["r"]            # deliberately degraded position
+            arr.append(entry)
         layers[name] = arr
     if dim != "nether":
         layers["cities"] = city_entries(face)
@@ -218,7 +221,7 @@ def face_image(uris, face):
 # ------------------------------------------------------------ the flat page
 FACE_PAGE = r"""<!doctype html>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>CubeWorld · __FACE__</title>
 <style>
   :root{--panel:rgba(12,16,24,.74);--edge:rgba(120,150,190,.22);--ink:#dbe4f0;
@@ -270,6 +273,29 @@ FACE_PAGE = r"""<!doctype html>
   #tip b{color:var(--accent);font-weight:600}
   #busy{position:fixed;top:14px;right:14px;padding:8px 11px;font:11px var(--mono);
     color:var(--muted)}
+  #laybtn{display:none;position:fixed;bottom:14px;right:14px;z-index:30;
+    background:var(--panel);border:1px solid var(--edge);color:var(--ink);
+    border-radius:10px;padding:10px 14px;cursor:pointer;backdrop-filter:blur(7px);
+    -webkit-backdrop-filter:blur(7px);font:600 12px var(--sans);
+    letter-spacing:.06em;text-transform:uppercase}
+  /* phones: the layers panel collapses into #laybtn and opens as a bottom
+     sheet; the fixed panels shrink so the map keeps the screen. Desktop
+     (>700px) is untouched. */
+  @media (max-width:700px){
+    #laybtn{display:block}
+    #lay{display:none}
+    #lay.open{display:block;top:auto;left:0;right:0;bottom:0;width:100%;
+      max-height:55vh;border-radius:14px 14px 0 0;z-index:29;
+      padding:12px 16px 58px}
+    #top{top:10px;left:10px;right:10px;padding:8px 10px;gap:8px;flex-wrap:wrap}
+    #top .fname{font-size:12px}
+    #top .frange{font-size:9px}
+    #busy{top:70px;right:10px}
+    #read{bottom:10px;left:10px;min-width:0;max-width:calc(100vw - 110px);
+      padding:8px 10px;font:11px/1.45 var(--mono)}
+    #read .big{font-size:13px}
+    #hint{display:none}
+  }
 </style>
 <canvas id="cv"></canvas>
 <div id="top" class="panel">
@@ -296,6 +322,7 @@ FACE_PAGE = r"""<!doctype html>
     <button id="copytp">copy /tp</button><span id="copied"></span></div>
 </div>
 <div id="hint" class="panel">drag · pan &nbsp; scroll · zoom &nbsp; dbl-click · fit</div>
+<button id="laybtn">layers</button>
 <div id="busy" class="panel">loading…</div>
 <div id="tip"></div>
 <script>
@@ -378,6 +405,14 @@ function drawMarkers(){
         ctx.strokeStyle='rgba(0,0,0,.85)';ctx.lineWidth=3;
         ctx.strokeText(m.name,X+8,Y+4);ctx.fillText(m.name,X+8,Y+4);
       } else {
+        if(m.r){                              // degraded position: honest circle
+          var rpx=m.r/HALF*k;
+          if(rpx>4){
+            ctx.beginPath();ctx.arc(X,Y,rpx,0,6.2832);
+            ctx.save();ctx.globalAlpha=.13;ctx.fillStyle=col;ctx.fill();ctx.restore();
+            ctx.lineWidth=1.3;ctx.strokeStyle=col;ctx.stroke();
+          }
+        }
         ctx.beginPath();ctx.arc(X,Y,3.4,0,6.2832);
         ctx.fillStyle=col;ctx.fill();
         ctx.lineWidth=1.2;ctx.strokeStyle='rgba(0,0,0,.7)';ctx.stroke();
@@ -406,7 +441,43 @@ function render(){
   ctx.strokeRect(x0-0.5,y0-0.5,side+1,side+1);
   if(showGrid) drawGrid();
   drawMarkers();
+  drawPlayers();
   drawPin();
+}
+
+// ---------------------------------------------------------------- players
+// Live players on this face, from the same privacy-filtered /players feed the
+// globe uses. r is the uncertainty radius in blocks (0 = exact): imprecise
+// players draw as an honest circle of that REAL radius at map scale, so a
+// ±512 marker covers the whole area the player might be in.
+var players=[];
+function pollPlayers(){
+  fetch('/players',{cache:'no-store'}).then(function(r){return r.json();})
+    .then(function(j){ players=j||[]; draw(); })
+    .catch(function(){})
+    .finally(function(){ setTimeout(pollPlayers,2000); });
+}
+pollPlayers();
+function drawPlayers(){
+  for(var i=0;i<players.length;i++){
+    var pl=players[i];
+    if(pl.face!==CFG.face) continue;
+    var X=sx(xToU(pl.x)), Y=sy(zToV(pl.z));
+    var rpx=(pl.r||0)/HALF*k;
+    if(X<-rpx-30||Y<-rpx-30||X>W+rpx+30||Y>H+rpx+30) continue;
+    if(rpx>4){                              // uncertainty disc, true to scale
+      ctx.beginPath();ctx.arc(X,Y,rpx,0,6.2832);
+      ctx.fillStyle='rgba(255,65,54,.14)';ctx.fill();
+      ctx.lineWidth=1.4;ctx.strokeStyle='rgba(255,65,54,.75)';ctx.stroke();
+    }
+    ctx.beginPath();ctx.arc(X,Y,(pl.r||0)>0?4.5:5.5,0,6.2832);
+    ctx.fillStyle=(pl.r||0)>0?'rgba(255,65,54,.65)':'#ff4136';ctx.fill();
+    ctx.lineWidth=1.8;ctx.strokeStyle='#fff';ctx.stroke();
+    var lbl=pl.name+((pl.r||0)>0?' ±'+pl.r:'');
+    ctx.font='600 12px system-ui,sans-serif';
+    ctx.strokeStyle='rgba(0,0,0,.85)';ctx.lineWidth=3;
+    ctx.strokeText(lbl,X+9,Y+4);ctx.fillStyle='#fff';ctx.fillText(lbl,X+9,Y+4);
+  }
 }
 
 // ---------------------------------------------------------------- imagery
@@ -476,6 +547,13 @@ document.getElementById('allon').onclick=function(){order.forEach(function(n){on
 document.getElementById('alloff').onclick=function(){order.forEach(function(n){on[n]=false;});
   layerRows();draw();};
 document.getElementById('grid').onclick=function(){showGrid=!showGrid;draw();};
+// phones: the panel is collapsed into this button (see the media query);
+// on desktop the button is display:none and the panel is always open.
+var laybtn=document.getElementById('laybtn'), layEl=document.getElementById('lay');
+laybtn.onclick=function(){
+  var open=layEl.classList.toggle('open');
+  laybtn.textContent=open?'close':'layers';
+};
 
 // ------------------------------------------------------------ interaction
 function hitTest(px,py){
@@ -497,61 +575,115 @@ function setCursor(px,py){
   document.getElementById('cur').textContent=
     inside?fmt(Math.round(uToX(u)),Math.round(vToZ(v))):'off this face';
 }
-var drag=false,moved=0,lx=0,ly=0;
-cv.addEventListener('mousedown',function(e){drag=true;moved=0;lx=e.clientX;ly=e.clientY;});
-addEventListener('mouseup',function(){drag=false;});
-// on the window, not the canvas: a pan that strays over a panel (they float on
-// top of the full-window canvas) must keep panning, not jump when it comes back.
-addEventListener('mousemove',function(e){
-  if(!drag && e.target!==cv){tip.style.display='none';return;}
-  if(drag){
-    var ddx=e.clientX-lx, ddy=e.clientY-ly; moved+=Math.abs(ddx)+Math.abs(ddy);
-    cu-=ddx/k; cvv-=ddy/k; lx=e.clientX; ly=e.clientY; draw();
-    tip.style.display='none'; return;
-  }
-  setCursor(e.clientX,e.clientY);
-  var h=hitTest(e.clientX,e.clientY);
-  if(h){
-    var m=h.m;
-    tip.innerHTML='<b>'+(m.name||h.layer.replace(/_/g,' '))+'</b><br>'+
-      (m.type||'')+(m.confidence==='superset'?' · superset':'')+'<br>'+fmt(m.x,m.z)+
-      (m.pop?('<br>pop '+m.pop.toLocaleString()+(m.country?(' · '+m.country):'')):'');
-    tip.style.display='block';
-    tip.style.left=Math.min(e.clientX+14,window.innerWidth-tip.offsetWidth-8)+'px';
-    tip.style.top=Math.min(e.clientY+16,window.innerHeight-tip.offsetHeight-8)+'px';
-    cv.style.cursor='pointer';
-  } else { tip.style.display='none'; cv.style.cursor='crosshair'; }
-});
-cv.addEventListener('mouseleave',function(){tip.style.display='none';});
-cv.addEventListener('click',function(e){
-  if(moved>4) return;                       // that was a pan, not a click
-  var u=ux(e.clientX), v=vy(e.clientY);
+// One Pointer-Events path serves mouse and touch alike: one pointer down and
+// dragged = pan, two touch pointers = pinch-zoom about their midpoint (and
+// moving the midpoint pans), a pointer that never travelled = click/tap.
+// Mouse keeps its hover tooltip; touch has no hover, so a tap on a marker
+// shows the tooltip instead and a tap elsewhere dismisses it.
+var ptrs={}, moved=0, pinched=false, lx=0, ly=0, pm0=null, pd0=0;
+var lastTap=0, lastTapXY=null;
+function pIds(){return Object.keys(ptrs);}
+function clampK(nk){
+  return Math.max(Math.min(W,H)*0.2, Math.min(nk, Math.min(W,H)*260));
+}
+function showTip(h,px,py){
+  var m=h.m;
+  tip.innerHTML='<b>'+(m.name||h.layer.replace(/_/g,' '))+'</b><br>'+
+    (m.type||'')+(m.confidence==='superset'?' · superset':'')+'<br>'+
+    (m.r?('somewhere within ±'+m.r):fmt(m.x,m.z))+
+    (m.pop?('<br>pop '+m.pop.toLocaleString()+(m.country?(' · '+m.country):'')):'');
+  tip.style.display='block';
+  tip.style.left=Math.min(px+14,window.innerWidth-tip.offsetWidth-8)+'px';
+  tip.style.top=Math.min(py+16,window.innerHeight-tip.offsetHeight-8)+'px';
+}
+function doClick(px,py,isTouch){
+  setCursor(px,py);
+  var u=ux(px), v=vy(py);
   pin={u:u,v:v};
-  var h=hitTest(e.clientX,e.clientY);
+  var h=hitTest(px,py);
   if(h){ pin={u:h.m.u,v:h.m.v}; }
   var x=Math.round(uToX(pin.u)), z=Math.round(vToZ(pin.v));
   window.lastXZ=[x,z];
   document.getElementById('pin').textContent=fmt(x,z)+
     (h?('  ·  '+(h.m.name||h.layer.replace(/_/g,' '))):'');
   document.getElementById('copied').textContent='';
+  if(isTouch){ if(h) showTip(h,px,py); else tip.style.display='none'; }
   draw();
+}
+cv.addEventListener('pointerdown',function(e){
+  if(e.pointerType==='mouse'&&e.button!==0)return;
+  ptrs[e.pointerId]=[e.clientX,e.clientY];
+  var ids=pIds();
+  if(ids.length===1){moved=0;pinched=false;lx=e.clientX;ly=e.clientY;}
+  else if(ids.length===2){pinched=true;
+    var a=ptrs[ids[0]], b=ptrs[ids[1]];
+    pm0=[(a[0]+b[0])/2,(a[1]+b[1])/2]; pd0=Math.hypot(a[0]-b[0],a[1]-b[1]);}
+  // capture: a pan that strays over a floating panel keeps panning.
+  try{cv.setPointerCapture(e.pointerId);}catch(err){}
+  // touch only: keep the tap from becoming a compatibility mouse event
+  // (desktop mousedown must stay untouched for text-select etc.)
+  if(e.pointerType!=='mouse')e.preventDefault();
 });
+cv.addEventListener('pointermove',function(e){
+  if(!(e.pointerId in ptrs))return;
+  ptrs[e.pointerId]=[e.clientX,e.clientY];
+  var ids=pIds();
+  if(ids.length>=2){                        // pinch: zoom about the midpoint,
+    var a=ptrs[ids[0]], b=ptrs[ids[1]];     // midpoint motion pans
+    var mx=(a[0]+b[0])/2, my=(a[1]+b[1])/2, d=Math.hypot(a[0]-b[0],a[1]-b[1]);
+    var u=ux(pm0[0]), v=vy(pm0[1]);         // world point under the old midpoint
+    if(pd0>0) k=clampK(k*d/pd0);
+    cu=u-(mx-W/2)/k; cvv=v-(my-H/2)/k;      // ...stays under the new midpoint
+    pm0=[mx,my]; pd0=d; moved+=999; draw();
+  } else {
+    var ddx=e.clientX-lx, ddy=e.clientY-ly;
+    moved+=Math.abs(ddx)+Math.abs(ddy);
+    cu-=ddx/k; cvv-=ddy/k; lx=e.clientX; ly=e.clientY; draw();
+  }
+  if(moved>4)tip.style.display='none';
+});
+function endPtr(e){
+  if(!(e.pointerId in ptrs))return;
+  delete ptrs[e.pointerId];
+  var ids=pIds();
+  if(ids.length===1){lx=ptrs[ids[0]][0];ly=ptrs[ids[0]][1];}  // pinch -> pan, no jump
+  if(ids.length)return;
+  var wasPinch=pinched; pinched=false;
+  if(e.type!=='pointerup'||wasPinch)return;
+  var slop=(e.pointerType==='mouse')?4:10;  // fingers wobble more than mice
+  if(moved>slop)return;
+  if(e.pointerType!=='mouse'){              // double-tap = fit (mirrors dbl-click)
+    var now=Date.now();
+    if(lastTapXY&&now-lastTap<350&&
+       Math.abs(e.clientX-lastTapXY[0])+Math.abs(e.clientY-lastTapXY[1])<40){
+      lastTap=0;lastTapXY=null;fit();return;
+    }
+    lastTap=now;lastTapXY=[e.clientX,e.clientY];
+  }
+  doClick(e.clientX,e.clientY,e.pointerType!=='mouse');
+}
+cv.addEventListener('pointerup',endPtr);
+cv.addEventListener('pointercancel',endPtr);
+// hover (mouse/pen only, no button down) on the window, not the canvas, so
+// leaving the canvas over a floating panel still dismisses the tooltip.
+addEventListener('pointermove',function(e){
+  if(e.pointerType!=='mouse'||pIds().length)return;
+  if(e.target!==cv){tip.style.display='none';return;}
+  setCursor(e.clientX,e.clientY);
+  var h=hitTest(e.clientX,e.clientY);
+  if(h){showTip(h,e.clientX,e.clientY);cv.style.cursor='pointer';}
+  else{tip.style.display='none';cv.style.cursor='crosshair';}
+});
+cv.addEventListener('mouseleave',function(){tip.style.display='none';});
 cv.addEventListener('dblclick',function(){fit();});
 cv.addEventListener('wheel',function(e){
   var f=Math.exp(-e.deltaY*0.0015);
-  var nk=Math.max(Math.min(W,H)*0.2, Math.min(k*f, Math.min(W,H)*260));
+  var nk=clampK(k*f);
   var u=ux(e.clientX), v=vy(e.clientY);
   k=nk;
   cu=u-(e.clientX-W/2)/k; cvv=v-(e.clientY-H/2)/k;
   draw(); e.preventDefault();
 },{passive:false});
-// touch: one finger pans
-cv.addEventListener('touchstart',function(e){drag=true;moved=0;
-  lx=e.touches[0].clientX;ly=e.touches[0].clientY;},{passive:true});
-cv.addEventListener('touchmove',function(e){if(!drag)return;
-  cu-=(e.touches[0].clientX-lx)/k; cvv-=(e.touches[0].clientY-ly)/k;
-  lx=e.touches[0].clientX;ly=e.touches[0].clientY;draw();},{passive:true});
-addEventListener('touchend',function(){drag=false;});
 
 function copy(txt){
   var done=function(){document.getElementById('copied').textContent='copied';
@@ -603,7 +735,9 @@ def face_index_page():
     rows = "".join(
         '<li><a href="/face?f=%s">%s</a> <span>x %d…%d, z %d…%d</span></li>'
         % ((f, f) + world_bounds(f)) for f in FACE_ORDER)
-    return ("<!doctype html><meta charset=utf-8><title>CubeWorld faces</title>"
+    return ("<!doctype html><meta charset=utf-8>"
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            "<title>CubeWorld faces</title>"
             "<style>body{background:#070a10;color:#dbe4f0;font:14px/1.7 system-ui;"
             "padding:32px}a{color:#5fb0c4}span{color:#8a97ab;font-family:monospace;"
             "font-size:12px}li{margin:2px 0}</style>"
@@ -633,6 +767,14 @@ GLOBE_ADDON = r"""
     display:none;padding:8px 13px;border-radius:10px;background:rgba(12,16,24,.82);
     border:1px solid rgba(120,150,190,.25);color:#dbe4f0;
     font:12px ui-monospace,Menlo,Consolas,monospace}
+  /* phones: the globe's HUD carries mouse-only instructions and the elevation
+     legend crowds the corner the buttons need -- both go; desktop unchanged. */
+  @media (max-width:700px){
+    #hud{display:none}
+    #legend{display:none}
+    #faceflash{top:60px;max-width:92vw;white-space:nowrap;overflow:hidden;
+      text-overflow:ellipsis}
+  }
 </style>
 <canvas id="cityov"></canvas>
 <div id="citytip"></div>
@@ -789,6 +931,78 @@ GLOBE_ADDON = r"""
   });
   cv.addEventListener('dblclick',function(){clearTimeout(navTimer);});
   cv.addEventListener('mouseleave',function(){mouse=null;flash.style.display='none';});
+
+  // ---- touch input (Pointer Events) ---------------------------------------
+  // One finger rotates the globe, two fingers pinch-zoom (dist) and pan via
+  // the midpoint (panX/panY, like shift-drag), a tap on a city dot shows its
+  // tooltip (no hover on touch), a tap elsewhere dismisses it or -- when no
+  // tooltip is up -- opens the tapped face's flat map like a mouse click.
+  // server.py renames the stock globe's own touch* handlers so they cannot
+  // double-apply the rotation; mouse pointers are left to the existing
+  // mouse handlers (preventDefault below also suppresses the compatibility
+  // mouse events a tap would otherwise synthesize).
+  var tptrs={}, tmoved=0, tpinch=false, tlx=0, tly=0, tm0=null, td0=0;
+  var tLast=0, tLastXY=null;
+  function tids(){return Object.keys(tptrs);}
+  cv.addEventListener('pointerdown',function(e){
+    if(e.pointerType==='mouse')return;
+    e.preventDefault();
+    tptrs[e.pointerId]=[e.clientX,e.clientY];
+    var ids=tids();
+    if(ids.length===1){tmoved=0;tpinch=false;tlx=e.clientX;tly=e.clientY;
+      spinning=false;
+      try{spinBtn.textContent='resume';}catch(err){}}
+    else if(ids.length===2){tpinch=true;
+      var a=tptrs[ids[0]], b=tptrs[ids[1]];
+      tm0=[(a[0]+b[0])/2,(a[1]+b[1])/2]; td0=Math.hypot(a[0]-b[0],a[1]-b[1]);}
+    try{cv.setPointerCapture(e.pointerId);}catch(err){}
+  });
+  cv.addEventListener('pointermove',function(e){
+    if(!(e.pointerId in tptrs))return;
+    tptrs[e.pointerId]=[e.clientX,e.clientY];
+    var ids=tids();
+    if(ids.length>=2){
+      var a=tptrs[ids[0]], b=tptrs[ids[1]];
+      var mx=(a[0]+b[0])/2, my=(a[1]+b[1])/2, d=Math.hypot(a[0]-b[0],a[1]-b[1]);
+      if(td0>0)dist=Math.max(1.08,Math.min(14,dist*td0/d));
+      var pk=panK(); panX+=(mx-tm0[0])*pk; panY-=(my-tm0[1])*pk;
+      tm0=[mx,my]; td0=d; tmoved+=999;
+    } else {
+      var dx=e.clientX-tlx, dy=e.clientY-tly;
+      tmoved+=Math.abs(dx)+Math.abs(dy);
+      var kk=dragK(); yaw+=dx*kk; pitch+=dy*kk;
+      pitch=Math.max(-1.5,Math.min(1.5,pitch));
+      tlx=e.clientX; tly=e.clientY;
+    }
+    if(tmoved>6){mouse=null;tip.style.display='none';}
+  });
+  function tEnd(e){
+    if(!(e.pointerId in tptrs))return;
+    delete tptrs[e.pointerId];
+    var ids=tids();
+    if(ids.length===1){tlx=tptrs[ids[0]][0];tly=tptrs[ids[0]][1];}
+    if(ids.length)return;
+    var was=tpinch; tpinch=false;
+    if(e.type!=='pointerup'||was||tmoved>10)return;
+    var now=Date.now();
+    if(tLastXY&&now-tLast<350&&
+       Math.abs(e.clientX-tLastXY[0])+Math.abs(e.clientY-tLastXY[1])<40){
+      tLast=0;tLastXY=null;panX=0;panY=0;return;   // double-tap = recenter
+    }
+    tLast=now; tLastXY=[e.clientX,e.clientY];
+    var hit=null,bd=20*20;                          // finger-sized hit circle
+    for(var j=0;j<pts.length;j++){
+      var dx=pts[j][0]-e.clientX, dy=pts[j][1]-e.clientY, d=dx*dx+dy*dy;
+      if(d<bd){bd=d;hit=pts[j];}
+    }
+    if(hit){mouse=[e.clientX,e.clientY];return;}    // loop() shows the tooltip
+    if(mouse){mouse=null;tip.style.display='none';return;}   // tap-away: dismiss
+    var h=pick(e.clientX,e.clientY); if(!h)return;
+    location.href='/face?f='+h.face+'&u='+h.u.toFixed(5)+'&v='+h.v.toFixed(5);
+  }
+  cv.addEventListener('pointerup',tEnd);
+  cv.addEventListener('pointercancel',tEnd);
+
   var hint=document.getElementById('hint');
   if(hint) hint.textContent=hint.textContent+' — click a face · flat map';
   loop();

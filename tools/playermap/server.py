@@ -413,6 +413,19 @@ STRUCTURE_OVERLAY = r"""
   #bkey .sw{width:11px;height:11px;border-radius:3px;flex:none;box-shadow:0 0 0 1px rgba(0,0,0,.4)}
   #bkey .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #bkey .ct{margin-left:auto;color:#8a97ab;font-variant-numeric:tabular-nums;padding-left:6px}
+  #psopen{display:none;position:fixed;top:12px;left:12px;z-index:12;
+    font:600 12px system-ui,sans-serif;letter-spacing:.05em;text-transform:uppercase;
+    color:#eaf1fb;background:rgba(12,16,24,.72);border:1px solid rgba(120,150,190,.3);
+    border-radius:10px;padding:10px 14px;cursor:pointer;backdrop-filter:blur(8px)}
+  /* phones: the panel collapses into #psopen and opens as a bottom sheet;
+     desktop (>700px) keeps the always-open panel. */
+  @media (max-width:700px){
+    #psopen{display:block}
+    #psctl{display:none}
+    #psctl.open{display:block;top:auto;left:0;right:0;bottom:0;width:100%;
+      max-height:60vh;border-radius:14px 14px 0 0;padding:12px 16px 20px}
+    #bkey{top:56px;max-height:55vh;width:170px}
+  }
 </style>
 <canvas id="psov"></canvas>
 <div id="bkey"><h3>Biomes</h3><div id="bkeylist"></div></div>
@@ -427,6 +440,7 @@ STRUCTURE_OVERLAY = r"""
   <div id="pslist"></div>
   <div class="mut" id="psstatus">loading…</div>
 </div>
+<button id="psopen">structures</button>
 <script>
 (function(){
   var COL={villages:'#ffd166',desert_pyramids:'#f4a259',jungle_temples:'#43aa8b',
@@ -507,6 +521,13 @@ STRUCTURE_OVERLAY = r"""
     Object.keys(data).forEach(function(t){on[t]=true;});buildList();};
   document.getElementById('psnone').onclick=function(){
     Object.keys(data).forEach(function(t){on[t]=false;});buildList();};
+  // phones: the panel is collapsed into this button (see the media query);
+  // on desktop the button is display:none and the panel is always open.
+  var psopen=document.getElementById('psopen');
+  psopen.onclick=function(){
+    var open=document.getElementById('psctl').classList.toggle('open');
+    psopen.textContent=open?'close':'structures';
+  };
   function draw(){
     var W=cv.clientWidth, Hh=cv.clientHeight;
     if(cvs.width!==W*dpr||cvs.height!==Hh*dpr){cvs.width=W*dpr;cvs.height=Hh*dpr;
@@ -687,9 +708,22 @@ def biomes_page():
     return html
 
 
+MOBILE_META = ('<meta name="viewport" content="width=device-width,'
+               'initial-scale=1,maximum-scale=1,user-scalable=no">\n')
+
+
 def load_page():
     with open(_globe_path(), encoding="utf-8") as f:
         html = f.read()
+    # Phones: the stock globe.html has no viewport meta (the page comes up
+    # desktop-scaled and the browser pinch-zooms the page instead of the
+    # globe), and its legacy one-finger touch* handlers would double-apply
+    # rotation under the Pointer-Events handlers faceview.GLOBE_ADDON now
+    # installs -- rename their event types so they never fire. The canvas
+    # itself already carries touch-action:none.
+    html = MOBILE_META + html
+    for ev in ("touchstart", "touchmove", "touchend"):
+        html = html.replace('"%s"' % ev, '"cw-%s"' % ev)
     uris = composited_uris()
     if uris:
         html = realmap.replace_uris(html, uris)
