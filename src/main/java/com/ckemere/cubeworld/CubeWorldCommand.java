@@ -105,7 +105,7 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
      * later defaults to admin-only rather than silently becoming public.
      */
     private static final java.util.Set<String> PUBLIC_SUBCOMMANDS =
-            java.util.Set.of("ping", "oreprobe", "findlatlon", "mapprecision", "hearts");
+            java.util.Set.of("ping", "oreprobe", "findlatlon", "mapprecision", "hearts", "face");
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command,
@@ -974,6 +974,17 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                 boolean safe = near != null && hs.distTo(p.getLocation(), near) <= hs.radius();
                 sender.sendMessage(Component.text("Hearts: " + n + " / " + hs.cap(),
                         NamedTextColor.RED));
+                sender.sendMessage(Component.text(plugin.heartLedger().summary(p),
+                        NamedTextColor.GRAY));
+                for (var le : plugin.heartLedger().entries(p)) {
+                    sender.sendMessage(Component.text("  ♥ ", NamedTextColor.RED)
+                            .append(Component.text(le.kind().name().charAt(0)
+                                    + le.kind().name().substring(1).toLowerCase(Locale.ROOT),
+                                    NamedTextColor.GRAY))
+                            .append(le.epitaph().isBlank() ? Component.empty()
+                                    : Component.text("  “" + le.epitaph() + "”",
+                                            NamedTextColor.DARK_PURPLE)));
+                }
                 if (safe) {
                     sender.sendMessage(Component.text("You stand in the sanctuary of "
                             + near.name() + ".", NamedTextColor.AQUA));
@@ -986,6 +997,17 @@ public final class CubeWorldCommand implements CommandExecutor, TabCompleter {
                     sender.sendMessage(Component.text("The wilds — no sanctuaries exist yet.",
                             NamedTextColor.GOLD));
                 }
+                return true;
+            }
+            case "cardiograph" -> {
+                if (!(sender instanceof Player p)) {
+                    sender.sendMessage(Component.text("Players only.", NamedTextColor.RED));
+                    return true;
+                }
+                var plugin = org.bukkit.plugin.java.JavaPlugin.getPlugin(CubeWorldPlugin.class);
+                p.getInventory().addItem(plugin.cardiograph().createItem());
+                sender.sendMessage(Component.text("Cardiograph given (traders sell these).",
+                        NamedTextColor.GREEN));
                 return true;
             }
             case "mapprecision" -> {

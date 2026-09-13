@@ -27,10 +27,12 @@ public final class LifestealListener implements Listener {
 
     private final CubeWorldPlugin plugin;
     private final HeartService hearts;
+    private final HeartLedger ledger;
 
-    public LifestealListener(CubeWorldPlugin plugin, HeartService hearts) {
+    public LifestealListener(CubeWorldPlugin plugin, HeartService hearts, HeartLedger ledger) {
         this.plugin = plugin;
         this.hearts = hearts;
+        this.ledger = ledger;
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
@@ -50,6 +52,7 @@ public final class LifestealListener implements Listener {
             return;                                 // at the floor: lose nothing, drop nothing
         }
         hearts.setHearts(p, n - 1);
+        ledger.recordLoss(p);
         String epitaph = e.deathMessage() == null ? p.getName()
                 : net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
                         .plainText().serialize(e.deathMessage());
@@ -97,6 +100,7 @@ public final class LifestealListener implements Listener {
             return;
         }
         hearts.setHearts(p, n + 1);
+        ledger.recordGain(p, hearts.kindOf(e.getItem()), hearts.epitaphOf(e.getItem()));
         p.setHealth(Math.min(p.getHealth() + 2.0,
                 p.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH).getValue()));
         p.sendMessage(Component.text("Your heart grows stronger — " + (n + 1) + " hearts.",

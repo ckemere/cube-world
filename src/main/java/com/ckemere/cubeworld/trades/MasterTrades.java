@@ -72,6 +72,12 @@ public final class MasterTrades {
             // Cheaper than a named city ticket: you don't get to pick — the
             // destination is a real station, revealed only on travel.
             () -> mysteryTicket(16, 4),
+            // The Cardiograph: a spyglass that reads heart provenance. Cheap
+            // for a master good — the craft route (needs a Heart of the Sea)
+            // is the adventure; this is the lazy-but-fair option.
+            () -> buy(org.bukkit.plugin.java.JavaPlugin
+                    .getPlugin(com.ckemere.cubeworld.CubeWorldPlugin.class)
+                    .cardiograph().createItem(), 14, 2),
             () -> buyArmed(item(Material.DIAMOND_HORSE_ARMOR), 48, 8, 3),
             () -> buy(item(Material.MUSIC_DISC_PIGSTEP), 42, 3),
             () -> buy(item(Material.BUDDING_AMETHYST), 56, 2),

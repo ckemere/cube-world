@@ -183,6 +183,35 @@ public final class HeartService {
                 .getPersistentDataContainer().has(heartItemKey, PersistentDataType.BYTE);
     }
 
+    /** The kind stamped on a heart item (FORGED for pre-variant legacy drops). */
+    public HeartKind kindOf(ItemStack it) {
+        if (it == null || !it.hasItemMeta()) {
+            return HeartKind.FORGED;
+        }
+        String v = it.getItemMeta().getPersistentDataContainer()
+                .get(heartKindKey, PersistentDataType.STRING);
+        try {
+            return v == null ? HeartKind.FORGED : HeartKind.valueOf(v);
+        } catch (IllegalArgumentException e) {
+            return HeartKind.FORGED;
+        }
+    }
+
+    /** The epitaph a spilled heart carries in its lore, or "" (forged). */
+    public String epitaphOf(ItemStack it) {
+        if (it == null || !it.hasItemMeta() || it.getItemMeta().lore() == null) {
+            return "";
+        }
+        for (Component line : it.getItemMeta().lore()) {
+            String s = net.kyori.adventure.text.serializer.plain
+                    .PlainTextComponentSerializer.plainText().serialize(line);
+            if (s.startsWith("“") && s.endsWith("”")) {
+                return s.substring(1, s.length() - 1);
+            }
+        }
+        return "";
+    }
+
     /** A Heart Fragment (firework star — the old SMP heart texture, as a nod). */
     public ItemStack createFragment(int amount) {
         ItemStack it = new ItemStack(Material.FIREWORK_STAR, amount);

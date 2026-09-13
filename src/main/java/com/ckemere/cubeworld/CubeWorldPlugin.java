@@ -60,6 +60,16 @@ public final class CubeWorldPlugin extends JavaPlugin {
     private com.ckemere.cubeworld.city.VillagePlacementWatcher placementWatcher;
     private com.ckemere.cubeworld.lifesteal.HeartService heartService;
     private com.ckemere.cubeworld.lifesteal.ZoneTracker zoneTracker;
+    private com.ckemere.cubeworld.lifesteal.HeartLedger heartLedger;
+    private com.ckemere.cubeworld.lifesteal.Cardiograph cardiograph;
+
+    public com.ckemere.cubeworld.lifesteal.HeartLedger heartLedger() {
+        return heartLedger;
+    }
+
+    public com.ckemere.cubeworld.lifesteal.Cardiograph cardiograph() {
+        return cardiograph;
+    }
 
     public com.ckemere.cubeworld.lifesteal.HeartService heartService() {
         return heartService;
@@ -132,10 +142,23 @@ public final class CubeWorldPlugin extends JavaPlugin {
         // icon only) show which side of the line you stand on.
         heartService = new com.ckemere.cubeworld.lifesteal.HeartService(this, teleport);
         heartService.registerRecipes();
+        heartLedger = new com.ckemere.cubeworld.lifesteal.HeartLedger(this, heartService);
         getServer().getPluginManager().registerEvents(
-                new com.ckemere.cubeworld.lifesteal.LifestealListener(this, heartService), this);
+                new com.ckemere.cubeworld.lifesteal.LifestealListener(
+                        this, heartService, heartLedger), this);
         zoneTracker = new com.ckemere.cubeworld.lifesteal.ZoneTracker(this, heartService);
         getServer().getScheduler().runTaskTimer(this, zoneTracker::tick, 60L, 20L);
+        // The Cardiograph: a spyglass that reads heart provenance (4 Hz scan).
+        cardiograph = new com.ckemere.cubeworld.lifesteal.Cardiograph(
+                this, heartService, heartLedger);
+        cardiograph.registerRecipe();
+        getServer().getScheduler().runTaskTimer(this, cardiograph::tick, 80L, 5L);
+        getServer().getPluginManager().registerEvents(new org.bukkit.event.Listener() {
+            @org.bukkit.event.EventHandler
+            public void onQuit(org.bukkit.event.player.PlayerQuitEvent e) {
+                cardiograph.forget(e.getPlayer());
+            }
+        }, this);
         getServer().getScheduler().runTaskTimer(this, teleport::ambientTick, 40L, 40L);
         // Repair the ground under the forced city villages once the structure
         // exists: fill water and voids across the walkable footprint so nothing
