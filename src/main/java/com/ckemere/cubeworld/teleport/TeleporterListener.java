@@ -87,6 +87,12 @@ public final class TeleporterListener implements Listener {
             return;
         }
         Block b = e.getBlockPlaced();
+        if (b.getWorld().getEnvironment() == org.bukkit.World.Environment.THE_END) {
+            e.getPlayer().sendMessage(Component.text(
+                    "The End does not anchor teleporters — nothing holds here.",
+                    NamedTextColor.LIGHT_PURPLE));
+            return;                            // places as a plain lodestone
+        }
         if (svc.tryRaise(b.getLocation(), coreName(e.getItemInHand(), b),
                 e.getPlayer().getUniqueId().toString())) {
             svc.spark(b.getLocation());
@@ -377,8 +383,12 @@ public final class TeleporterListener implements Listener {
         TeleportService.Station ticketTarget = svc.stationByCode(code);
         // A well-formed code with no station is an "uncharted" destination:
         // hashed from the code + world seed, one-way, delivered at the surface.
-        TeleportService.Station uncharted =
-                (code != null && ticketTarget == null) ? svc.unchartedFor(code, s) : null;
+        // Overworld only — the hash maps onto the overworld net, and "surface"
+        // in the nether would mean the bedrock roof.
+        boolean overworld = e.getClickedBlock().getWorld().getEnvironment()
+                == org.bukkit.World.Environment.NORMAL;
+        TeleportService.Station uncharted = (code != null && ticketTarget == null && overworld)
+                ? svc.unchartedFor(code, s) : null;
         boolean hasBook = main.getType() == Material.WRITABLE_BOOK
                 || off.getType() == Material.WRITABLE_BOOK;
 

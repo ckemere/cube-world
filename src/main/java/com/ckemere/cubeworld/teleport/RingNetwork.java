@@ -39,27 +39,42 @@ public final class RingNetwork {
      * stations this yields two distinct destinations.
      */
     public List<String> twoDestinations(String key) {
+        return twoDestinations(key, k -> true);
+    }
+
+    /**
+     * As {@link #twoDestinations(String)}, but only stations matching the
+     * filter count — each ring walks forward past non-matching keys. Used to
+     * keep ring hops within one dimension: station keys are
+     * {@code world:x:y:z}, so a world-prefix filter partitions the shared
+     * rings into per-world lanes without restructuring the persisted cycles.
+     */
+    public List<String> twoDestinations(String key, java.util.function.Predicate<String> ok) {
         List<String> out = new ArrayList<>();
-        String sa = successorA(key);
+        String sa = walk(a, key, ok, null);
         if (sa != null) {
             out.add(sa);
         }
-        String sb = successorB(key);
-        if (sb != null && !sb.equals(sa)) {
+        String sb = walk(b, key, ok, sa);
+        if (sb != null) {
             out.add(sb);
-            return out;
-        }
-        int i = b.indexOf(key);                  // ring-B coincided (or null) — walk on
-        if (i >= 0) {
-            for (int step = 1; step < b.size(); step++) {
-                String cand = b.get((i + step) % b.size());
-                if (!cand.equals(key) && !cand.equals(sa)) {
-                    out.add(cand);
-                    break;
-                }
-            }
         }
         return out;
+    }
+
+    private static String walk(List<String> ring, String key,
+                               java.util.function.Predicate<String> ok, String exclude) {
+        int i = ring.indexOf(key);
+        if (i < 0) {
+            return null;
+        }
+        for (int step = 1; step < ring.size(); step++) {
+            String cand = ring.get((i + step) % ring.size());
+            if (!cand.equals(key) && !cand.equals(exclude) && ok.test(cand)) {
+                return cand;
+            }
+        }
+        return null;
     }
 
     public void remove(String key) {

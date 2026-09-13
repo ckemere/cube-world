@@ -42,6 +42,7 @@ public final class TeleportService {
     public static final int BASE_RADIUS = 1;            // 3x3 amethyst pad
     private static final double BLOCKS_PER_LAPIS = 1500.0;
     private static final int MAX_LAPIS = 64;
+    private static final int MAX_LAPIS_NETHER = 12;
 
     // A non-owner can mine a core loose, but only after this much cumulative
     // ACTIVE mining time (wall-clock, so it's tool-independent). 1 MC day =
@@ -160,7 +161,11 @@ public final class TeleportService {
     /** Register a station if the core block sits on a full 3x3 amethyst pad. */
     public boolean tryRaise(Location core, String name, String owner) {
         World w = core.getWorld();
-        if (w == null || !baseIntact(core)) {
+        // No stations in the End: the dimension is deliberately outside the
+        // network (vanilla End travel — gateways and elytra — stays supreme,
+        // and a post-dragon fast-exit would trivialize it).
+        if (w == null || w.getEnvironment() == World.Environment.THE_END
+                || !baseIntact(core)) {
             return false;
         }
         register(core, name, false, owner);
@@ -309,6 +314,9 @@ public final class TeleportService {
     /** As above, plus an "uncharted" destination for a valid-but-unmapped code. */
     public List<Offer> offers(Station source, Station ticketTarget, Station uncharted) {
         List<Offer> out = new ArrayList<>();
+        // One loop across both dimensions: a ring successor may be a nether
+        // station seen from the overworld or vice versa — crossing costs the
+        // flat dimension fare (see lapisCost).
         List<String> dests = rings.twoDestinations(source.key());
         if (dests.size() > 0) {
             addOffer(out, stations.get(dests.get(0)), OfferKind.RING_A, source);
@@ -418,10 +426,19 @@ public final class TeleportService {
         return Math.sqrt(dx * dx + dz * dz);
     }
 
-    /** Lapis cost of a hop, scaled by distance and capped. */
+    /** Lapis cost of a hop. Same-world: distance-scaled, capped at 64
+     * overworld / 12 nether (1500 nether blocks per lapis over 1:8
+     * coordinates makes nether lanes the budget long-haul). Crossing
+     * dimensions: a flat 12 — planar distance between an overworld and a
+     * nether coordinate means nothing, so the fare is the crossing itself. */
     public int lapisCost(Location from, Station to) {
+        if (from.getWorld() != null && !from.getWorld().getName().equals(to.world())) {
+            return MAX_LAPIS_NETHER;
+        }
         int c = (int) Math.round(dist(from, to) / BLOCKS_PER_LAPIS);
-        return Math.max(1, Math.min(MAX_LAPIS, c));
+        boolean nether = from.getWorld() != null
+                && from.getWorld().getEnvironment() == World.Environment.NETHER;
+        return Math.max(1, Math.min(nether ? MAX_LAPIS_NETHER : MAX_LAPIS, c));
     }
 
     // --------------------------------------------------------- city pre-seeding
