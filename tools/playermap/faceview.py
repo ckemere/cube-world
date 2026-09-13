@@ -300,6 +300,7 @@ FACE_PAGE = r"""<!doctype html>
 <canvas id="cv"></canvas>
 <div id="top" class="panel">
   <a class="back" id="back" href="/">&larr; globe</a>
+  <a class="back" href="/guide">guide</a>
   <div><div class="fname" id="fname">__FACE__</div>
        <div class="frange" id="frange"></div></div>
   <select id="bg"><option value="terrain">terrain</option>
